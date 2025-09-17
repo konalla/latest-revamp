@@ -13,20 +13,74 @@ const verifyObjectiveOwnership = async (objectiveId: number, userId: number) => 
     where: { 
       id: objectiveId, 
       userId,
-      // Also ensure the project belongs to the user
-      project: {
-        userId,
-      },
     },
   });
   return !!objective;
 };
 
+// Helper function to verify plan ownership
+const verifyPlanOwnership = async (planId: number, userId: number) => {
+  const plan = await prisma.plan.findFirst({
+    where: {
+      id: planId,
+      OR: [
+        { project: { userId } },
+        { objective: { userId } }
+      ]
+    },
+  });
+  return !!plan;
+};
+
 const createOkr = async (data: CreateOkrRequest, userId: number) => {
-  // Verify that the user owns the objective
-  const ownsObjective = await verifyObjectiveOwnership(data.objectiveId, userId);
-  if (!ownsObjective) {
-    throw new Error("Objective not found or access denied");
+  // Verify ownership based on what's provided
+  if (data.objectiveId) {
+    const ownsObjective = await verifyObjectiveOwnership(data.objectiveId, userId);
+    if (!ownsObjective) {
+      throw new Error("Objective not found or access denied");
+    }
+  }
+
+  if (data.planId) {
+    const ownsPlan = await verifyPlanOwnership(data.planId, userId);
+    if (!ownsPlan) {
+      throw new Error("Plan not found or access denied");
+    }
+  }
+
+  if (!data.objectiveId && !data.planId) {
+    throw new Error("Either objectiveId or planId must be provided");
+  }
+
+  const includeConfig: any = {
+    user: {
+      select: { id: true, name: true, email: true },
+    },
+  };
+
+  if (data.objectiveId) {
+    includeConfig.objective = {
+      select: { 
+        id: true, 
+        name: true,
+      },
+    };
+  }
+
+  if (data.planId) {
+    includeConfig.plan = {
+      select: {
+        id: true,
+        name: true,
+        status: true,
+        project: {
+          select: { id: true, name: true },
+        },
+        objective: {
+          select: { id: true, name: true },
+        },
+      },
+    };
   }
 
   return prisma.okr.create({
@@ -36,21 +90,7 @@ const createOkr = async (data: CreateOkrRequest, userId: number) => {
       keyResults: data.keyResults || [],
       progressHistory: [],
     },
-    include: {
-      user: {
-        select: { id: true, name: true, email: true },
-      },
-      objective: {
-        select: { 
-          id: true, 
-          name: true, 
-          projectId: true,
-          project: {
-            select: { id: true, name: true },
-          },
-        },
-      },
-    },
+    include: includeConfig,
   });
 };
 
@@ -115,9 +155,17 @@ const getOkrsByObjective = async (objectiveId: number, userId: number, queryPara
           select: { 
             id: true, 
             name: true, 
-            projectId: true,
+          },
+        },
+        plan: {
+          select: {
+            id: true,
+            name: true,
             project: {
-              select: { id: true, name: true },
+              select: { 
+                id: true, 
+                name: true 
+              },
             },
           },
         },
@@ -141,15 +189,9 @@ const getAllOkrsByUser = async (userId: number, queryParams: OkrQueryParams = {}
   
   const skip = (page - 1) * limit;
 
-  // Build where clause - only OKRs for objectives owned by the user
+  // Build where clause - only OKRs owned by the user
   const where: Prisma.OkrWhereInput = {
     userId,
-    objective: {
-      userId,
-      project: {
-        userId,
-      },
-    },
     ...(status && { status }),
     ...(search && {
       OR: [
@@ -189,9 +231,17 @@ const getAllOkrsByUser = async (userId: number, queryParams: OkrQueryParams = {}
           select: { 
             id: true, 
             name: true, 
-            projectId: true,
+          },
+        },
+        plan: {
+          select: {
+            id: true,
+            name: true,
             project: {
-              select: { id: true, name: true },
+              select: { 
+                id: true, 
+                name: true 
+              },
             },
           },
         },
@@ -208,12 +258,6 @@ const getOkrById = async (id: number, userId: number) => {
     where: { 
       id, 
       userId,
-      objective: {
-        userId,
-        project: {
-          userId,
-        },
-      },
     },
     include: {
       user: {
@@ -223,10 +267,6 @@ const getOkrById = async (id: number, userId: number) => {
         select: { 
           id: true, 
           name: true, 
-          projectId: true,
-          project: {
-            select: { id: true, name: true },
-          },
         },
       },
     },
@@ -239,12 +279,6 @@ const updateOkr = async (id: number, userId: number, data: UpdateOkrRequest) => 
     where: { 
       id, 
       userId,
-      objective: {
-        userId,
-        project: {
-          userId,
-        },
-      },
     },
   });
 
@@ -263,10 +297,6 @@ const updateOkr = async (id: number, userId: number, data: UpdateOkrRequest) => 
         select: { 
           id: true, 
           name: true, 
-          projectId: true,
-          project: {
-            select: { id: true, name: true },
-          },
         },
       },
     },
@@ -279,12 +309,6 @@ const updateOkrProgress = async (id: number, userId: number, data: UpdateOkrProg
     where: { 
       id, 
       userId,
-      objective: {
-        userId,
-        project: {
-          userId,
-        },
-      },
     },
   });
 
@@ -319,10 +343,6 @@ const updateOkrProgress = async (id: number, userId: number, data: UpdateOkrProg
         select: { 
           id: true, 
           name: true, 
-          projectId: true,
-          project: {
-            select: { id: true, name: true },
-          },
         },
       },
     },
@@ -335,12 +355,6 @@ const deleteOkr = async (id: number, userId: number) => {
     where: { 
       id, 
       userId,
-      objective: {
-        userId,
-        project: {
-          userId,
-        },
-      },
     },
   });
 
@@ -361,12 +375,6 @@ const updateOkrPositions = async (okrPositions: { id: number; position: number }
     where: {
       id: { in: okrIds },
       userId,
-      objective: {
-        userId,
-        project: {
-          userId,
-        },
-      },
     },
   });
 
@@ -388,12 +396,6 @@ const updateOkrPositions = async (okrPositions: { id: number; position: number }
 const getOkrStats = async (userId: number, objectiveId?: number) => {
   const whereClause: Prisma.OkrWhereInput = {
     userId,
-    objective: {
-      userId,
-      project: {
-        userId,
-      },
-    },
     ...(objectiveId && { objectiveId }),
   };
 

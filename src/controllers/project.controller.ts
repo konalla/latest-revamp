@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import * as projectService from "../services/project.service";
 import type { CreateProjectRequest, UpdateProjectRequest, ProjectQueryParams } from "../types/project.types";
+import type { OkrQueryParams } from "../types/okr.types";
 
 const createProject = async (req: Request, res: Response) => {
   try {
@@ -144,6 +145,99 @@ const getProjectStats = async (req: Request, res: Response) => {
   }
 };
 
+const getProjectTasks = async (req: Request, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: "User not authenticated" });
+    }
+
+    const projectId = parseInt(req.params.id!);
+    if (isNaN(projectId)) {
+      return res.status(400).json({ message: "Invalid project ID" });
+    }
+
+    const tasks = await projectService.getProjectTasks(projectId, req.user.userId);
+    
+    if (tasks === null) {
+      return res.status(404).json({ message: "Project not found" });
+    }
+
+    res.json({
+      message: "Project tasks retrieved successfully",
+      tasks,
+    });
+  } catch (error: any) {
+    res.status(400).json({ message: error.message });
+  }
+};
+
+const getProjectObjectives = async (req: Request, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: "User not authenticated" });
+    }
+
+    const projectId = parseInt(req.params.id!);
+    if (isNaN(projectId)) {
+      return res.status(400).json({ message: "Invalid project ID" });
+    }
+
+    const objectives = await projectService.getProjectObjectives(projectId, req.user.userId);
+    
+    if (objectives === null) {
+      return res.status(404).json({ message: "Project not found" });
+    }
+
+    res.json({
+      message: "Project objectives retrieved successfully",
+      objectives,
+    });
+  } catch (error: any) {
+    res.status(400).json({ message: error.message });
+  }
+};
+
+const getProjectKeyResults = async (req: Request, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: "User not authenticated" });
+    }
+
+    const projectId = parseInt(req.params.id!);
+    if (isNaN(projectId)) {
+      return res.status(400).json({ message: "Invalid project ID" });
+    }
+
+    const queryParams: OkrQueryParams = {
+      page: req.query.page ? parseInt(req.query.page as string) : 1,
+      limit: req.query.limit ? parseInt(req.query.limit as string) : 10,
+      ...(req.query.status && { status: req.query.status as string }),
+      ...(req.query.search && { search: req.query.search as string }),
+      ...(req.query.sortBy && { sortBy: req.query.sortBy as 'title' | 'createdAt' | 'startDate' | 'endDate' | 'currentValue' | 'position' }),
+      ...(req.query.sortOrder && { sortOrder: req.query.sortOrder as 'asc' | 'desc' }),
+    };
+
+    const result = await projectService.getProjectKeyResults(projectId, req.user.userId, queryParams);
+    
+    if (result === null) {
+      return res.status(404).json({ message: "Project not found" });
+    }
+
+    res.json({
+      message: "Project key results retrieved successfully",
+      data: result,
+      pagination: {
+        page: queryParams.page,
+        limit: queryParams.limit,
+        total: result.total,
+        totalPages: Math.ceil(result.total / queryParams.limit!),
+      },
+    });
+  } catch (error: any) {
+    res.status(400).json({ message: error.message });
+  }
+};
+
 export {
   createProject,
   getProjects,
@@ -151,4 +245,7 @@ export {
   updateProject,
   deleteProject,
   getProjectStats,
+  getProjectTasks,
+  getProjectObjectives,
+  getProjectKeyResults,
 };

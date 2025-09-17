@@ -9,7 +9,8 @@ export interface CreateOkrRequest {
   position?: number;
   confidenceScore?: number;
   keyResults?: any[];
-  objectiveId: number;
+  objectiveId?: number;
+  planId?: number;
 }
 
 export interface UpdateOkrRequest {
@@ -47,7 +48,8 @@ export interface OkrResponse {
   createdAt: Date;
   updatedAt: Date;
   userId: number;
-  objectiveId: number;
+  objectiveId?: number;
+  planId?: number;
   position: number;
   confidenceScore: number;
   keyResults: any[];
@@ -60,8 +62,16 @@ export interface OkrResponse {
   objective?: {
     id: number;
     name: string;
-    projectId: number;
-    project?: {
+  };
+  plan?: {
+    id: number;
+    name: string;
+    status: string;
+    project: {
+      id: number;
+      name: string;
+    };
+    objective: {
       id: number;
       name: string;
     };

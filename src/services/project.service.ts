@@ -1,6 +1,7 @@
 import prisma from "../config/prisma";
 import type { Project, Prisma } from "../generated/prisma/index";
 import type { CreateProjectRequest, UpdateProjectRequest, ProjectQueryParams } from "../types/project.types";
+import type { OkrQueryParams } from "../types/okr.types";
 
 const createProject = async (data: CreateProjectRequest, userId: number) => {
   return prisma.project.create({
@@ -92,6 +93,146 @@ const getProjectStats = async (userId: number) => {
   };
 };
 
+const getProjectTasks = async (projectId: number, userId: number) => {
+  // First check if the project belongs to the user
+  const project = await prisma.project.findFirst({
+    where: { id: projectId, userId },
+  });
+
+  if (!project) {
+    return null;
+  }
+
+  // Get all tasks for this project
+  return prisma.task.findMany({
+    where: { 
+      projectId,
+      userId, // Ensure user can only see their own tasks
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+};
+
+const getProjectObjectives = async (projectId: number, userId: number) => {
+  // First check if the project belongs to the user
+  const project = await prisma.project.findFirst({
+    where: { id: projectId, userId },
+  });
+
+  if (!project) {
+    return null;
+  }
+
+  // Get all objectives for this project
+  return prisma.objective.findMany({
+    where: { 
+      projectId,
+      userId, // Ensure user can only see their own objectives
+    },
+    orderBy: { created_at: 'desc' },
+  });
+};
+
+const getProjectKeyResults = async (projectId: number, userId: number, queryParams: OkrQueryParams = {}) => {
+  // First check if the project belongs to the user
+  const project = await prisma.project.findFirst({
+    where: { id: projectId, userId },
+  });
+
+  if (!project) {
+    return null;
+  }
+
+  const { 
+    page = 1, 
+    limit = 10, 
+    status, 
+    search,
+    sortBy = 'position',
+    sortOrder = 'asc'
+  } = queryParams;
+  
+  const skip = (page - 1) * limit;
+
+  // Build where clause to find OKRs connected to this project through Plans or Objectives
+  const where: Prisma.OkrWhereInput = {
+    userId, // Ensure user can only see their own OKRs
+    OR: [
+      // OKRs connected through Plans
+      {
+        plan: {
+          projectId,
+        },
+      },
+      // OKRs connected through Objectives
+      {
+        objective: {
+          projectId,
+        },
+      },
+    ],
+    ...(status && { status }),
+    ...(search && {
+      OR: [
+        { title: { contains: search, mode: 'insensitive' } },
+        { description: { contains: search, mode: 'insensitive' } },
+      ],
+    }),
+  };
+
+  // Build orderBy clause
+  const orderBy: Prisma.OkrOrderByWithRelationInput = {};
+  if (sortBy === 'title') {
+    orderBy.title = sortOrder;
+  } else if (sortBy === 'createdAt') {
+    orderBy.createdAt = sortOrder;
+  } else if (sortBy === 'startDate') {
+    orderBy.startDate = sortOrder;
+  } else if (sortBy === 'endDate') {
+    orderBy.endDate = sortOrder;
+  } else if (sortBy === 'currentValue') {
+    orderBy.currentValue = sortOrder;
+  } else {
+    orderBy.position = sortOrder;
+  }
+
+  const [okrs, total] = await Promise.all([
+    prisma.okr.findMany({
+      where,
+      skip,
+      take: limit,
+      orderBy,
+      include: {
+        user: {
+          select: { id: true, name: true, email: true },
+        },
+        objective: {
+          select: { 
+            id: true, 
+            name: true,
+          },
+        },
+        plan: {
+          select: {
+            id: true,
+            name: true,
+            status: true,
+            project: {
+              select: { id: true, name: true },
+            },
+            objective: {
+              select: { id: true, name: true },
+            },
+          },
+        },
+      },
+    }),
+    prisma.okr.count({ where }),
+  ]);
+
+  return { okrs, total };
+};
+
 export {
   createProject,
   getAllProjectsByUser,
@@ -99,4 +240,7 @@ export {
   updateProject,
   deleteProject,
   getProjectStats,
+  getProjectTasks,
+  getProjectObjectives,
+  getProjectKeyResults,
 };

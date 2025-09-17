@@ -2,13 +2,41 @@ import type { Request, Response } from "express";
 import * as taskService from "../services/task.service";
 import type { CreateTaskRequest, UpdateTaskRequest, TaskQueryParams } from "../types/task.types";
 
+/**
+ * Helper function to handle backward compatibility and filter legacy fields
+ * 
+ * Transforms legacy field names and removes fields that no longer exist in the Prisma schema:
+ * - keyResultId → okrId (field was renamed)
+ * - isHighLeverage (removed from schema)
+ * - willMoveKRForward (removed from schema)
+ */
+const sanitizeTaskData = (body: any) => {
+  const requestBody = { ...body };
+  
+  // Transform legacy field names
+  if ('keyResultId' in requestBody) {
+    requestBody.okrId = requestBody.keyResultId;
+    delete requestBody.keyResultId;
+  }
+  
+  // Remove legacy fields that are no longer in the schema
+  const legacyFieldsToRemove = ['isHighLeverage', 'willMoveKRForward'];
+  legacyFieldsToRemove.forEach(field => {
+    if (field in requestBody) {
+      delete requestBody[field];
+    }
+  });
+  
+  return requestBody;
+};
+
 const createTask = async (req: Request, res: Response) => {
   try {
     if (!req.user) {
       return res.status(401).json({ message: "User not authenticated" });
     }
 
-    const taskData: CreateTaskRequest = req.body;
+    const taskData: CreateTaskRequest = sanitizeTaskData(req.body);
     
     // Validate required fields
     if (!taskData.title || !taskData.category || typeof taskData.duration !== 'number' || !taskData.priority || typeof taskData.position !== 'number') {
@@ -225,7 +253,7 @@ const updateTask = async (req: Request, res: Response) => {
       return res.status(400).json({ message: "Invalid task ID" });
     }
 
-    const updateData: UpdateTaskRequest = req.body;
+    const updateData: UpdateTaskRequest = sanitizeTaskData(req.body);
     const task = await taskService.updateTask(taskId, req.user.userId, updateData);
     
     if (!task) {

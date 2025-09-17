@@ -11,6 +11,7 @@ export interface CreateTaskRequest {
   projectId?: number;
   objectiveId?: number;
   okrId?: number;
+  planId?: number;
 }
 
 export interface UpdateTaskRequest {
@@ -26,6 +27,7 @@ export interface UpdateTaskRequest {
   projectId?: number;
   objectiveId?: number;
   okrId?: number;
+  planId?: number;
 }
 
 export interface TaskResponse {
@@ -44,6 +46,7 @@ export interface TaskResponse {
   projectId?: number;
   objectiveId?: number;
   okrId?: number;
+  planId?: number;
   user?: {
     id: number;
     name: string;
@@ -60,6 +63,19 @@ export interface TaskResponse {
   okr?: {
     id: number;
     title: string;
+  };
+  plan?: {
+    id: number;
+    name: string;
+    status: string;
+    project: {
+      id: number;
+      name: string;
+    };
+    objective: {
+      id: number;
+      name: string;
+    };
   };
 }
 
@@ -80,6 +96,7 @@ export interface TaskQueryParams {
   projectId?: number;
   objectiveId?: number;
   okrId?: number;
+  planId?: number;
   sortBy?: 'title' | 'createdAt' | 'priority' | 'position' | 'duration' | 'category';
   sortOrder?: 'asc' | 'desc';
 }

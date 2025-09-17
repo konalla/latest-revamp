@@ -11,23 +11,47 @@ const verifyProjectOwnership = async (projectId: number, userId: number) => {
 };
 
 const createObjective = async (data: CreateObjectiveRequest, userId: number) => {
-  // Verify that the user owns the project
-  const ownsProject = await verifyProjectOwnership(data.projectId, userId);
-  if (!ownsProject) {
-    throw new Error("Project not found or access denied");
+  // If projectId is provided, verify that the user owns the project
+  if (data.projectId) {
+    const ownsProject = await verifyProjectOwnership(data.projectId, userId);
+    if (!ownsProject) {
+      throw new Error("Project not found or access denied");
+    }
+  }
+
+  // Handle field mapping between camelCase (frontend) and snake_case (database)
+  const mappedData: any = { ...data, userId };
+  
+  // Map camelCase to snake_case for date fields if they exist
+  if ('startDate' in mappedData) {
+    mappedData.start_date = mappedData.startDate;
+    delete mappedData.startDate;
+  }
+  if ('endDate' in mappedData) {
+    mappedData.end_date = mappedData.endDate;
+    delete mappedData.endDate;
   }
 
   return prisma.objective.create({
-    data: {
-      ...data,
-      userId,
-    },
+    data: mappedData,
     include: {
       user: {
         select: { id: true, name: true, email: true },
       },
-      project: {
-        select: { id: true, name: true },
+      ...(data.projectId && {
+        project: {
+          select: { id: true, name: true },
+        },
+      }),
+      plans: {
+        select: {
+          id: true,
+          name: true,
+          status: true,
+          project: {
+            select: { id: true, name: true },
+          },
+        },
       },
     },
   });
@@ -51,10 +75,14 @@ const getObjectivesByProject = async (projectId: number, userId: number, queryPa
   
   const skip = (page - 1) * limit;
 
-  // Build where clause
+  // Build where clause - find objectives through plans
   const where: Prisma.ObjectiveWhereInput = {
-    projectId,
     userId,
+    plans: {
+      some: {
+        projectId
+      }
+    },
     ...(status && { status }),
     ...(search && {
       OR: [
@@ -88,8 +116,15 @@ const getObjectivesByProject = async (projectId: number, userId: number, queryPa
         user: {
           select: { id: true, name: true, email: true },
         },
-        project: {
-          select: { id: true, name: true },
+        plans: {
+          select: {
+            id: true,
+            name: true,
+            status: true,
+            project: {
+              select: { id: true, name: true },
+            },
+          },
         },
       },
     }),
@@ -111,7 +146,7 @@ const getAllObjectivesByUser = async (userId: number, queryParams: ObjectiveQuer
   
   const skip = (page - 1) * limit;
 
-  // Build where clause - only objectives for projects owned by the user
+  // Build where clause
   const where: Prisma.ObjectiveWhereInput = {
     userId,
     ...(status && { status }),
@@ -147,8 +182,15 @@ const getAllObjectivesByUser = async (userId: number, queryParams: ObjectiveQuer
         user: {
           select: { id: true, name: true, email: true },
         },
-        project: {
-          select: { id: true, name: true },
+        plans: {
+          select: {
+            id: true,
+            name: true,
+            status: true,
+            project: {
+              select: { id: true, name: true },
+            },
+          },
         },
       },
     }),
@@ -163,31 +205,31 @@ const getObjectiveById = async (id: number, userId: number) => {
     where: { 
       id, 
       userId,
-      // Also ensure the project belongs to the user
-      project: {
-        userId,
-      },
     },
     include: {
       user: {
         select: { id: true, name: true, email: true },
       },
-      project: {
-        select: { id: true, name: true },
+      plans: {
+        select: {
+          id: true,
+          name: true,
+          status: true,
+          project: {
+            select: { id: true, name: true },
+          },
+        },
       },
     },
   });
 };
 
 const updateObjective = async (id: number, userId: number, data: UpdateObjectiveRequest) => {
-  // First check if the objective belongs to the user and the user owns the project
+  // First check if the objective belongs to the user
   const existingObjective = await prisma.objective.findFirst({
     where: { 
       id, 
       userId,
-      project: {
-        userId,
-      },
     },
   });
 
@@ -195,29 +237,46 @@ const updateObjective = async (id: number, userId: number, data: UpdateObjective
     return null;
   }
 
+  // Handle field mapping between camelCase (frontend) and snake_case (database)
+  const mappedData: any = { ...data };
+  
+  // Map camelCase to snake_case for date fields if they exist
+  if ('startDate' in mappedData) {
+    mappedData.start_date = mappedData.startDate;
+    delete mappedData.startDate;
+  }
+  if ('endDate' in mappedData) {
+    mappedData.end_date = mappedData.endDate;
+    delete mappedData.endDate;
+  }
+
   return prisma.objective.update({
     where: { id },
-    data,
+    data: mappedData,
     include: {
       user: {
         select: { id: true, name: true, email: true },
       },
-      project: {
-        select: { id: true, name: true },
+      plans: {
+        select: {
+          id: true,
+          name: true,
+          status: true,
+          project: {
+            select: { id: true, name: true },
+          },
+        },
       },
     },
   });
 };
 
 const deleteObjective = async (id: number, userId: number) => {
-  // First check if the objective belongs to the user and the user owns the project
+  // First check if the objective belongs to the user
   const existingObjective = await prisma.objective.findFirst({
     where: { 
       id, 
       userId,
-      project: {
-        userId,
-      },
     },
   });
 
@@ -230,57 +289,77 @@ const deleteObjective = async (id: number, userId: number) => {
   });
 };
 
-const updateObjectivePositions = async (objectivePositions: { id: number; position: number }[], userId: number) => {
-  // Verify all objectives belong to the user and their projects are owned by the user
-  const objectiveIds = objectivePositions.map(op => op.id);
-  
-  const existingObjectives = await prisma.objective.findMany({
-    where: {
-      id: { in: objectiveIds },
-      userId,
-      project: {
-        userId,
-      },
-    },
-  });
-
-  if (existingObjectives.length !== objectiveIds.length) {
-    throw new Error("One or more objectives not found or access denied");
+const reorderObjectives = async (
+  projectId: number,
+  userId: number,
+  objectiveIds: number[]
+) => {
+  // Verify that the user owns the project
+  const ownsProject = await verifyProjectOwnership(projectId, userId);
+  if (!ownsProject) {
+    throw new Error("Project not found or access denied");
   }
 
   // Update positions in a transaction
-  const updatePromises = objectivePositions.map(({ id, position }) =>
-    prisma.objective.update({
-      where: { id },
-      data: { position },
+  const updatePromises = objectiveIds.map((objectiveId, index) =>
+    prisma.objective.updateMany({
+      where: {
+        id: objectiveId,
+        userId,
+        plans: {
+          some: {
+            projectId
+          }
+        }
+      },
+      data: { position: index },
     })
   );
 
-  return Promise.all(updatePromises);
+  await prisma.$transaction(updatePromises);
+
+  // Return updated objectives
+  return getObjectivesByProject(projectId, userId);
 };
 
-const getObjectiveStats = async (userId: number, projectId?: number) => {
-  const whereClause: Prisma.ObjectiveWhereInput = {
-    userId,
-    project: {
-      userId,
+const getObjectiveStats = async (userId: number) => {
+  const objectives = await prisma.objective.findMany({
+    where: { userId },
+    include: {
+      okrs: true,
+      tasks: true,
     },
-    ...(projectId && { projectId }),
+  });
+
+  const stats = {
+    total: objectives.length,
+    active: 0,
+    completed: 0,
+    paused: 0,
+    totalOkrs: 0,
+    totalTasks: 0,
+    completedTasks: 0,
   };
 
-  const [totalObjectives, activeObjectives, completedObjectives, pendingObjectives] = await Promise.all([
-    prisma.objective.count({ where: whereClause }),
-    prisma.objective.count({ where: { ...whereClause, status: 'active' } }),
-    prisma.objective.count({ where: { ...whereClause, status: 'completed' } }),
-    prisma.objective.count({ where: { ...whereClause, status: 'pending' } }),
-  ]);
+  objectives.forEach((objective) => {
+    switch (objective.status) {
+      case 'active':
+        stats.active++;
+        break;
+      case 'completed':
+        stats.completed++;
+        break;
+      case 'paused':
+        stats.paused++;
+        break;
+    }
 
-  return {
-    total: totalObjectives,
-    active: activeObjectives,
-    completed: completedObjectives,
-    pending: pendingObjectives,
-  };
+    stats.totalOkrs += objective.okrs.length;
+    stats.totalTasks += objective.tasks.length;
+    stats.completedTasks += objective.tasks.filter((task) => task.completed).length;
+  });
+
+  return stats;
 };
 
 export {
@@ -290,6 +369,6 @@ export {
   getObjectiveById,
   updateObjective,
   deleteObjective,
-  updateObjectivePositions,
+  reorderObjectives,
   getObjectiveStats,
 };

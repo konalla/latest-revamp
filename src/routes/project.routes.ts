@@ -25,4 +25,13 @@ router.put("/:id", projectController.updateProject);
 // DELETE /api/projects/:id - Delete project by ID (only if it belongs to logged-in user)
 router.delete("/:id", projectController.deleteProject);
 
+// GET /api/projects/:id/tasks - Get all tasks for a specific project
+router.get("/:id/tasks", projectController.getProjectTasks);
+
+// GET /api/projects/:id/objectives - Get all objectives for a specific project
+router.get("/:id/objectives", projectController.getProjectObjectives);
+
+// GET /api/projects/:id/key-results - Get all OKRs (key results) for a specific project
+router.get("/:id/key-results", projectController.getProjectKeyResults);
+
 export default router;

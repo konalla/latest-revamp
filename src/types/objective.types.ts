@@ -5,8 +5,11 @@ export interface CreateObjectiveRequest {
   color?: string;
   start_date?: Date;
   end_date?: Date;
+  // Support both camelCase (frontend) and snake_case (database) field names
+  startDate?: Date | string;
+  endDate?: Date | string;
   position?: number;
-  projectId: number;
+  projectId?: number;
 }
 
 export interface UpdateObjectiveRequest {
@@ -16,7 +19,11 @@ export interface UpdateObjectiveRequest {
   color?: string;
   start_date?: Date;
   end_date?: Date;
+  // Support both camelCase (frontend) and snake_case (database) field names
+  startDate?: Date | string;
+  endDate?: Date | string;
   position?: number;
+  projectId?: number;
 }
 
 export interface ObjectiveResponse {
@@ -30,7 +37,7 @@ export interface ObjectiveResponse {
   created_at: Date;
   position: number;
   userId: number;
-  projectId: number;
+  projectId?: number;
   user?: {
     id: number;
     name: string;
@@ -40,6 +47,15 @@ export interface ObjectiveResponse {
     id: number;
     name: string;
   };
+  plans?: {
+    id: number;
+    name: string;
+    status: string;
+    project: {
+      id: number;
+      name: string;
+    };
+  }[];
 }
 
 export interface ObjectiveListResponse {

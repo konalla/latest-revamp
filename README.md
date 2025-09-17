@@ -1,4 +1,4 @@
-# revamp-backend
+# IQniti Backend
 
 A TypeScript backend application for managing projects, objectives, OKRs (Objectives and Key Results), and tasks with user authentication.
 
@@ -25,7 +25,7 @@ Before setting up the application, make sure you have the following installed:
 1. **Clone the repository**
    ```bash
    git clone <repository-url>
-   cd revamp-backend
+   cd iqniti-backend
    ```
 
 2. **Install dependencies**
@@ -45,7 +45,7 @@ Before setting up the application, make sure you have the following installed:
    Add the following environment variables to your `.env` file:
    ```env
    # Database
-   DATABASE_URL="postgresql://username:password@localhost:5432/iqniti"
+   DATABASE_URL="postgresql://username:password@localhost:5432/iqniti_db"
    
    # JWT Configuration
    JWT_SECRET="your-super-secret-jwt-key-change-this-in-production"
