@@ -1,7 +1,7 @@
 import type { Request, Response } from "express";
-import * as projectService from "../services/project.service";
-import type { CreateProjectRequest, UpdateProjectRequest, ProjectQueryParams } from "../types/project.types";
-import type { OkrQueryParams } from "../types/okr.types";
+import * as projectService from "../services/project.service.js";
+import type { CreateProjectRequest, UpdateProjectRequest, ProjectQueryParams } from "../types/project.types.js";
+import type { OkrQueryParams } from "../types/okr.types.js";
 
 const createProject = async (req: Request, res: Response) => {
   try {

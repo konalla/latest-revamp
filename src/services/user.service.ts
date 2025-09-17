@@ -1,7 +1,7 @@
-import prisma from "../config/prisma";
-import type { User, Prisma } from "../generated/prisma/index";
+import prisma from "../config/prisma.js";
 
-const createUser = async (data: Prisma.UserCreateInput) => {
+
+const createUser = async (data: any) => {
   return prisma.user.create({ data });
 };
 
@@ -13,7 +13,7 @@ const getUserById = async (id: number) => {
   return prisma.user.findUnique({ where: { id } });
 };
 
-const updateUser = async (id: number, data: Prisma.UserUpdateInput) => {
+const updateUser = async (id: number, data: any) => {
   return prisma.user.update({ where: { id }, data });
 };
 

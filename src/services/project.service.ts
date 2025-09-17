@@ -1,7 +1,7 @@
-import prisma from "../config/prisma";
-import type { Project, Prisma } from "../generated/prisma/index";
-import type { CreateProjectRequest, UpdateProjectRequest, ProjectQueryParams } from "../types/project.types";
-import type { OkrQueryParams } from "../types/okr.types";
+import prisma from "../config/prisma.js";
+
+import type { CreateProjectRequest, UpdateProjectRequest, ProjectQueryParams } from "../types/project.types.js";
+import type { OkrQueryParams } from "../types/okr.types.js";
 
 const createProject = async (data: CreateProjectRequest, userId: number) => {
   return prisma.project.create({
@@ -17,7 +17,7 @@ const getAllProjectsByUser = async (userId: number, queryParams: ProjectQueryPar
   const skip = (page - 1) * limit;
 
   // Build where clause
-  const where: Prisma.ProjectWhereInput = {
+  const where: any = {
     userId,
     ...(status && { status }),
     ...(visibility && { visibility }),
@@ -155,7 +155,7 @@ const getProjectKeyResults = async (projectId: number, userId: number, queryPara
   const skip = (page - 1) * limit;
 
   // Build where clause to find OKRs connected to this project through Plans or Objectives
-  const where: Prisma.OkrWhereInput = {
+  const where: any = {
     userId, // Ensure user can only see their own OKRs
     OR: [
       // OKRs connected through Plans
@@ -181,7 +181,7 @@ const getProjectKeyResults = async (projectId: number, userId: number, queryPara
   };
 
   // Build orderBy clause
-  const orderBy: Prisma.OkrOrderByWithRelationInput = {};
+  const orderBy: any = {};
   if (sortBy === 'title') {
     orderBy.title = sortOrder;
   } else if (sortBy === 'createdAt') {

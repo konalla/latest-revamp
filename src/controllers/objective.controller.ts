@@ -1,10 +1,10 @@
 import type { Request, Response } from "express";
-import * as objectiveService from "../services/objective.service";
-import * as taskService from "../services/task.service";
-import * as okrService from "../services/okr.service";
-import type { CreateObjectiveRequest, UpdateObjectiveRequest, ObjectiveQueryParams } from "../types/objective.types";
-import type { TaskQueryParams } from "../types/task.types";
-import type { OkrQueryParams } from "../types/okr.types";
+import * as objectiveService from "../services/objective.service.js";
+import * as taskService from "../services/task.service.js";
+import * as okrService from "../services/okr.service.js";
+import type { CreateObjectiveRequest, UpdateObjectiveRequest, ObjectiveQueryParams } from "../types/objective.types.js";
+import type { TaskQueryParams } from "../types/task.types.js";
+import type { OkrQueryParams } from "../types/okr.types.js";
 
 const createObjective = async (req: Request, res: Response) => {
   try {

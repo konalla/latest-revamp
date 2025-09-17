@@ -1,13 +1,12 @@
 import type { Request, Response } from "express";
-import { PlanService } from '../services/plan.service';
-import prisma from '../config/prisma';
+import { PlanService } from '../services/plan.service.js';
 import type { 
   CreatePlanRequest, 
   UpdatePlanRequest, 
   PlanQueryParams 
-} from '../types/plan.types';
+} from '../types/plan.types.js';
 
-const planService = new PlanService(prisma);
+const planService = new PlanService();
 
 export const createPlan = async (req: Request, res: Response) => {
   try {

@@ -1,4 +1,5 @@
-import { PrismaClient, Prisma } from '../generated/prisma';
+import prismaClient from "../config/prisma.js";
+
 import type { 
   CreatePlanRequest, 
   UpdatePlanRequest, 
@@ -7,10 +8,10 @@ import type {
   PlanQueryParams,
   PlanStats,
   PlanWithDetails
-} from '../types/plan.types';
+} from '../types/plan.types.js';
 
 export class PlanService {
-  constructor(private prisma: PrismaClient) {}
+  constructor(private prisma = prismaClient) {}
 
   private transformPlanResponse(plan: any): PlanResponse {
     return {
@@ -185,7 +186,7 @@ export class PlanService {
 
     const skip = (page - 1) * limit;
     
-    const where: Prisma.PlanWhereInput = {
+    const where: any = {
       OR: [
         { project: { userId } },
         { objective: { userId } }
@@ -211,7 +212,7 @@ export class PlanService {
       ];
     }
 
-    const orderBy: Prisma.PlanOrderByWithRelationInput = {};
+    const orderBy: any = {};
     orderBy[sortBy] = sortOrder;
 
     const [plans, total] = await Promise.all([
@@ -261,7 +262,7 @@ export class PlanService {
     ]);
 
     return { 
-      plans: plans.map(plan => this.transformPlanResponse(plan)), 
+      plans: plans.map((plan: any) => this.transformPlanResponse(plan)), 
       total 
     };
   }
@@ -378,7 +379,7 @@ export class PlanService {
       completedTasks: 0
     };
 
-    plans.forEach(plan => {
+    plans.forEach((plan: any) => {
       switch (plan.status) {
         case 'active':
           stats.active++;
@@ -396,7 +397,7 @@ export class PlanService {
 
       stats.totalOkrs += plan.okrs.length;
       stats.totalTasks += plan.tasks.length;
-      stats.completedTasks += plan.tasks.filter(task => task.completed).length;
+      stats.completedTasks += plan.tasks.filter((task: any) => task.completed).length;
     });
 
     return stats;
@@ -446,7 +447,7 @@ export class PlanService {
       }
     });
     
-    return plans.map(plan => this.transformPlanResponse(plan));
+    return plans.map((plan: any) => this.transformPlanResponse(plan));
   }
 
   async getPlansForObjective(objectiveId: number, userId: number): Promise<PlanResponse[]> {
@@ -493,6 +494,6 @@ export class PlanService {
       }
     });
     
-    return plans.map(plan => this.transformPlanResponse(plan));
+    return plans.map((plan: any) => this.transformPlanResponse(plan));
   }
 }

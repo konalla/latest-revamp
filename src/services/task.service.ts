@@ -1,6 +1,6 @@
-import prisma from "../config/prisma";
-import type { Task, Prisma } from "../generated/prisma/index";
-import type { CreateTaskRequest, UpdateTaskRequest, TaskQueryParams } from "../types/task.types";
+import prisma from "../config/prisma.js";
+
+import type { CreateTaskRequest, UpdateTaskRequest, TaskQueryParams } from "../types/task.types.js";
 
 // Helper functions to verify ownership
 const verifyProjectOwnership = async (projectId: number, userId: number) => {
@@ -100,7 +100,7 @@ const getTasksByUser = async (userId: number, queryParams: TaskQueryParams = {})
   const skip = (page - 1) * limit;
 
   // Build where clause
-  const where: Prisma.TaskWhereInput = {
+  const where: any = {
     userId,
     ...(completed !== undefined && { completed }),
     ...(priority && { priority }),
@@ -119,7 +119,7 @@ const getTasksByUser = async (userId: number, queryParams: TaskQueryParams = {})
   };
 
   // Build orderBy clause
-  const orderBy: Prisma.TaskOrderByWithRelationInput = {};
+  const orderBy: any = {};
   if (sortBy === 'title') {
     orderBy.title = sortOrder;
   } else if (sortBy === 'createdAt') {
@@ -344,7 +344,7 @@ const toggleTaskCompletion = async (id: number, userId: number) => {
 };
 
 const getTaskStats = async (userId: number, projectId?: number, objectiveId?: number, okrId?: number) => {
-  const whereClause: Prisma.TaskWhereInput = {
+  const whereClause: any = {
     userId,
     ...(projectId && { projectId }),
     ...(objectiveId && { objectiveId }),

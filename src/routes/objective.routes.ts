@@ -1,6 +1,6 @@
 import { Router } from "express";
-import * as objectiveController from "../controllers/objective.controller";
-import { authenticateToken } from "../middleware/auth.middleware";
+import * as objectiveController from "../controllers/objective.controller.js";
+import { authenticateToken } from "../middleware/auth.middleware.js";
 
 const router = Router();
 

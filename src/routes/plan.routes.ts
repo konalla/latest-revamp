@@ -9,8 +9,8 @@ import {
   getPlanStats,
   getPlansForProject,
   getPlansForObjective
-} from '../controllers/plan.controller';
-import { authenticateToken } from '../middleware/auth.middleware';
+} from '../controllers/plan.controller.js';
+import { authenticateToken } from '../middleware/auth.middleware.js';
 
 const router = Router();
 

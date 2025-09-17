@@ -1,6 +1,6 @@
 import { Router } from "express";
-import * as taskController from "../controllers/task.controller";
-import { authenticateToken } from "../middleware/auth.middleware";
+import * as taskController from "../controllers/task.controller.js";
+import { authenticateToken } from "../middleware/auth.middleware.js";
 
 const router = Router();
 

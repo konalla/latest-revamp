@@ -1,6 +1,6 @@
-import prisma from "../config/prisma";
-import type { Objective, Prisma } from "../generated/prisma/index";
-import type { CreateObjectiveRequest, UpdateObjectiveRequest, ObjectiveQueryParams } from "../types/objective.types";
+import prisma from "../config/prisma.js";
+
+import type { CreateObjectiveRequest, UpdateObjectiveRequest, ObjectiveQueryParams } from "../types/objective.types.js";
 
 // Helper function to verify project ownership
 const verifyProjectOwnership = async (projectId: number, userId: number) => {
@@ -76,7 +76,7 @@ const getObjectivesByProject = async (projectId: number, userId: number, queryPa
   const skip = (page - 1) * limit;
 
   // Build where clause - find objectives through plans
-  const where: Prisma.ObjectiveWhereInput = {
+  const where: any = {
     userId,
     plans: {
       some: {
@@ -93,7 +93,7 @@ const getObjectivesByProject = async (projectId: number, userId: number, queryPa
   };
 
   // Build orderBy clause
-  const orderBy: Prisma.ObjectiveOrderByWithRelationInput = {};
+  const orderBy: any = {};
   if (sortBy === 'name') {
     orderBy.name = sortOrder;
   } else if (sortBy === 'created_at') {
@@ -147,7 +147,7 @@ const getAllObjectivesByUser = async (userId: number, queryParams: ObjectiveQuer
   const skip = (page - 1) * limit;
 
   // Build where clause
-  const where: Prisma.ObjectiveWhereInput = {
+  const where: any = {
     userId,
     ...(status && { status }),
     ...(search && {
@@ -159,7 +159,7 @@ const getAllObjectivesByUser = async (userId: number, queryParams: ObjectiveQuer
   };
 
   // Build orderBy clause
-  const orderBy: Prisma.ObjectiveOrderByWithRelationInput = {};
+  const orderBy: any = {};
   if (sortBy === 'name') {
     orderBy.name = sortOrder;
   } else if (sortBy === 'created_at') {
@@ -341,7 +341,7 @@ const getObjectiveStats = async (userId: number) => {
     completedTasks: 0,
   };
 
-  objectives.forEach((objective) => {
+  objectives.forEach((objective: any) => {
     switch (objective.status) {
       case 'active':
         stats.active++;
@@ -356,7 +356,7 @@ const getObjectiveStats = async (userId: number) => {
 
     stats.totalOkrs += objective.okrs.length;
     stats.totalTasks += objective.tasks.length;
-    stats.completedTasks += objective.tasks.filter((task) => task.completed).length;
+    stats.completedTasks += objective.tasks.filter((task: any) => task.completed).length;
   });
 
   return stats;

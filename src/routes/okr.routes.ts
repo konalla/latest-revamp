@@ -1,6 +1,6 @@
 import { Router } from "express";
-import * as okrController from "../controllers/okr.controller";
-import { authenticateToken } from "../middleware/auth.middleware";
+import * as okrController from "../controllers/okr.controller.js";
+import { authenticateToken } from "../middleware/auth.middleware.js";
 
 const router = Router();
 

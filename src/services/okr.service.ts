@@ -1,11 +1,11 @@
-import prisma from "../config/prisma";
-import type { Okr, Prisma } from "../generated/prisma/index";
+import prisma from "../config/prisma.js";
+
 import type { 
   CreateOkrRequest, 
   UpdateOkrRequest, 
   UpdateOkrProgressRequest,
   OkrQueryParams 
-} from "../types/okr.types";
+} from "../types/okr.types.js";
 
 // Helper function to verify objective ownership
 const verifyObjectiveOwnership = async (objectiveId: number, userId: number) => {
@@ -113,7 +113,7 @@ const getOkrsByObjective = async (objectiveId: number, userId: number, queryPara
   const skip = (page - 1) * limit;
 
   // Build where clause
-  const where: Prisma.OkrWhereInput = {
+  const where: any = {
     objectiveId,
     userId,
     ...(status && { status }),
@@ -126,7 +126,7 @@ const getOkrsByObjective = async (objectiveId: number, userId: number, queryPara
   };
 
   // Build orderBy clause
-  const orderBy: Prisma.OkrOrderByWithRelationInput = {};
+  const orderBy: any = {};
   if (sortBy === 'title') {
     orderBy.title = sortOrder;
   } else if (sortBy === 'createdAt') {
@@ -190,7 +190,7 @@ const getAllOkrsByUser = async (userId: number, queryParams: OkrQueryParams = {}
   const skip = (page - 1) * limit;
 
   // Build where clause - only OKRs owned by the user
-  const where: Prisma.OkrWhereInput = {
+  const where: any = {
     userId,
     ...(status && { status }),
     ...(search && {
@@ -202,7 +202,7 @@ const getAllOkrsByUser = async (userId: number, queryParams: OkrQueryParams = {}
   };
 
   // Build orderBy clause
-  const orderBy: Prisma.OkrOrderByWithRelationInput = {};
+  const orderBy: any = {};
   if (sortBy === 'title') {
     orderBy.title = sortOrder;
   } else if (sortBy === 'createdAt') {
@@ -394,7 +394,7 @@ const updateOkrPositions = async (okrPositions: { id: number; position: number }
 };
 
 const getOkrStats = async (userId: number, objectiveId?: number) => {
-  const whereClause: Prisma.OkrWhereInput = {
+  const whereClause: any = {
     userId,
     ...(objectiveId && { objectiveId }),
   };
@@ -422,15 +422,15 @@ const getOkrStats = async (userId: number, objectiveId?: number) => {
 
   // Calculate average progress percentage
   const averageProgress = allOkrs.length > 0 
-    ? allOkrs.reduce((sum, okr) => {
-        const progress = okr.targetValue > 0 ? (okr.currentValue / okr.targetValue) * 100 : 0;
+    ? allOkrs.reduce((sum: any, anyokr: any) => {
+        const progress = anyokr.targetValue > 0 ? (anyokr.currentValue / anyokr.targetValue) * 100 : 0;
         return sum + Math.min(progress, 100); // Cap at 100%
       }, 0) / allOkrs.length
     : 0;
 
   // Calculate average confidence score
   const averageConfidenceScore = allOkrs.length > 0 
-    ? allOkrs.reduce((sum, okr) => sum + okr.confidenceScore, 0) / allOkrs.length
+    ? allOkrs.reduce((sum: any, anyokr: any) => sum + anyokr.confidenceScore, 0) / allOkrs.length
     : 0;
 
   return {

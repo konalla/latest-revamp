@@ -1,11 +1,11 @@
 import type { Request, Response } from "express";
-import * as okrService from "../services/okr.service";
+import * as okrService from "../services/okr.service.js";
 import type { 
   CreateOkrRequest, 
   UpdateOkrRequest, 
   UpdateOkrProgressRequest,
   OkrQueryParams 
-} from "../types/okr.types";
+} from "../types/okr.types.js";
 
 const createOkr = async (req: Request, res: Response) => {
   try {

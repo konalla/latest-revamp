@@ -1,7 +1,7 @@
 import bcrypt from "bcrypt";
-import prisma from "../config/prisma";
-import type { LoginRequest, RegisterRequest, AuthResponse } from "../types/auth.types";
-import { generateToken } from "../utils/jwt.utils";
+import prisma from "../config/prisma.js";
+import type { LoginRequest, RegisterRequest, AuthResponse } from "../types/auth.types.js";
+import { generateToken } from "../utils/jwt.utils.js";
 
 const SALT_ROUNDS = 10;
 
