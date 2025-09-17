@@ -266,6 +266,41 @@ curl -X DELETE http://localhost:3000/api/users/1 \
   -H "Authorization: Bearer YOUR_JWT_TOKEN"
 ```
 
+### PATCH /api/users/change-password
+Change the current user's password.
+
+**Authentication:** Required
+
+**Request Body:**
+```json
+{
+  "currentPassword": "currentPassword123",
+  "newPassword": "newPassword456"
+}
+```
+
+**Response:**
+```json
+{
+  "message": "Password changed successfully"
+}
+```
+
+**Error Responses:**
+- 400 Bad Request: Current password is incorrect
+- 401 Unauthorized: User not authenticated
+
+**Curl Example:**
+```bash
+curl -X PATCH http://localhost:3000/api/users/change-password \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "currentPassword": "currentPassword123",
+    "newPassword": "newPassword456"
+  }'
+```
+
 ---
 
 ## 4. Project Management APIs

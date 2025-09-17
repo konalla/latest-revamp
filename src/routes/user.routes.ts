@@ -7,11 +7,14 @@ const router = Router();
 // Public routes
 router.post("/", userController.createUser);
 router.get("/", userController.getUsers);
-router.get("/:id", userController.getUser);
 
 // Protected routes (require JWT token)
 router.get("/me", authenticateToken, userController.getCurrentUser);
+
+// Public routes continued (/:id must come after /me to avoid conflicts)
+router.get("/:id", userController.getUser);
 router.put("/:id", authenticateToken, userController.updateUser);
 router.delete("/:id", authenticateToken, userController.deleteUser);
+router.patch("/change-password", authenticateToken, userController.changePassword);
 
 export default router;

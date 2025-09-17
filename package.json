@@ -7,6 +7,7 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
+    "postinstall": "npx prisma generate",
     "prisma": "node --experimental-wasm-reftypes ./node_modules/.bin/prisma"
   },
   "keywords": [],

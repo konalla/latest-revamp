@@ -59,6 +59,20 @@ const getCurrentUser = async (req: Request, res: Response) => {
   }
 };
 
+const changePassword = async (req: Request, res: Response) => {
+  try {
+    // req.user is available from JWT middleware
+    if (!req.user) {
+      return res.status(401).json({ message: "User not authenticated" });
+    }
+    
+    const result = await userService.changePassword(req.user.userId, req.body);
+    res.json(result);
+  } catch (error: any) {
+    res.status(400).json({ message: error.message });
+  }
+};
+
 export {
   createUser,
   getUsers,
@@ -66,4 +80,5 @@ export {
   updateUser,
   deleteUser,
   getCurrentUser,
+  changePassword,
 };
