@@ -22,7 +22,7 @@ export interface AuthResponse {
   message: string;
 }
 
-export interface JWTPayload {
+export interface UserJWTPayload {
   userId: number;
   email: string;
   role: string;

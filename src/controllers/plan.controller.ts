@@ -11,7 +11,7 @@ const planService = new PlanService(prisma);
 
 export const createPlan = async (req: Request, res: Response) => {
   try {
-    const userId = req.user?.id;
+    const userId = req.user?.userId;
     if (!userId) {
       return res.status(401).json({ error: 'User not authenticated' });
     }
@@ -35,8 +35,8 @@ export const createPlan = async (req: Request, res: Response) => {
 
 export const getPlanById = async (req: Request, res: Response) => {
   try {
-    const userId = req.user?.id;
-    const planId = parseInt(req.params.id);
+    const userId = req.user?.userId;
+    const planId = parseInt(req.params.id!);
 
     if (!planId || isNaN(planId)) {
       return res.status(400).json({ error: 'Valid plan ID is required' });
@@ -57,8 +57,8 @@ export const getPlanById = async (req: Request, res: Response) => {
 
 export const getPlanWithDetails = async (req: Request, res: Response) => {
   try {
-    const userId = req.user?.id;
-    const planId = parseInt(req.params.id);
+    const userId = req.user?.userId;
+    const planId = parseInt(req.params.id!);
 
     if (!planId || isNaN(planId)) {
       return res.status(400).json({ error: 'Valid plan ID is required' });
@@ -79,21 +79,37 @@ export const getPlanWithDetails = async (req: Request, res: Response) => {
 
 export const getPlans = async (req: Request, res: Response) => {
   try {
-    const userId = req.user?.id;
+    const userId = req.user?.userId;
     if (!userId) {
       return res.status(401).json({ error: 'User not authenticated' });
     }
 
-    const queryParams: PlanQueryParams = {
-      page: req.query.page ? parseInt(req.query.page as string) : undefined,
-      limit: req.query.limit ? parseInt(req.query.limit as string) : undefined,
-      status: req.query.status as string,
-      search: req.query.search as string,
-      projectId: req.query.projectId ? parseInt(req.query.projectId as string) : undefined,
-      objectiveId: req.query.objectiveId ? parseInt(req.query.objectiveId as string) : undefined,
-      sortBy: req.query.sortBy as any,
-      sortOrder: req.query.sortOrder as any,
-    };
+    const queryParams: PlanQueryParams = {};
+    
+    if (req.query.page) {
+      queryParams.page = parseInt(req.query.page as string);
+    }
+    if (req.query.limit) {
+      queryParams.limit = parseInt(req.query.limit as string);
+    }
+    if (req.query.status) {
+      queryParams.status = req.query.status as string;
+    }
+    if (req.query.search) {
+      queryParams.search = req.query.search as string;
+    }
+    if (req.query.projectId) {
+      queryParams.projectId = parseInt(req.query.projectId as string);
+    }
+    if (req.query.objectiveId) {
+      queryParams.objectiveId = parseInt(req.query.objectiveId as string);
+    }
+    if (req.query.sortBy) {
+      queryParams.sortBy = req.query.sortBy as any;
+    }
+    if (req.query.sortOrder) {
+      queryParams.sortOrder = req.query.sortOrder as any;
+    }
 
     const result = await planService.getPlans(userId, queryParams);
     res.json(result);
@@ -105,12 +121,12 @@ export const getPlans = async (req: Request, res: Response) => {
 
 export const updatePlan = async (req: Request, res: Response) => {
   try {
-    const userId = req.user?.id;
+    const userId = req.user?.userId;
     if (!userId) {
       return res.status(401).json({ error: 'User not authenticated' });
     }
 
-    const planId = parseInt(req.params.id);
+    const planId = parseInt(req.params.id!);
     if (!planId || isNaN(planId)) {
       return res.status(400).json({ error: 'Valid plan ID is required' });
     }
@@ -130,12 +146,12 @@ export const updatePlan = async (req: Request, res: Response) => {
 
 export const deletePlan = async (req: Request, res: Response) => {
   try {
-    const userId = req.user?.id;
+    const userId = req.user?.userId;
     if (!userId) {
       return res.status(401).json({ error: 'User not authenticated' });
     }
 
-    const planId = parseInt(req.params.id);
+    const planId = parseInt(req.params.id!);
     if (!planId || isNaN(planId)) {
       return res.status(400).json({ error: 'Valid plan ID is required' });
     }
@@ -153,7 +169,7 @@ export const deletePlan = async (req: Request, res: Response) => {
 
 export const getPlanStats = async (req: Request, res: Response) => {
   try {
-    const userId = req.user?.id;
+    const userId = req.user?.userId;
     if (!userId) {
       return res.status(401).json({ error: 'User not authenticated' });
     }
@@ -168,12 +184,12 @@ export const getPlanStats = async (req: Request, res: Response) => {
 
 export const getPlansForProject = async (req: Request, res: Response) => {
   try {
-    const userId = req.user?.id;
+    const userId = req.user?.userId;
     if (!userId) {
       return res.status(401).json({ error: 'User not authenticated' });
     }
 
-    const projectId = parseInt(req.params.projectId);
+    const projectId = parseInt(req.params.projectId!);
     if (!projectId || isNaN(projectId)) {
       return res.status(400).json({ error: 'Valid project ID is required' });
     }
@@ -188,12 +204,12 @@ export const getPlansForProject = async (req: Request, res: Response) => {
 
 export const getPlansForObjective = async (req: Request, res: Response) => {
   try {
-    const userId = req.user?.id;
+    const userId = req.user?.userId;
     if (!userId) {
       return res.status(401).json({ error: 'User not authenticated' });
     }
 
-    const objectiveId = parseInt(req.params.objectiveId);
+    const objectiveId = parseInt(req.params.objectiveId!);
     if (!objectiveId || isNaN(objectiveId)) {
       return res.status(400).json({ error: 'Valid objective ID is required' });
     }

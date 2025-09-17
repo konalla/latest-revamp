@@ -12,6 +12,13 @@ import type {
 export class PlanService {
   constructor(private prisma: PrismaClient) {}
 
+  private transformPlanResponse(plan: any): PlanResponse {
+    return {
+      ...plan,
+      description: plan.description ?? undefined
+    };
+  }
+
   async createPlan(userId: number, data: CreatePlanRequest): Promise<PlanResponse> {
     // Verify that both project and objective belong to the user
     const project = await this.prisma.project.findFirst({
@@ -47,7 +54,7 @@ export class PlanService {
     const plan = await this.prisma.plan.create({
       data: {
         name: data.name,
-        description: data.description,
+        description: data.description || null,
         status: data.status || 'active',
         projectId: data.projectId,
         objectiveId: data.objectiveId
@@ -90,7 +97,7 @@ export class PlanService {
       }
     });
 
-    return plan;
+    return this.transformPlanResponse(plan);
   }
 
   async getPlanById(id: number, userId?: number): Promise<PlanResponse | null> {
@@ -143,7 +150,7 @@ export class PlanService {
       }
     });
 
-    return plan;
+    return this.transformPlanResponse(plan);
   }
 
   async getPlanWithDetails(id: number, userId?: number): Promise<PlanWithDetails | null> {
@@ -253,7 +260,10 @@ export class PlanService {
       this.prisma.plan.count({ where })
     ]);
 
-    return { plans, total };
+    return { 
+      plans: plans.map(plan => this.transformPlanResponse(plan)), 
+      total 
+    };
   }
 
   async updatePlan(id: number, userId: number, data: UpdatePlanRequest): Promise<PlanResponse> {
@@ -272,13 +282,14 @@ export class PlanService {
       throw new Error('Plan not found or access denied');
     }
 
+    const updateData: any = {};
+    if (data.name !== undefined) updateData.name = data.name;
+    if (data.description !== undefined) updateData.description = data.description;
+    if (data.status !== undefined) updateData.status = data.status;
+
     const plan = await this.prisma.plan.update({
       where: { id },
-      data: {
-        name: data.name,
-        description: data.description,
-        status: data.status
-      },
+      data: updateData,
       include: {
         project: {
           select: {
@@ -317,7 +328,7 @@ export class PlanService {
       }
     });
 
-    return plan;
+    return this.transformPlanResponse(plan);
   }
 
   async deletePlan(id: number, userId: number): Promise<void> {
@@ -392,7 +403,7 @@ export class PlanService {
   }
 
   async getPlansForProject(projectId: number, userId: number): Promise<PlanResponse[]> {
-    return this.prisma.plan.findMany({
+    const plans = await this.prisma.plan.findMany({
       where: {
         projectId,
         project: { userId }
@@ -434,10 +445,12 @@ export class PlanService {
         }
       }
     });
+    
+    return plans.map(plan => this.transformPlanResponse(plan));
   }
 
   async getPlansForObjective(objectiveId: number, userId: number): Promise<PlanResponse[]> {
-    return this.prisma.plan.findMany({
+    const plans = await this.prisma.plan.findMany({
       where: {
         objectiveId,
         objective: { userId }
@@ -479,5 +492,7 @@ export class PlanService {
         }
       }
     });
+    
+    return plans.map(plan => this.transformPlanResponse(plan));
   }
 }
