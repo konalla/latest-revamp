@@ -1,0 +1,149 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                         Int      @id @default(autoincrement())
+  username                   String
+  name                       String
+  email                      String   @unique
+  password                   String
+  role                       String   @default("user")
+
+  // Profile Information
+  phone_number               String?
+  company_name               String?
+  website                    String?
+  profile_photo_url          String?
+  job_title                  String?
+  industry                   String?
+  bio                        String?
+  timezone                   String?
+
+  // Social Links
+  linkedin_url               String?
+  website_url                String?
+  secondary_social_url       String?
+  secondary_social_type      String?
+
+  // Preferences & Settings
+  preferred_working_hours    Json     @default("{}")
+  communication_preference   String?
+  primary_work_focus         String?
+  profile_completion_percentage Int   @default(20)
+  last_profile_update        DateTime @default(now())
+
+  // Credits System
+  credits                    Int      @default(100)
+  credit_refresh_period      String   @default("monthly")
+  credit_refresh_amount      Int      @default(100)
+  last_credit_refresh        DateTime @default(now())
+
+  created_at                 DateTime @default(now())
+  
+  // Relations
+  projects                   Project[]
+  objectives                 Objective[]
+  okrs                       Okr[]
+  tasks                      Task[]
+}
+
+model Project {
+  id          Int      @id @default(autoincrement())
+  name        String
+  description String?
+  status      String?
+  color       String   @default("#4A6CF7")
+  icon        String?
+  startDate   DateTime @default(now())
+  endDate     DateTime?
+  createdAt   DateTime @default(now())
+  userId      Int
+  is_private  Boolean  @default(false)
+  visibility  String   @default("private")
+  
+  // Relations
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  objectives  Objective[]
+  tasks       Task[]
+}
+
+model Objective {
+  id          Int      @id @default(autoincrement())
+  name        String
+  description String?
+  status      String   @default("active")
+  color       String   @default("#4A6CF7")
+  start_date  DateTime @default(now())
+  end_date    DateTime?
+  created_at  DateTime @default(now())
+  position    Int      @default(0)
+
+  // Relations
+  userId      Int
+  projectId   Int
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  okrs        Okr[]
+  tasks       Task[]
+}
+
+model Okr {
+  id              Int       @id @default(autoincrement())
+  title           String
+  description     String?
+  status          String    @default("notStarted")
+  targetValue     Float
+  currentValue    Float     @default(0)
+  startDate       DateTime  @default(now())
+  endDate         DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  userId          Int
+  objectiveId     Int
+  position        Int       @default(0)
+  confidenceScore Int       @default(3)
+  keyResults      Json      @default("[]")
+  progressHistory Json      @default("[]")
+
+  // Relations
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  objective       Objective @relation(fields: [objectiveId], references: [id], onDelete: Cascade)
+  tasks           Task[]
+}
+
+model Task {
+  id                     Int       @id @default(autoincrement())
+  title                  String
+  description            String?
+  category               String
+  duration               Int
+  priority               String
+  position               Int
+  createdAt              DateTime  @default(now())
+  completed              Boolean   @default(false)
+
+  // Eisenhower Matrix
+  importance             Boolean   @default(false)
+  urgency                Boolean   @default(false)
+
+  // Relations
+  userId                 Int
+  projectId              Int?
+  objectiveId            Int?
+  okrId                  Int?
+
+  user                  User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project               Project?   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  objective             Objective? @relation(fields: [objectiveId], references: [id], onDelete: Cascade)
+  okr                   Okr?       @relation(fields: [okrId], references: [id], onDelete: Cascade)
+}
