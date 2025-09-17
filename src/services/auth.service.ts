@@ -50,20 +50,25 @@ const register = async (data: RegisterRequest): Promise<AuthResponse> => {
 };
 
 const login = async (data: LoginRequest): Promise<AuthResponse> => {
-  // Find user by email
-  const user = await prisma.user.findUnique({
-    where: { email: data.email }
+  // Find user by email or username
+  const user = await prisma.user.findFirst({
+    where: {
+      OR: [
+        { email: data.identifier },
+        { username: data.identifier }
+      ]
+    }
   });
 
   if (!user) {
-    throw new Error("Invalid email or password");
+    throw new Error("Invalid credentials");
   }
 
   // Verify password
   const isPasswordValid = await bcrypt.compare(data.password, user.password);
 
   if (!isPasswordValid) {
-    throw new Error("Invalid email or password");
+    throw new Error("Invalid credentials");
   }
 
   // Generate JWT token

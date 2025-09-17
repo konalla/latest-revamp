@@ -35,6 +35,15 @@ export interface ProjectResponse {
   userId: number;
   is_private: boolean;
   visibility: string;
+  plans?: {
+    id: number;
+    name: string;
+    status: string;
+    objective: {
+      id: number;
+      name: string;
+    };
+  }[];
 }
 
 export interface ProjectListResponse {

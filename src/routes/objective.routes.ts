@@ -19,6 +19,12 @@ router.get("/project/:projectId", objectiveController.getObjectivesByProject);
 // GET /api/objectives/:id - Get specific objective by ID (only if it belongs to logged-in user)
 router.get("/:id", objectiveController.getObjective);
 
+// GET /api/objectives/:id/tasks - Get all tasks for a specific objective
+router.get("/:id/tasks", objectiveController.getObjectiveTasks);
+
+// GET /api/objectives/:id/okrs - Get all OKRs for a specific objective
+router.get("/:id/okrs", objectiveController.getObjectiveOkrs);
+
 // POST /api/objectives - Create a new objective for logged-in user
 router.post("/", objectiveController.createObjective);
 

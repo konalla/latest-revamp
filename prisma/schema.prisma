@@ -13,7 +13,7 @@ datasource db {
 
 model User {
   id                         Int      @id @default(autoincrement())
-  username                   String
+  username                   String   @unique
   name                       String
   email                      String   @unique
   password                   String
@@ -73,8 +73,9 @@ model Project {
   
   // Relations
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  objectives  Objective[]
+  plans       Plan[]
   tasks       Task[]
+  objectives  Objective[]
 }
 
 model Objective {
@@ -90,11 +91,31 @@ model Objective {
 
   // Relations
   userId      Int
-  projectId   Int
+  projectId   Int?
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project     Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  plans       Plan[]
   okrs        Okr[]
   tasks       Task[]
+}
+
+model Plan {
+  id          Int      @id @default(autoincrement())
+  name        String
+  description String?
+  status      String   @default("active")
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+  
+  // Relations
+  projectId   Int
+  objectiveId Int
+  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  objective   Objective @relation(fields: [objectiveId], references: [id], onDelete: Cascade)
+  okrs        Okr[]
+  tasks       Task[]
+
+  @@unique([projectId, objectiveId])
 }
 
 model Okr {
@@ -109,7 +130,8 @@ model Okr {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
   userId          Int
-  objectiveId     Int
+  objectiveId     Int?      // Made optional
+  planId          Int?      // Added optional Plan reference
   position        Int       @default(0)
   confidenceScore Int       @default(3)
   keyResults      Json      @default("[]")
@@ -117,7 +139,8 @@ model Okr {
 
   // Relations
   user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  objective       Objective @relation(fields: [objectiveId], references: [id], onDelete: Cascade)
+  objective       Objective? @relation(fields: [objectiveId], references: [id], onDelete: Cascade)
+  plan            Plan?     @relation(fields: [planId], references: [id], onDelete: Cascade)
   tasks           Task[]
 }
 
@@ -141,9 +164,11 @@ model Task {
   projectId              Int?
   objectiveId            Int?
   okrId                  Int?
+  planId                 Int?      // Added optional Plan reference
 
   user                  User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   project               Project?   @relation(fields: [projectId], references: [id], onDelete: Cascade)
   objective             Objective? @relation(fields: [objectiveId], references: [id], onDelete: Cascade)
   okr                   Okr?       @relation(fields: [okrId], references: [id], onDelete: Cascade)
+  plan                  Plan?      @relation(fields: [planId], references: [id], onDelete: Cascade)
 }
