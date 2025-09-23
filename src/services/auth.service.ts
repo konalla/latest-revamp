@@ -91,7 +91,18 @@ const login = async (data: LoginRequest): Promise<AuthResponse> => {
   };
 };
 
+const logout = async (): Promise<{ message: string }> => {
+  // Since JWT tokens are stateless, logout is primarily handled on the client side
+  // by removing the token from storage. This endpoint provides a confirmation
+  // and can be used for logging purposes or future token blacklisting features.
+  
+  return {
+    message: "Logout successful"
+  };
+};
+
 export {
   register,
   login,
+  logout,
 };

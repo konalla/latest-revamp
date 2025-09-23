@@ -345,6 +345,70 @@ const toggleTaskCompletion = async (req: Request, res: Response) => {
   }
 };
 
+const getArchivedTasks = async (req: Request, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: "User not authenticated" });
+    }
+
+    const queryParams: TaskQueryParams = {
+      page: req.query.page ? parseInt(req.query.page as string) : 1,
+      limit: req.query.limit ? parseInt(req.query.limit as string) : 10,
+      ...(req.query.priority && { priority: req.query.priority as string }),
+      ...(req.query.category && { category: req.query.category as string }),
+      ...(req.query.importance && { importance: req.query.importance === 'true' }),
+      ...(req.query.urgency && { urgency: req.query.urgency === 'true' }),
+      ...(req.query.search && { search: req.query.search as string }),
+      ...(req.query.projectId && { projectId: parseInt(req.query.projectId as string) }),
+      ...(req.query.objectiveId && { objectiveId: parseInt(req.query.objectiveId as string) }),
+      ...(req.query.okrId && { okrId: parseInt(req.query.okrId as string) }),
+      ...(req.query.sortBy && { sortBy: req.query.sortBy as 'title' | 'createdAt' | 'priority' | 'position' | 'duration' | 'category' }),
+      ...(req.query.sortOrder && { sortOrder: req.query.sortOrder as 'asc' | 'desc' }),
+    };
+
+    const result = await taskService.getArchivedTasks(req.user.userId, queryParams);
+    
+    res.json({
+      message: "Archived tasks retrieved successfully",
+      data: result,
+      pagination: {
+        page: queryParams.page,
+        limit: queryParams.limit,
+        total: result.total,
+        totalPages: Math.ceil(result.total / queryParams.limit!),
+      },
+    });
+  } catch (error: any) {
+    res.status(400).json({ message: error.message });
+  }
+};
+
+const restoreTask = async (req: Request, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: "User not authenticated" });
+    }
+
+    const taskId = parseInt(req.params.id!);
+    if (isNaN(taskId)) {
+      return res.status(400).json({ message: "Invalid task ID" });
+    }
+
+    const task = await taskService.restoreTask(taskId, req.user.userId);
+    
+    if (!task) {
+      return res.status(404).json({ message: "Task not found" });
+    }
+
+    res.json({
+      message: "Task restored successfully",
+      task,
+    });
+  } catch (error: any) {
+    res.status(400).json({ message: error.message });
+  }
+};
+
 const getTaskStats = async (req: Request, res: Response) => {
   try {
     if (!req.user) {
@@ -389,5 +453,7 @@ export {
   deleteTask,
   updateTaskPositions,
   toggleTaskCompletion,
+  getArchivedTasks,
+  restoreTask,
   getTaskStats,
 };

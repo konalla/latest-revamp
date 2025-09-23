@@ -13,6 +13,9 @@ router.get("/", taskController.getAllTasks);
 // GET /api/tasks/stats - Get task statistics for logged-in user
 router.get("/stats", taskController.getTaskStats);
 
+// GET /api/tasks/archived - Get archived (completed) tasks for logged-in user
+router.get("/archived", taskController.getArchivedTasks);
+
 // GET /api/tasks/project/:projectId - Get all tasks for a specific project
 router.get("/project/:projectId", taskController.getTasksByProject);
 
@@ -27,6 +30,9 @@ router.get("/:id", taskController.getTask);
 
 // POST /api/tasks - Create a new task for logged-in user
 router.post("/", taskController.createTask);
+
+// PATCH /api/tasks/:id - Restore task (set completed: false)
+router.patch("/:id", taskController.restoreTask);
 
 // PUT /api/tasks/:id - Update task by ID (only if it belongs to logged-in user)
 router.put("/:id", taskController.updateTask);

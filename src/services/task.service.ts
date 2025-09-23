@@ -343,6 +343,43 @@ const toggleTaskCompletion = async (id: number, userId: number) => {
   });
 };
 
+const getArchivedTasks = async (userId: number, queryParams: TaskQueryParams = {}) => {
+  return getTasksByUser(userId, { ...queryParams, completed: true });
+};
+
+const restoreTask = async (id: number, userId: number) => {
+  // First check if the task belongs to the user
+  const existingTask = await prisma.task.findFirst({
+    where: { 
+      id, 
+      userId,
+    },
+  });
+
+  if (!existingTask) {
+    return null;
+  }
+
+  return prisma.task.update({
+    where: { id },
+    data: { completed: false },
+    include: {
+      user: {
+        select: { id: true, name: true, email: true },
+      },
+      project: {
+        select: { id: true, name: true },
+      },
+      objective: {
+        select: { id: true, name: true },
+      },
+      okr: {
+        select: { id: true, title: true },
+      },
+    },
+  });
+};
+
 const getTaskStats = async (userId: number, projectId?: number, objectiveId?: number, okrId?: number) => {
   const whereClause: any = {
     userId,
@@ -394,5 +431,7 @@ export {
   deleteTask,
   updateTaskPositions,
   toggleTaskCompletion,
+  getArchivedTasks,
+  restoreTask,
   getTaskStats,
 };

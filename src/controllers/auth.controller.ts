@@ -20,7 +20,17 @@ const login = async (req: Request<{}, {}, LoginRequest>, res: Response) => {
   }
 };
 
+const logout = async (req: Request, res: Response) => {
+  try {
+    const result = await authService.logout();
+    res.status(200).json(result);
+  } catch (error: any) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 export {
   register,
   login,
+  logout,
 };
