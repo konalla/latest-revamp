@@ -15,7 +15,11 @@ const verifyObjectiveOwnership = async (objectiveId: number, userId: number) => 
     where: { 
       id: objectiveId, 
       userId,
-      project: { userId } // Also verify project ownership
+      // Only verify project ownership if the objective is associated with a project
+      OR: [
+        { projectId: null }, // Objective not associated with any project
+        { project: { userId } } // Objective associated with a project owned by the user
+      ]
     },
   });
   return !!objective;
