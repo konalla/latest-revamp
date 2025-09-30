@@ -41,6 +41,16 @@ model User {
   profile_completion_percentage Int   @default(20)
   last_profile_update        DateTime @default(now())
 
+  // Work Duration Preferences (AI Recommendation System)
+  deep_work_start_time       String   @default("09:00")
+  deep_work_end_time         String   @default("12:00")
+  creative_work_start_time   String   @default("12:00")
+  creative_work_end_time     String   @default("15:00")
+  reflective_work_start_time String   @default("15:00")
+  reflective_work_end_time   String   @default("18:00")
+  executive_work_start_time  String   @default("18:00")
+  executive_work_end_time    String   @default("21:00")
+
   // Credits System
   credits                    Int      @default(100)
   credit_refresh_period      String   @default("monthly")
@@ -153,6 +163,7 @@ model Task {
   position               Int
   createdAt              DateTime  @default(now())
   completed              Boolean   @default(false)
+  dueDate                DateTime?
 
   // Eisenhower Matrix
   importance             Boolean   @default(false)
@@ -170,4 +181,21 @@ model Task {
   objective             Objective? @relation(fields: [objectiveId], references: [id], onDelete: Cascade)
   okr                   Okr?       @relation(fields: [okrId], references: [id], onDelete: Cascade)
   plan                  Plan?      @relation(fields: [planId], references: [id], onDelete: Cascade)
+  
+  // AI Recommendation relation
+  aiRecommendation       AIRecommendation?
+}
+
+model AIRecommendation {
+  id                     Int       @id @default(autoincrement())
+  taskId                 Int       @unique
+  category               String    // DEEP_WORK, CREATIVE_WORK, REFLECTIVE_WORK, EXECUTIVE_WORK
+  recommendedTime        String    // Time in HH:MM format
+  confidence             Float     // 0.0 to 1.0
+  reasoning              String?   // Optional reasoning text
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  // Relations
+  task                   Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
 }

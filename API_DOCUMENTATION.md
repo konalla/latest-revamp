@@ -152,6 +152,28 @@ curl -X POST http://localhost:3000/api/auth/login \
   }'
 ```
 
+### POST /api/auth/logout
+Logout the authenticated user.
+
+**Authentication:** Required
+
+**Request Body:** None
+
+**Response:**
+```json
+{
+  "message": "Logout successful"
+}
+```
+
+**Curl Example:**
+```bash
+curl -X POST http://localhost:3000/api/auth/logout \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+**Note:** Since JWT tokens are stateless, logout is primarily handled on the client side by removing the token from storage. This endpoint provides a confirmation and can be used for logging purposes or future token blacklisting features.
+
 ---
 
 ## 3. User Management APIs
@@ -675,6 +697,70 @@ Get specific objective by ID.
 **Curl Example:**
 ```bash
 curl -X GET http://localhost:3000/api/objectives/1 \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+### GET /api/objectives/:id/tasks
+Get all tasks for a specific objective.
+
+**Authentication:** Required
+
+**Query Parameters:**
+- `page` (optional): Page number (default: 1)
+- `limit` (optional): Items per page (default: 10)
+- `completed` (optional): Filter by completion status (true/false)
+- `priority` (optional): Filter by priority
+- `category` (optional): Filter by category
+- `importance` (optional): Filter by importance (true/false)
+- `urgency` (optional): Filter by urgency (true/false)
+- `search` (optional): Search term
+- `sortBy` (optional): Sort field (title, createdAt, priority, duration, category, position)
+- `sortOrder` (optional): Sort direction (asc/desc)
+
+**Response:**
+```json
+{
+  "message": "Tasks retrieved successfully",
+  "data": {
+    "tasks": [
+      {
+        "id": 1,
+        "title": "Task Title",
+        "description": "Task Description",
+        "category": "development",
+        "priority": "high",
+        "duration": 120,
+        "completed": false,
+        "importance": true,
+        "urgency": false,
+        "position": 1,
+        "createdAt": "2025-01-15T10:30:00.000Z",
+        "objectiveId": 3,
+        "projectId": null,
+        "okrId": null,
+        "planId": null
+      }
+    ],
+    "total": 25
+  },
+  "pagination": {
+    "page": 1,
+    "limit": 10,
+    "total": 25,
+    "totalPages": 3
+  }
+}
+```
+
+**Curl Example:**
+```bash
+curl -X GET http://localhost:3000/api/objectives/3/tasks \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+**Curl Example with Query Parameters:**
+```bash
+curl -X GET "http://localhost:3000/api/objectives/3/tasks?page=1&limit=20&completed=false&priority=high&sortBy=priority&sortOrder=desc" \
   -H "Authorization: Bearer YOUR_JWT_TOKEN"
 ```
 
@@ -1371,7 +1457,7 @@ curl -X PUT http://localhost:3000/api/tasks/positions \
 ```
 
 ### DELETE /api/tasks/:id
-Delete task by ID.
+Permanently delete task by ID.
 
 **Authentication:** Required
 
@@ -1383,11 +1469,40 @@ curl -X DELETE http://localhost:3000/api/tasks/1 \
   -H "Authorization: Bearer YOUR_JWT_TOKEN"
 ```
 
+### GET /api/tasks/archived
+Fetches completed tasks (archived tasks).
+
+**Authentication:** Required
+
+**Query Parameters:**
+- `page`, `limit`, `priority`, `category`, `importance`, `urgency`, `search`, `projectId`, `objectiveId`, `okrId`, `sortBy`, `sortOrder`
+
+**Response:** List of completed tasks with pagination
+
+**Curl Example:**
+```bash
+curl -X GET "http://localhost:3000/api/tasks/archived?page=1&limit=10&priority=high" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+### PATCH /api/tasks/:id
+Restore task (set completed: false).
+
+**Authentication:** Required
+
+**Response:** Restored task object
+
+**Curl Example:**
+```bash
+curl -X PATCH http://localhost:3000/api/tasks/1 \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
 ---
 
 ## Summary
 
-**Total API Endpoints: 42**
+**Total API Endpoints: 45**
 
 ### Breakdown by Category:
 1. **Health Check**: 1 endpoint
@@ -1397,16 +1512,17 @@ curl -X DELETE http://localhost:3000/api/tasks/1 \
 5. **Objective Management**: 8 endpoints
 6. **Plan Management**: 8 endpoints
 7. **OKR Management**: 9 endpoints
-8. **Task Management**: 10 endpoints
+8. **Task Management**: 13 endpoints
 
 ### Authentication Summary:
 - **Public endpoints**: 7 (health, auth, basic user operations)
-- **Protected endpoints**: 35 (require JWT token)
+- **Protected endpoints**: 38 (require JWT token)
 
 ### HTTP Methods Used:
-- **GET**: 25 endpoints (data retrieval)
+- **GET**: 26 endpoints (data retrieval)
 - **POST**: 7 endpoints (resource creation)
 - **PUT**: 9 endpoints (resource updates)
-- **DELETE**: 6 endpoints (resource deletion)
+- **PATCH**: 1 endpoint (partial updates)
+- **DELETE**: 2 endpoints (resource deletion)
 
 All protected endpoints require a valid JWT token in the Authorization header. Make sure to include `Bearer <token>` in your requests.
