@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 import * as objectiveService from "../services/objective.service.js";
-import * as taskService from "../services/task.service.js";
+import { taskService } from "../services/task.service.js";
 import * as okrService from "../services/okr.service.js";
 import type { CreateObjectiveRequest, UpdateObjectiveRequest, ObjectiveQueryParams } from "../types/objective.types.js";
 import type { TaskQueryParams } from "../types/task.types.js";

@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import * as taskService from "../services/task.service.js";
+import { taskService } from "../services/task.service.js";
 import type { CreateTaskRequest, UpdateTaskRequest, TaskQueryParams } from "../types/task.types.js";
 
 /**
