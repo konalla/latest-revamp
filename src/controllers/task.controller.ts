@@ -9,6 +9,7 @@ import type { CreateTaskRequest, UpdateTaskRequest, TaskQueryParams } from "../t
  * - keyResultId → okrId (field was renamed)
  * - isHighLeverage (removed from schema)
  * - willMoveKRForward (removed from schema)
+ * - dueDate: converts date-only strings to proper DateTime format
  */
 const sanitizeTaskData = (body: any) => {
   const requestBody = { ...body };
@@ -17,6 +18,25 @@ const sanitizeTaskData = (body: any) => {
   if ('keyResultId' in requestBody) {
     requestBody.okrId = requestBody.keyResultId;
     delete requestBody.keyResultId;
+  }
+  
+  // Convert dueDate from date-only string to proper DateTime format
+  if (requestBody.dueDate && typeof requestBody.dueDate === 'string') {
+    // Check if it's a date-only string (YYYY-MM-DD format)
+    const dateOnlyRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (dateOnlyRegex.test(requestBody.dueDate)) {
+      // Convert to ISO DateTime format (end of day in UTC)
+      requestBody.dueDate = new Date(requestBody.dueDate + 'T23:59:59.999Z');
+    } else {
+      // Try to parse as Date object
+      const parsedDate = new Date(requestBody.dueDate);
+      if (isNaN(parsedDate.getTime())) {
+        // Invalid date format, remove it
+        delete requestBody.dueDate;
+      } else {
+        requestBody.dueDate = parsedDate;
+      }
+    }
   }
   
   // Remove legacy fields that are no longer in the schema
