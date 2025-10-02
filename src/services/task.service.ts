@@ -9,7 +9,7 @@ export class TaskService {
    */
   async createTask(taskData: CreateTaskRequest, userId: number): Promise<TaskResponse> {
     const task = await prisma.task.create({
-      data: {
+    data: {
         ...taskData,
       userId,
     },
@@ -331,7 +331,7 @@ export class TaskService {
               },
             },
           },
-        },
+      },
     },
   });
 
@@ -401,7 +401,7 @@ export class TaskService {
               },
             },
           },
-        },
+      },
     },
   });
 
@@ -518,7 +518,7 @@ export class TaskService {
               },
             },
           },
-        },
+      },
     },
   });
 
@@ -595,7 +595,7 @@ export class TaskService {
               },
             },
           },
-        },
+      },
     },
   });
 

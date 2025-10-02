@@ -500,7 +500,14 @@ const getNowRecommendedTask = async (req: Request, res: Response) => {
       return res.status(401).json({ error: "User not authenticated" });
     }
 
-    const timezone = (req.query.timezone as string) || Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const timezone = req.query.timezone as string;
+    
+    if (!timezone) {
+      return res.status(400).json({
+        error: "User timezone required",
+        details: "Please provide your timezone (e.g., America/Los_Angeles, Europe/London)"
+      });
+    }
 
     const result = await taskService.getNowRecommendedTask(userId, timezone);
 

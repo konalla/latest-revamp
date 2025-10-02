@@ -713,12 +713,12 @@ Content-Type: application/json
 
 **Request:**
 ```http
-GET /api/ai-recommendations/now?timezone=America/New_York
+GET /api/ai-recommendations/now?timezone=America/Los_Angeles
 Authorization: Bearer <jwt_token>
 ```
 
 **Query Parameters:**
-- `timezone` (optional): User's timezone for current time calculation (default: UTC)
+- `timezone` (required): User's timezone for current time calculation (e.g., "America/Los_Angeles", "Europe/London")
 
 **Response (Perfect Timing - Current Task):**
 ```http
