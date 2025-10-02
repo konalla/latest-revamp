@@ -5,6 +5,7 @@ import {
   generateBulkTaskRecommendations,
   getTaskRecommendation,
   getTodayTasksWithAIRecommendations,
+  getNowRecommendedTask,
   getUserWorkPreferences,
   updateUserWorkPreferences,
   getTasksWithAIRecommendations
@@ -63,5 +64,12 @@ router.get("/tasks", getTasksWithAIRecommendations);
  * @access Private
  */
 router.get("/today-tasks", getTodayTasksWithAIRecommendations);
+
+/**
+ * @route GET /api/ai-recommendations/now
+ * @desc Get task recommended for RIGHT NOW based on current time and AI recommendations
+ * @access Private
+ */
+router.get("/now", getNowRecommendedTask);
 
 export default router;

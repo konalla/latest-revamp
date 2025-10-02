@@ -705,7 +705,112 @@ Content-Type: application/json
 }
 ```
 
-### 6. Get User Work Preferences
+### 6. Get Task Recommended for RIGHT NOW
+
+**Endpoint:** `GET /api/ai-recommendations/now`
+
+**Description:** Get task that user should work on RIGHT NOW based on current time and AI recommendations
+
+**Request:**
+```http
+GET /api/ai-recommendations/now?timezone=America/New_York
+Authorization: Bearer <jwt_token>
+```
+
+**Query Parameters:**
+- `timezone` (optional): User's timezone for current time calculation (default: UTC)
+
+**Response (Perfect Timing - Current Task):**
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "success": true,
+  "data": {
+    "task": {
+      "id": 123,
+      "title": "Code review for authentication",
+      "description": "Review team's pull requests for security",
+      "duration": 90,
+      "priority": "high",
+      "importance": true,
+      "urgency": true,
+      "dueDate": "2024-01-15T18:00:00Z",
+      "aiRecommendation": {
+        "id": 1,
+        "taskId": 123,
+        "category": "Deep Work",
+        "recommendedTime": "09:15",
+        "confidence": 0.92,
+        "reasoning": "Complex analytical work requiring focus",
+        "createdAt": "2024-01-15T08:00:00Z",
+        "updatedAt": "2024-01-15T08:00:00Z"
+      },
+      "aiRecommendationStatus": "available",
+      "rank": 1
+    },
+    "nextRecommendation": null,
+    "currentTime": "09:15:32",
+    "reasoning": "Perfect timing! This task is recommended for 09:15, and it's deep work that aligns with your current focus window."
+  }
+}
+```
+
+**Response (Next Recommendation):**
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "success": true,
+  "data": {
+    "task": null,
+    "nextRecommendation": {
+      "id": 124,
+      "title": "Design user interface",
+      "description": "Create wireframes for new feature",
+      "duration": 120,
+      "priority": "medium",
+      "importance": true,
+      "urgency": false,
+      "dueDate": "2024-01-15T20:00:00Z",
+      "aiRecommendation": {
+        "id": 2,
+        "taskId": 124,
+        "category": "Creative Work",
+        "recommendedTime": "14:00",
+        "confidence": 0.88,
+        "reasoning": "Creative design work benefits from afternoon energy",
+        "createdAt": "2024-01-15T08:30:00Z",
+        "updatedAt": "2024-01-15T08:30:00Z"
+      },
+      "aiRecommendationStatus": "available",
+      "rank": 2
+    },
+    "currentTime": "10:30:45",
+    "reasoning": "No tasks recommended for right now (10:30). Next recommendation is \"Design user interface\" at 14:00 (in 210 minutes)."
+  }
+}
+```
+
+**Response (No Tasks Today):**
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "success": true,
+  "data": {
+    "task": null,
+    "nextRecommendation": null,
+    "currentTime": "15:30:20",
+    "reasoning": "No tasks found for today"
+  }
+}
+```
+
+### 7. Get User Work Preferences
 
 **Endpoint:** `GET /api/ai-recommendations/user/preferences`
 

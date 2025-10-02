@@ -43,6 +43,10 @@ export interface TaskAnalysis {
   urgency: boolean;
   dueDate?: Date;
   projectName?: string;
+  objectiveName?: string;
+  objectiveDescription?: string;
+  okrTitle?: string;
+  okrDescription?: string;
 }
 
 export class AIRecommendationService {
@@ -75,7 +79,21 @@ export class AIRecommendationService {
       const prompt = this.createDynamicPrompt(task, userPreferences, userTaskHistory);
       
       // Get AI recommendation
-      const formattedPrompt = await prompt.format({});
+      const formattedPrompt = await prompt.format({
+        title: task.title,
+        description: task.description || "",
+        duration: task.duration,
+        importance: task.importance,
+        urgency: task.urgency,
+        projectName: task.projectName || "",
+        objectiveName: task.objectiveName || "",
+        objectiveDescription: task.objectiveDescription || "",
+        okrTitle: task.okrTitle || "",
+        okrDescription: task.okrDescription || "",
+        ...this.getCategoryTimeSlots(userPreferences),
+        userHistory: JSON.stringify(userTaskHistory, null, 2),
+        formatInstructions: this.parser.getFormatInstructions()
+      });
       const response = await this.llm.invoke(formattedPrompt);
       
       // Parse the structured response
@@ -112,6 +130,14 @@ TASK ANALYSIS:
 - Importance: {importance}
 - Urgency: {urgency}
 - Project: {projectName}
+
+OBJECTIVE CONTEXT:
+- Objective: {objectiveName}
+- Objective Description: {objectiveDescription}
+
+OKR CONTEXT:
+- OKR Title: {okrTitle}
+- OKR Description: {okrDescription}
 
 USER WORK PREFERENCES:
 - Deep Work: {deepWorkStartTime} - {deepWorkEndTime}
@@ -218,6 +244,10 @@ RECOMMENDATION GUIDELINES:
         "importance",
         "urgency",
         "projectName",
+        "objectiveName",
+        "objectiveDescription",
+        "okrTitle",
+        "okrDescription",
         "deepWorkStartTime",
         "deepWorkEndTime",
         "creativeWorkStartTime",

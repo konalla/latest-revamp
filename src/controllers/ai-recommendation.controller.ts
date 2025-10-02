@@ -490,11 +490,39 @@ const getTasksWithAIRecommendations = async (req: Request, res: Response) => {
   }
 };
 
+/**
+ * Get task recommended for RIGHT NOW based on current time and AI recommendations
+ */
+const getNowRecommendedTask = async (req: Request, res: Response) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ error: "User not authenticated" });
+    }
+
+    const timezone = (req.query.timezone as string) || Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+    const result = await taskService.getNowRecommendedTask(userId, timezone);
+
+    res.json({
+      success: true,
+      data: result
+    });
+  } catch (error) {
+    console.error("Error fetching now recommended task:", error);
+    res.status(500).json({
+      error: "Failed to get now recommended task",
+      details: error instanceof Error ? error.message : "Unknown error"
+    });
+  }
+};
+
 export {
   generateTaskRecommendation,
   generateBulkTaskRecommendations,
   getTaskRecommendation,
   getTodayTasksWithAIRecommendations,
+  getNowRecommendedTask,
   getUserWorkPreferences,
   updateUserWorkPreferences,
   getTasksWithAIRecommendations

@@ -79,6 +79,18 @@ export class TaskService {
         include: {
           project: {
             select: { name: true }
+          },
+          objective: {
+            select: { 
+              name: true,
+              description: true
+            }
+          },
+          okr: {
+            select: { 
+              title: true,
+              description: true
+            }
           }
         }
       } as any);
@@ -96,7 +108,11 @@ export class TaskService {
         importance: task.importance,
         urgency: task.urgency,
         dueDate: (task as any).dueDate,
-        projectName: (task as any).project?.name || ""
+        projectName: (task as any).project?.name || "",
+        objectiveName: (task as any).objective?.name || "",
+        objectiveDescription: (task as any).objective?.description || "",
+        okrTitle: (task as any).okr?.title || "",
+        okrDescription: (task as any).okr?.description || ""
       };
 
       const recommendation = await aiRecommendationService.generateTaskRecommendation(
@@ -105,9 +121,18 @@ export class TaskService {
         userId
       );
 
-      // Create AI recommendation in separate table
-      await (prisma as any).aIRecommendation.create({
-        data: {
+      // Update existing AI recommendation or create new one
+      await (prisma as any).aIRecommendation.upsert({
+        where: {
+          taskId: task.id
+        },
+        update: {
+          category: recommendation.category,
+          recommendedTime: recommendation.recommendedTime,
+          confidence: recommendation.confidence,
+          reasoning: recommendation.reasoning
+        },
+        create: {
           taskId: task.id,
           category: recommendation.category,
           recommendedTime: recommendation.recommendedTime,
@@ -758,6 +783,143 @@ export class TaskService {
       notImportantUrgent,
       notImportantNotUrgent,
     };
+  }
+
+  /**
+   * Get task recommended for RIGHT NOW based on current time and AI recommendations
+   */
+  async getNowRecommendedTask(userId: number, timezone: string): Promise<{
+    task: TodayTaskResponse | null;
+    nextRecommendation: TodayTaskResponse | null;
+    currentTime: string;
+    reasoning: string;
+  }> {
+    try {
+      // Use the provided timezone directly (controller handles auto-detection)
+      const actualTimezone = timezone;
+      
+      // Get current time in user's timezone using system methods
+      const now = new Date();
+      
+      // Convert to user's timezone
+      const userTime = new Intl.DateTimeFormat('en-CA', {
+        timeZone: actualTimezone,
+        hour12: false,
+        hour: '2-digit',
+        minute: '2-digit'
+      }).format(now);
+      
+      const timeOnly: string = userTime;
+      
+      // Get today's tasks with AI recommendations
+      const todayTasks = await this.getTodayTasksWithAIRecommendations(userId, timezone);
+      
+      if (!todayTasks.tasks.length) {
+        return {
+          task: null,
+          nextRecommendation: null,
+          currentTime: timeOnly,
+          reasoning: "No tasks found for today"
+        };
+      }
+
+      const TOLERANCE_MINUTES = 15;
+      const currentMinutes = this.parseTimeToMinutes(timeOnly);
+      
+      // Find tasks where AI recommended time matches current time (±15min tolerance)
+      const matchingTasks = todayTasks.tasks.filter(task => {
+        if (!task.aiRecommendation) return false;
+        
+        const recommendedMinutes = this.parseTimeToMinutes(task.aiRecommendation.recommendedTime);
+        const timeDiff = Math.abs(currentMinutes - recommendedMinutes);
+        
+        return timeDiff <= TOLERANCE_MINUTES;
+      });
+
+      if (matchingTasks.length > 0) {
+        // Prioritize: urgency → importance → duration fit
+        const prioritizedTask = this.selectBestTaskForNow(matchingTasks, currentMinutes);
+        
+        return {
+          task: prioritizedTask,
+          nextRecommendation: null,
+          currentTime: timeOnly,
+          reasoning: `Perfect timing! This task is recommended for ${prioritizedTask?.aiRecommendation?.recommendedTime}, 
+                     and it's ${prioritizedTask?.aiRecommendation?.category.toLowerCase()} work that aligns with your current focus window.`
+        };
+      }
+
+      // Find next recommended task (closest future recommendation)
+      const futureTasks = todayTasks.tasks
+        .filter(task => task.aiRecommendation)
+        .map(task => ({
+          ...task,
+          recommendedMinutes: this.parseTimeToMinutes(task.aiRecommendation!.recommendedTime)
+        }))
+        .filter(task => task.recommendedMinutes > currentMinutes)
+        .sort((a, b) => a.recommendedMinutes - b.recommendedMinutes);
+
+      const nextTask = futureTasks[0] || null;
+
+      if (nextTask) {
+        const timeUntil = nextTask.recommendedMinutes - currentMinutes;
+        return {
+          task: null,
+          nextRecommendation: nextTask,
+          currentTime: timeOnly,
+          reasoning: `No tasks recommended for right now (${timeOnly}). Next recommendation is "${nextTask.title}" 
+                     at ${nextTask.aiRecommendation?.recommendedTime} (in ${timeUntil} minutes).`
+        };
+      }
+
+      return {
+        task: null,
+        nextRecommendation: null,
+        currentTime: timeOnly,
+        reasoning: `No upcoming task recommendations found. Current time: ${timeOnly}`
+      };
+
+    } catch (error) {
+      console.error("Error getting now recommended task:", error);
+      throw new Error("Failed to get now recommended task");
+    }
+  }
+
+  /**
+   * Select best task for current moment considering urgency, importance, and duration fit
+   */
+  private selectBestTaskForNow(tasks: TodayTaskResponse[], currentMinutes: number): TodayTaskResponse {
+    // Sort by priority: urgency → importance → closest to recommended time
+    const sorted = tasks.sort((a, b) => {
+      // 1. Urgent tasks first
+      if (a.urgency !== b.urgency) {
+        return b.urgency ? 1 : -1;
+      }
+      
+      // 2. Important tasks second
+      if (a.importance !== b.importance) {
+        return b.importance ? 1 : -1;
+      }
+      
+      // 3. Closest to recommended time
+      const aDiff = Math.abs((currentMinutes) - this.parseTimeToMinutes(a.aiRecommendation!.recommendedTime));
+      const bDiff = Math.abs((currentMinutes) - this.parseTimeToMinutes(b.aiRecommendation!.recommendedTime));
+      return aDiff - bDiff;
+    });
+    
+    if (sorted.length === 0) {
+      throw new Error("No tasks available for selection");
+    }
+    return sorted[0]!;
+  }
+
+  /**
+   * Format minutes to HH:MM string
+   */
+  private formatMinutesToTime(minutes: number): string {
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
   }
 }
 
