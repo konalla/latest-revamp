@@ -6,13 +6,23 @@ import { generateToken } from "../utils/jwt.utils.js";
 const SALT_ROUNDS = 10;
 
 const register = async (data: RegisterRequest): Promise<AuthResponse> => {
-  // Check if user already exists
-  const existingUser = await prisma.user.findUnique({
+  // Check if user with email already exists
+  const existingUserByEmail = await prisma.user.findUnique({
     where: { email: data.email }
   });
 
-  if (existingUser) {
-    throw new Error("User with this email already exists");
+  // Check if user with username already exists
+  const existingUserByUsername = await prisma.user.findUnique({
+    where: { username: data.username }
+  });
+
+  // Handle duplicate user scenarios
+  if (existingUserByEmail && existingUserByUsername) {
+    throw new Error("Both email and username already exist");
+  } else if (existingUserByEmail) {
+    throw new Error("Email already exists");
+  } else if (existingUserByUsername) {
+    throw new Error("Username already exists");
   }
 
   // Hash the password

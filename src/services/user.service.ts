@@ -6,6 +6,31 @@ const SALT_ROUNDS = 10;
 
 
 const createUser = async (data: any) => {
+  // Check for duplicates if email or username are provided
+  if (data.email || data.username) {
+    const existingUserByEmail = data.email ? await prisma.user.findUnique({
+      where: { email: data.email }
+    }) : null;
+
+    const existingUserByUsername = data.username ? await prisma.user.findUnique({
+      where: { username: data.username }
+    }) : null;
+
+    // Handle duplicate user scenarios
+    if (existingUserByEmail && existingUserByUsername) {
+      throw new Error("Both email and username already exist");
+    } else if (existingUserByEmail) {
+      throw new Error("Email already exists");
+    } else if (existingUserByUsername) {
+      throw new Error("Username already exists");
+    }
+  }
+
+  // Hash password if provided
+  if (data.password) {
+    data.password = await bcrypt.hash(data.password, SALT_ROUNDS);
+  }
+
   return prisma.user.create({ data });
 };
 
