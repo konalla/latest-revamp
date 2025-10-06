@@ -31,6 +31,9 @@ router.get("/:id", taskController.getTask);
 // POST /api/tasks - Create a new task for logged-in user
 router.post("/", taskController.createTask);
 
+// POST /api/tasks/bulk - Create multiple tasks in bulk with AI classification
+router.post("/bulk", taskController.createBulkTasks);
+
 // PATCH /api/tasks/:id - Restore task (set completed: false)
 router.patch("/:id", taskController.restoreTask);
 

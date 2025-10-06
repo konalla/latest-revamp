@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 import { taskService } from "../services/task.service.js";
-import type { CreateTaskRequest, UpdateTaskRequest, TaskQueryParams } from "../types/task.types.js";
+import type { CreateTaskRequest, UpdateTaskRequest, TaskQueryParams, BulkTaskRequest } from "../types/task.types.js";
 
 /**
  * Helper function to handle backward compatibility and filter legacy fields
@@ -70,6 +70,64 @@ const createTask = async (req: Request, res: Response) => {
       task,
     });
   } catch (error: any) {
+    res.status(400).json({ message: error.message });
+  }
+};
+
+const createBulkTasks = async (req: Request, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: "User not authenticated" });
+    }
+
+    const bulkData: BulkTaskRequest = req.body;
+    
+    // Validate required fields
+    if (!bulkData.tasks || !Array.isArray(bulkData.tasks) || bulkData.tasks.length === 0) {
+      return res.status(400).json({ message: "Tasks array is required and must not be empty" });
+    }
+
+    // Validate each task in the array
+    for (let i = 0; i < bulkData.tasks.length; i++) {
+      const task = bulkData.tasks[i];
+      if (!task || !task.title || !task.category || typeof task.duration !== 'number' || !task.priority || !task.dueDate) {
+        return res.status(400).json({ 
+          message: `Task ${i + 1} is missing required fields: title, category, duration, priority, and dueDate are required` 
+        });
+      }
+
+      // Validate duration is positive
+      if (task.duration <= 0) {
+        return res.status(400).json({ 
+          message: `Task ${i + 1} duration must be a positive number` 
+        });
+      }
+
+      // Validate dueDate is a valid date string
+      const dueDate = new Date(task.dueDate);
+      if (isNaN(dueDate.getTime())) {
+        return res.status(400).json({ 
+          message: `Task ${i + 1} dueDate must be a valid date string` 
+        });
+      }
+    }
+
+    // Validate optional IDs if provided
+    if (bulkData.projectId && (typeof bulkData.projectId !== 'number' || bulkData.projectId <= 0)) {
+      return res.status(400).json({ message: "projectId must be a positive number" });
+    }
+    if (bulkData.objectiveId && (typeof bulkData.objectiveId !== 'number' || bulkData.objectiveId <= 0)) {
+      return res.status(400).json({ message: "objectiveId must be a positive number" });
+    }
+    if (bulkData.okrId && (typeof bulkData.okrId !== 'number' || bulkData.okrId <= 0)) {
+      return res.status(400).json({ message: "okrId must be a positive number" });
+    }
+
+    const result = await taskService.createBulkTasks(bulkData, req.user.userId);
+    
+    res.status(201).json(result);
+  } catch (error: any) {
+    console.error("Error in createBulkTasks controller:", error);
     res.status(400).json({ message: error.message });
   }
 };
@@ -464,6 +522,7 @@ const getTaskStats = async (req: Request, res: Response) => {
 
 export {
   createTask,
+  createBulkTasks,
   getAllTasks,
   getTasksByProject,
   getTasksByObjective,

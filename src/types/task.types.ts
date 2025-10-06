@@ -196,3 +196,24 @@ export interface TodayTasksResponse {
   generatedRecommendations: number;
   failedRecommendations: number;
 }
+
+// Bulk task creation types
+export interface BulkTaskItem {
+  title: string;
+  category: string;
+  duration: number;
+  priority: string;
+  dueDate: string;
+}
+
+export interface BulkTaskRequest {
+  tasks: BulkTaskItem[];
+  projectId?: number;
+  objectiveId?: number;
+  okrId?: number;
+}
+
+export interface BulkTaskResponse {
+  tasks: TaskResponse[];
+  message: string;
+}
