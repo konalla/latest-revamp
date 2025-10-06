@@ -90,7 +90,14 @@ export class AIRecommendationService {
         objectiveDescription: task.objectiveDescription || "",
         okrTitle: task.okrTitle || "",
         okrDescription: task.okrDescription || "",
-        ...this.getCategoryTimeSlots(userPreferences),
+        deepWorkStartTime: userPreferences.deepWorkStartTime,
+        deepWorkEndTime: userPreferences.deepWorkEndTime,
+        creativeWorkStartTime: userPreferences.creativeWorkStartTime,
+        creativeWorkEndTime: userPreferences.creativeWorkEndTime,
+        reflectiveWorkStartTime: userPreferences.reflectiveWorkStartTime,
+        reflectiveWorkEndTime: userPreferences.reflectiveWorkEndTime,
+        executiveWorkStartTime: userPreferences.executiveWorkStartTime,
+        executiveWorkEndTime: userPreferences.executiveWorkEndTime,
         userHistory: JSON.stringify(userTaskHistory, null, 2),
         formatInstructions: this.parser.getFormatInstructions()
       });
