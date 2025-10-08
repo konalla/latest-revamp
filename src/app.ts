@@ -9,6 +9,7 @@ import planRoutes from "./routes/plan.routes.js";
 import okrRoutes from "./routes/okr.routes.js";
 import taskRoutes from "./routes/task.routes.js";
 import aiRecommendationRoutes from "./routes/ai-recommendation.routes.js";
+import userSettingsRoutes from "./routes/user-settings.routes.js";
 
 const app = express();
 
@@ -30,5 +31,6 @@ app.use("/api/plans", planRoutes);
 app.use("/api/okrs", okrRoutes);
 app.use("/api/tasks", taskRoutes);
 app.use("/api/ai-recommendations", aiRecommendationRoutes);
+app.use("/api/user-settings", userSettingsRoutes);
 
 export default app;

@@ -74,7 +74,7 @@ export class TaskService {
           // Create task data
           const taskData: CreateTaskRequest = {
             title: taskItem.title,
-            category: categoryMap[aiRecommendation.category] || taskItem.category,
+            category: taskItem.category || categoryMap[aiRecommendation.category] || "",
             duration: Math.max(taskItem.duration, 15), // Minimum 15 minutes
             priority: finalPriority,
             position: index,
