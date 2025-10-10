@@ -1,7 +1,8 @@
 import type { Request, Response } from "express";
 import * as userService from "../services/user.service.js";
+import type { CreateUserRequest } from "../types/user.types.js";
 
-const createUser = async (req: Request, res: Response) => {
+const createUser = async (req: Request<{}, {}, CreateUserRequest>, res: Response) => {
   try {
     const user = await userService.createUser(req.body);
     res.status(201).json(user);
@@ -53,7 +54,14 @@ const getCurrentUser = async (req: Request, res: Response) => {
     
     // Don't return password
     const { password, ...userWithoutPassword } = user;
-    res.json(userWithoutPassword);
+    
+    // Add default language for now
+    const response = {
+      ...userWithoutPassword,
+      language: "english"
+    };
+    
+    res.json(response);
   } catch (error: any) {
     res.status(400).json({ message: error.message });
   }
@@ -73,6 +81,44 @@ const changePassword = async (req: Request, res: Response) => {
   }
 };
 
+const uploadProfilePhoto = async (req: Request, res: Response) => {
+  try {
+    // req.user is available from JWT middleware
+    if (!req.user) {
+      return res.status(401).json({ 
+        success: false, 
+        message: "User not authenticated" 
+      });
+    }
+
+    // Check if file was uploaded
+    if (!req.file) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "No file uploaded" 
+      });
+    }
+
+    // Generate the photo URL path
+    const photoUrl = `/uploads/profile/${req.file.filename}`;
+    
+    // Update user profile photo URL in database
+    const updatedUser = await userService.updateProfilePhoto(req.user.userId, photoUrl);
+
+    // Return success response
+    res.status(200).json({
+      success: true,
+      photoUrl: photoUrl,
+      user: updatedUser
+    });
+  } catch (error: any) {
+    res.status(500).json({ 
+      success: false, 
+      message: error.message || "Failed to upload profile photo" 
+    });
+  }
+};
+
 export {
   createUser,
   getUsers,
@@ -81,4 +127,5 @@ export {
   deleteUser,
   getCurrentUser,
   changePassword,
+  uploadProfilePhoto,
 };

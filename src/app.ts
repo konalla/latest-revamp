@@ -1,5 +1,6 @@
 import express from "express";
 import cors from "cors";
+import path from "path";
 import userRoutes from "./routes/user.routes.js";
 import healthRoutes from "./routes/health.routes.js";
 import authRoutes from "./routes/auth.routes.js";
@@ -10,6 +11,7 @@ import okrRoutes from "./routes/okr.routes.js";
 import taskRoutes from "./routes/task.routes.js";
 import aiRecommendationRoutes from "./routes/ai-recommendation.routes.js";
 import userSettingsRoutes from "./routes/user-settings.routes.js";
+import profileRoutes from "./routes/profile.routes.js";
 
 const app = express();
 
@@ -22,6 +24,10 @@ app.use(cors({
 }));
 
 app.use(express.json());
+
+// Serve static files from uploads directory
+app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
+
 app.use("/api/health", healthRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/auth", authRoutes);
@@ -32,5 +38,6 @@ app.use("/api/okrs", okrRoutes);
 app.use("/api/tasks", taskRoutes);
 app.use("/api/ai-recommendations", aiRecommendationRoutes);
 app.use("/api/user-settings", userSettingsRoutes);
+app.use("/api/profile", profileRoutes);
 
 export default app;

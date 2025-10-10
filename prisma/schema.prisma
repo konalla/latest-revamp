@@ -21,6 +21,9 @@ model User {
   // Profile Information
   phone_number               String?
   company_name               String?
+  company_size               String?
+  company_description        String?
+  founded_year               Int?
   website                    String?
   profile_photo_url          String?
   job_title                  String?
@@ -58,6 +61,7 @@ model User {
   last_credit_refresh        DateTime @default(now())
 
   created_at                 DateTime @default(now())
+  updated_at                 DateTime @updatedAt
   
   // Relations
   projects                   Project[]
