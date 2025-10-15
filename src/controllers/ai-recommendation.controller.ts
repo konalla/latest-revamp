@@ -533,12 +533,17 @@ const getLast7DaysTasksWithAIRecommendations = async (req: Request, res: Respons
       return res.status(401).json({ message: "User not authenticated" });
     }
 
-    // Calculate date range for last 7 days
-    const endDate = new Date();
-    const startDate = new Date();
-    startDate.setDate(endDate.getDate() - 7);
+    // Calculate date range for last 7 days (excluding today)
+    const today = new Date();
+    const endDate = new Date(today);
+    endDate.setDate(today.getDate() - 1); // Yesterday
+    endDate.setHours(23, 59, 59, 999); // End of yesterday
+    
+    const startDate = new Date(today);
+    startDate.setDate(today.getDate() - 7); // 7 days ago
+    startDate.setHours(0, 0, 0, 0); // Start of day
 
-    // Get tasks with AI recommendations from last 7 days
+    // Get tasks with AI recommendations from last 7 days (excluding today)
     const tasks = await prisma.task.findMany({
       where: {
         userId: req.user.userId,

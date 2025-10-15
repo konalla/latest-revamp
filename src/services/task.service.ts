@@ -988,6 +988,7 @@ export class TaskService {
       const currentMinutes = this.parseTimeToMinutes(timeOnly);
       
       // PRIORITY 1: Check for overdue tasks (due date has passed) with AI recommendations
+      // Note: Tasks with today's due date are NOT considered overdue
       const overdueTasks = todayTasks.tasks.filter(task => {
         if (!task.aiRecommendation || !task.dueDate) return false;
         
@@ -995,23 +996,9 @@ export class TaskService {
         const dueDate = new Date(task.dueDate);
         const currentDate = new Date();
         
-        // If due date is before current date, it's overdue
-        if (dueDate < currentDate) return true;
-        
-        // If due date is today, check if due time has passed
-        if (dueDate.toDateString() === currentDate.toDateString()) {
-          const dueTime = new Intl.DateTimeFormat('en-CA', {
-            timeZone: actualTimezone,
-            hour12: false,
-            hour: '2-digit',
-            minute: '2-digit'
-          }).format(dueDate);
-          
-          const dueMinutes = this.parseTimeToMinutes(dueTime);
-          return currentMinutes > dueMinutes;
-        }
-        
-        return false;
+        // Only consider tasks overdue if due date is before today
+        // Tasks with today's due date are NOT considered overdue
+        return dueDate < currentDate;
       });
 
       if (overdueTasks.length > 0) {
