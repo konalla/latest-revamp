@@ -52,108 +52,29 @@ export interface TaskAnalysis {
 export class AIRecommendationService {
   private llm: ChatOpenAI;
   private parser: any;
+  private systemPrompt: string;
 
   constructor() {
+    // Initialize parser first
+    this.parser = StructuredOutputParser.fromZodSchema(TaskRecommendationSchema as any);
+    
+    // Create system prompt with the comprehensive rulebook
+    this.systemPrompt = this.createSystemPrompt();
+    
     this.llm = new ChatOpenAI({
       modelName: "gpt-4o-mini",
       temperature: 0.3,
       openAIApiKey: process.env.OPENAI_API_KEY || "",
     });
-
-    this.parser = StructuredOutputParser.fromZodSchema(TaskRecommendationSchema as any);
   }
 
   /**
-   * Generate AI recommendation for a task based on its attributes and user preferences
+   * Create system prompt with comprehensive rulebook
    */
-  async generateTaskRecommendation(
-    task: TaskAnalysis,
-    userPreferences: UserWorkPreferences,
-    userId: number
-  ): Promise<TaskRecommendation> {
-    try {
-      // Get user's historical task patterns for better recommendations
-      const userTaskHistory = await this.getUserTaskHistory(userId);
-      
-      // Create dynamic prompt based on task attributes and user preferences
-      const prompt = this.createDynamicPrompt(task, userPreferences, userTaskHistory);
-      
-      // Get AI recommendation
-      const formattedPrompt = await prompt.format({
-        title: task.title,
-        description: task.description || "",
-        duration: task.duration,
-        importance: task.importance,
-        urgency: task.urgency,
-        projectName: task.projectName || "",
-        objectiveName: task.objectiveName || "",
-        objectiveDescription: task.objectiveDescription || "",
-        okrTitle: task.okrTitle || "",
-        okrDescription: task.okrDescription || "",
-        deepWorkStartTime: userPreferences.deepWorkStartTime,
-        deepWorkEndTime: userPreferences.deepWorkEndTime,
-        creativeWorkStartTime: userPreferences.creativeWorkStartTime,
-        creativeWorkEndTime: userPreferences.creativeWorkEndTime,
-        reflectiveWorkStartTime: userPreferences.reflectiveWorkStartTime,
-        reflectiveWorkEndTime: userPreferences.reflectiveWorkEndTime,
-        executiveWorkStartTime: userPreferences.executiveWorkStartTime,
-        executiveWorkEndTime: userPreferences.executiveWorkEndTime,
-        userHistory: JSON.stringify(userTaskHistory, null, 2),
-        formatInstructions: this.parser.getFormatInstructions()
-      });
-      const response = await this.llm.invoke(formattedPrompt);
-      
-      // Parse the structured response
-      const recommendation = await this.parser.parse(response.content as string);
-      
-      // Validate and adjust recommendation based on user preferences
-      const validatedRecommendation = this.validateRecommendation(recommendation, userPreferences);
-      
-      return validatedRecommendation;
-    } catch (error) {
-      console.error("Error generating AI recommendation:", error);
-      // Return fallback recommendation
-      return this.getFallbackRecommendation(task, userPreferences);
-    }
-  }
-
-  /**
-   * Create dynamic prompt based on task attributes and user preferences
-   */
-  private createDynamicPrompt(
-    task: TaskAnalysis,
-    userPreferences: UserWorkPreferences,
-    userHistory: any[]
-  ): PromptTemplate {
+  private createSystemPrompt(): string {
     const formatInstructions = this.parser.getFormatInstructions();
     
-    const template = `
-You are an AI productivity expert specializing in task categorization based on cognitive work modes. Use the comprehensive rulebook below to classify tasks accurately.
-
-TASK ANALYSIS:
-- Title: {title}
-- Description: {description}
-- Duration: {duration} minutes
-- Importance: {importance}
-- Urgency: {urgency}
-- Project: {projectName}
-
-OBJECTIVE CONTEXT:
-- Objective: {objectiveName}
-- Objective Description: {objectiveDescription}
-
-OKR CONTEXT:
-- OKR Title: {okrTitle}
-- OKR Description: {okrDescription}
-
-USER WORK PREFERENCES:
-- Deep Work: {deepWorkStartTime} - {deepWorkEndTime}
-- Creative Work: {creativeWorkStartTime} - {creativeWorkEndTime}
-- Reflective Work: {reflectiveWorkStartTime} - {reflectiveWorkEndTime}
-- Executive Work: {executiveWorkStartTime} - {executiveWorkEndTime}
-
-USER TASK HISTORY (for pattern recognition):
-{userHistory}
+    return `You are an AI productivity expert specializing in task categorization based on cognitive work modes. Use the comprehensive rulebook below to classify tasks accurately.
 
 COMPREHENSIVE CLASSIFICATION RULEBOOK:
 
@@ -239,40 +160,95 @@ RECOMMENDATION GUIDELINES:
 4. Consider user's work preferences and optimal time slots
 5. Provide clear reasoning based on the rulebook criteria
 
-{formatInstructions}
-`;
+RESPONSE FORMAT:
+${formatInstructions}`;
+  }
 
-    return new PromptTemplate({
-      template,
-      inputVariables: [
-        "title",
-        "description", 
-        "duration",
-        "importance",
-        "urgency",
-        "projectName",
-        "objectiveName",
-        "objectiveDescription",
-        "okrTitle",
-        "okrDescription",
-        "deepWorkStartTime",
-        "deepWorkEndTime",
-        "creativeWorkStartTime",
-        "creativeWorkEndTime",
-        "reflectiveWorkStartTime",
-        "reflectiveWorkEndTime",
-        "executiveWorkStartTime",
-        "executiveWorkEndTime",
-        "userHistory",
-        "formatInstructions"
-      ],
-    });
+  /**
+   * Generate AI recommendation for a task based on its attributes and user preferences
+   */
+  async generateTaskRecommendation(
+    task: TaskAnalysis,
+    userPreferences: UserWorkPreferences,
+    userId: number
+  ): Promise<TaskRecommendation> {
+    try {
+      // Get user's historical task patterns for better recommendations
+      const userTaskHistory = await this.getUserTaskHistory(userId);
+      
+      // Create compressed user prompt
+      const userPrompt = this.createCompressedUserPrompt(task, userPreferences, userTaskHistory);
+      
+      // Create messages array with system prompt and user prompt
+      const messages = [
+        { role: "system" as const, content: this.systemPrompt },
+        { role: "user" as const, content: userPrompt }
+      ];
+      
+      // Get AI recommendation
+      const response = await this.llm.invoke(messages);
+      
+      // Parse the structured response
+      const recommendation = await this.parser.parse(response.content as string);
+      
+      // Validate and adjust recommendation based on user preferences
+      const validatedRecommendation = this.validateRecommendation(recommendation, userPreferences);
+      
+      return validatedRecommendation;
+    } catch (error) {
+      console.error("Error generating AI recommendation:", error);
+      // Return fallback recommendation
+      return this.getFallbackRecommendation(task, userPreferences);
+    }
+  }
+
+  /**
+   * Create compressed user prompt with minimal token usage
+   */
+  private createCompressedUserPrompt(
+    task: TaskAnalysis,
+    userPreferences: UserWorkPreferences,
+    userHistory: any[]
+  ): string {
+    // Compress user history to reduce tokens
+    const compressedHistory = this.compressUserHistory(userHistory);
+    
+    // Create compact task representation
+    const taskInfo = `TASK: ${task.title} | ${task.description || 'No description'} | duration=${task.duration}m | important=${task.importance} | urgent=${task.urgency} | project=${task.projectName || 'None'}`;
+    
+    // Add context if available
+    const contextInfo = [];
+    if (task.objectiveName) contextInfo.push(`objective=${task.objectiveName}`);
+    if (task.okrTitle) contextInfo.push(`okr=${task.okrTitle}`);
+    const context = contextInfo.length > 0 ? ` | ${contextInfo.join(' | ')}` : '';
+    
+    // Compress user preferences
+    const preferences = `PREFERENCES: Deep=${userPreferences.deepWorkStartTime}-${userPreferences.deepWorkEndTime} | Creative=${userPreferences.creativeWorkStartTime}-${userPreferences.creativeWorkEndTime} | Reflective=${userPreferences.reflectiveWorkStartTime}-${userPreferences.reflectiveWorkEndTime} | Executive=${userPreferences.executiveWorkStartTime}-${userPreferences.executiveWorkEndTime}`;
+    
+    // Compress history
+    const history = compressedHistory ? `HISTORY: ${compressedHistory}` : '';
+    
+    return `${taskInfo}${context}\n${preferences}\n${history}`.trim();
+  }
+
+  /**
+   * Compress user task history to reduce token usage
+   */
+  private compressUserHistory(userHistory: any[]): string {
+    if (!userHistory || userHistory.length === 0) return '';
+    
+    // Limit to 5 most recent tasks and compress format
+    const recentTasks = userHistory.slice(0, 5);
+    
+    return recentTasks
+      .map(task => `${task.title}(${task.category},${task.duration}m,imp:${task.importance},urg:${task.urgency})`)
+      .join('; ');
   }
 
   /**
    * Get user's task history for pattern recognition
    */
-  private async getUserTaskHistory(userId: number, limit: number = 20): Promise<any[]> {
+  private async getUserTaskHistory(userId: number, limit: number = 5): Promise<any[]> {
     try {
       const tasks = await prisma.task.findMany({
         where: { userId },

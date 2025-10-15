@@ -8,7 +8,8 @@ import {
   getNowRecommendedTask,
   getUserWorkPreferences,
   updateUserWorkPreferences,
-  getTasksWithAIRecommendations
+  getTasksWithAIRecommendations,
+  getLast7DaysTasksWithAIRecommendations
 } from "../controllers/ai-recommendation.controller.js";
 
 const router = Router();
@@ -71,5 +72,12 @@ router.get("/today-tasks", getTodayTasksWithAIRecommendations);
  * @access Private
  */
 router.get("/now", getNowRecommendedTask);
+
+/**
+ * @route GET /api/ai-recommendations/last-7-days
+ * @desc Get tasks with AI recommendations from the last 7 days, ordered by due date ascending
+ * @access Private
+ */
+router.get("/last-7-days", getLast7DaysTasksWithAIRecommendations);
 
 export default router;

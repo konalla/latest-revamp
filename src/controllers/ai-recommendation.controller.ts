@@ -524,6 +524,89 @@ const getNowRecommendedTask = async (req: Request, res: Response) => {
   }
 };
 
+/**
+ * Get tasks with AI recommendations from the last 7 days, ordered by due date
+ */
+const getLast7DaysTasksWithAIRecommendations = async (req: Request, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: "User not authenticated" });
+    }
+
+    // Calculate date range for last 7 days
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(endDate.getDate() - 7);
+
+    // Get tasks with AI recommendations from last 7 days
+    const tasks = await prisma.task.findMany({
+      where: {
+        userId: req.user.userId,
+        completed: false, // Only non-completed tasks
+        aiRecommendation: {
+          isNot: null // Only tasks with AI recommendations
+        },
+        dueDate: {
+          gte: startDate,
+          lte: endDate
+        }
+      },
+      orderBy: [
+        {
+          dueDate: 'asc' // Order by due date ascending
+        },
+        {
+          createdAt: 'asc' // Secondary sort by creation date for tasks without due date
+        }
+      ],
+      include: {
+        aiRecommendation: true,
+        project: {
+          select: { id: true, name: true }
+        }
+      } as any
+    });
+
+    // Separate tasks with and without due dates for proper ordering
+    const tasksWithDueDate = tasks.filter(task => task.dueDate !== null);
+    const tasksWithoutDueDate = tasks.filter(task => task.dueDate === null);
+
+    // Sort tasks with due date by due date ascending
+    tasksWithDueDate.sort((a, b) => {
+      if (a.dueDate && b.dueDate) {
+        return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
+      }
+      return 0;
+    });
+
+    // Sort tasks without due date by creation date ascending
+    tasksWithoutDueDate.sort((a, b) => {
+      return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+    });
+
+    // Combine: tasks with due date first, then tasks without due date
+    const orderedTasks = [...tasksWithDueDate, ...tasksWithoutDueDate];
+
+    res.json({
+      message: "Last 7 days tasks with AI recommendations retrieved successfully",
+      data: {
+        tasks: orderedTasks,
+        dateRange: {
+          startDate: startDate.toISOString(),
+          endDate: endDate.toISOString()
+        },
+        total: orderedTasks.length
+      }
+    });
+  } catch (error: any) {
+    console.error("Error retrieving last 7 days tasks with AI recommendations:", error);
+    res.status(500).json({ 
+      message: "Failed to retrieve last 7 days tasks with AI recommendations",
+      error: error.message 
+    });
+  }
+};
+
 export {
   generateTaskRecommendation,
   generateBulkTaskRecommendations,
@@ -532,5 +615,6 @@ export {
   getNowRecommendedTask,
   getUserWorkPreferences,
   updateUserWorkPreferences,
-  getTasksWithAIRecommendations
+  getTasksWithAIRecommendations,
+  getLast7DaysTasksWithAIRecommendations
 };

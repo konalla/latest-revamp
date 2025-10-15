@@ -987,7 +987,46 @@ export class TaskService {
       const TOLERANCE_MINUTES = 15;
       const currentMinutes = this.parseTimeToMinutes(timeOnly);
       
-      // Find tasks where AI recommended time matches current time (±15min tolerance)
+      // PRIORITY 1: Check for overdue tasks (due date has passed) with AI recommendations
+      const overdueTasks = todayTasks.tasks.filter(task => {
+        if (!task.aiRecommendation || !task.dueDate) return false;
+        
+        // Check if due date has passed (considering timezone)
+        const dueDate = new Date(task.dueDate);
+        const currentDate = new Date();
+        
+        // If due date is before current date, it's overdue
+        if (dueDate < currentDate) return true;
+        
+        // If due date is today, check if due time has passed
+        if (dueDate.toDateString() === currentDate.toDateString()) {
+          const dueTime = new Intl.DateTimeFormat('en-CA', {
+            timeZone: actualTimezone,
+            hour12: false,
+            hour: '2-digit',
+            minute: '2-digit'
+          }).format(dueDate);
+          
+          const dueMinutes = this.parseTimeToMinutes(dueTime);
+          return currentMinutes > dueMinutes;
+        }
+        
+        return false;
+      });
+
+      if (overdueTasks.length > 0) {
+        // Prioritize overdue tasks by AI recommendation importance
+        const prioritizedOverdueTask = this.selectBestTaskForNow(overdueTasks, currentMinutes);
+        
+        return {
+          task: prioritizedOverdueTask,
+          nextRecommendation: null,
+          currentTime: timeOnly,
+          reasoning: `URGENT: This task is overdue and needs immediate attention! It's ${prioritizedOverdueTask?.aiRecommendation?.category.toLowerCase()} work that should be completed right now.`
+        };
+      }
+      
+      // PRIORITY 2: Find tasks where AI recommended time matches current time (±15min tolerance)
       const matchingTasks = todayTasks.tasks.filter(task => {
         if (!task.aiRecommendation) return false;
         
@@ -1010,7 +1049,7 @@ export class TaskService {
         };
       }
 
-      // Find next recommended task (closest future recommendation)
+      // PRIORITY 3: Find next recommended task (closest future recommendation)
       const futureTasks = todayTasks.tasks
         .filter(task => task.aiRecommendation)
         .map(task => ({
