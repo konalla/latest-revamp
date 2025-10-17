@@ -1001,18 +1001,6 @@ export class TaskService {
         return dueDate < currentDate;
       });
 
-      if (overdueTasks.length > 0) {
-        // Prioritize overdue tasks by AI recommendation importance
-        const prioritizedOverdueTask = this.selectBestTaskForNow(overdueTasks, currentMinutes);
-        
-        return {
-          task: prioritizedOverdueTask,
-          nextRecommendation: null,
-          currentTime: timeOnly,
-          reasoning: `URGENT: This task is overdue and needs immediate attention! It's ${prioritizedOverdueTask?.aiRecommendation?.category.toLowerCase()} work that should be completed right now.`
-        };
-      }
-      
       // PRIORITY 2: Find tasks where AI recommended time matches current time (±15min tolerance)
       const matchingTasks = todayTasks.tasks.filter(task => {
         if (!task.aiRecommendation) return false;
@@ -1023,8 +1011,46 @@ export class TaskService {
         return timeDiff <= TOLERANCE_MINUTES;
       });
 
+      // Compare overdue vs today's matching tasks
+      if (overdueTasks.length > 0 && matchingTasks.length > 0) {
+        const bestOverdueTask = this.selectBestTaskForNow(overdueTasks, currentMinutes);
+        const bestTodayTask = this.selectBestTaskForNow(matchingTasks, currentMinutes);
+        
+        // Compare priority, importance, and urgency
+        const todayTaskWins = this.compareTaskPriority(bestTodayTask, bestOverdueTask);
+        
+        if (todayTaskWins) {
+          return {
+            task: bestTodayTask,
+            nextRecommendation: null,
+            currentTime: timeOnly,
+            reasoning: `Perfect timing! This task is recommended for ${bestTodayTask?.aiRecommendation?.recommendedTime}, 
+                       and it's ${bestTodayTask?.aiRecommendation?.category.toLowerCase()} work that aligns with your current focus window.`
+          };
+        } else {
+          return {
+            task: bestOverdueTask,
+            nextRecommendation: null,
+            currentTime: timeOnly,
+            reasoning: `URGENT: This task is overdue and needs immediate attention! It's ${bestOverdueTask?.aiRecommendation?.category.toLowerCase()} work that should be completed right now.`
+          };
+        }
+      }
+
+      // If only overdue tasks exist
+      if (overdueTasks.length > 0) {
+        const prioritizedOverdueTask = this.selectBestTaskForNow(overdueTasks, currentMinutes);
+        
+        return {
+          task: prioritizedOverdueTask,
+          nextRecommendation: null,
+          currentTime: timeOnly,
+          reasoning: `URGENT: This task is overdue and needs immediate attention! It's ${prioritizedOverdueTask?.aiRecommendation?.category.toLowerCase()} work that should be completed right now.`
+        };
+      }
+
+      // If only today's matching tasks exist
       if (matchingTasks.length > 0) {
-        // Prioritize: urgency → importance → duration fit
         const prioritizedTask = this.selectBestTaskForNow(matchingTasks, currentMinutes);
         
         return {
@@ -1070,6 +1096,52 @@ export class TaskService {
       console.error("Error getting now recommended task:", error);
       throw new Error("Failed to get now recommended task");
     }
+  }
+
+  /**
+   * Compare two tasks based on priority, importance, and urgency
+   * Returns true if todayTask wins over overdueTask
+   */
+  private compareTaskPriority(todayTask: TodayTaskResponse, overdueTask: TodayTaskResponse): boolean {
+    // Convert priority strings to numbers for comparison (high=3, medium=2, low=1)
+    const getPriorityValue = (priority: string): number => {
+      switch (priority.toLowerCase()) {
+        case 'high': return 3;
+        case 'medium': return 2;
+        case 'low': return 1;
+        default: return 1;
+      }
+    };
+
+    const todayPriority = getPriorityValue(todayTask.priority);
+    const overduePriority = getPriorityValue(overdueTask.priority);
+
+    // 1. Compare priority (high > medium > low)
+    if (todayPriority > overduePriority) {
+      return true; // Today's task wins
+    }
+    if (todayPriority < overduePriority) {
+      return false; // Overdue task wins
+    }
+
+    // 2. If same priority, compare importance
+    if (todayTask.importance && !overdueTask.importance) {
+      return true; // Today's task wins
+    }
+    if (!todayTask.importance && overdueTask.importance) {
+      return false; // Overdue task wins
+    }
+
+    // 3. If same priority and importance, compare urgency
+    if (todayTask.urgency && !overdueTask.urgency) {
+      return true; // Today's task wins
+    }
+    if (!todayTask.urgency && overdueTask.urgency) {
+      return false; // Overdue task wins
+    }
+
+    // 4. If all are same (priority, importance, urgency), overdue task wins
+    return false;
   }
 
   /**
