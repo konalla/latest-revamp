@@ -972,15 +972,60 @@ export class TaskService {
       
       const timeOnly: string = userTime;
       
-      // Get today's tasks with AI recommendations
+      // Get today's tasks with AI recommendations AND overdue tasks
       const todayTasks = await this.getTodayTasksWithAIRecommendations(userId, timezone);
       
-      if (!todayTasks.tasks.length) {
+      // Also get overdue tasks (due before today but within last 7 days) with AI recommendations
+      const currentTime = new Date();
+      const todayStart = new Date(currentTime.toLocaleDateString('en-CA', { timeZone: timezone }));
+      const sevenDaysAgo = new Date(todayStart);
+      sevenDaysAgo.setDate(todayStart.getDate() - 7);
+      
+      const overdueTasksFromDB = await prisma.task.findMany({
+        where: {
+          userId,
+          dueDate: {
+            gte: sevenDaysAgo, // Due date within last 7 days
+            lt: todayStart // Due date before today
+          },
+          completed: false,
+          aiRecommendation: {
+            isNot: null
+          }
+        },
+        include: {
+          aiRecommendation: true
+        },
+        orderBy: [
+          { urgency: 'desc' },
+          { importance: 'desc' },
+          { dueDate: 'asc' }
+        ]
+      } as any);
+      
+      // Convert overdue tasks to TodayTaskResponse format
+      const overdueTasksFormatted: TodayTaskResponse[] = overdueTasksFromDB
+        .filter(task => task.dueDate !== null) // Only include tasks with due dates
+        .map(task => ({
+          ...task,
+          description: task.description || '', // Convert null to empty string
+          dueDate: task.dueDate!, // We know it's not null due to filter above
+          aiRecommendationStatus: 'available' as const,
+          rank: 0 // Will be calculated later if needed
+        }));
+      
+      // Combine today's tasks and overdue tasks
+      const allTasks = {
+        ...todayTasks,
+        tasks: [...todayTasks.tasks, ...overdueTasksFormatted]
+      };
+      
+      if (!allTasks.tasks.length) {
         return {
           task: null,
           nextRecommendation: null,
           currentTime: timeOnly,
-          reasoning: "No tasks found for today"
+          reasoning: "No tasks found for today or overdue"
         };
       }
 
@@ -989,7 +1034,7 @@ export class TaskService {
       
       // PRIORITY 1: Check for overdue tasks (due date has passed) with AI recommendations
       // Note: Tasks with today's due date are NOT considered overdue
-      const overdueTasks = todayTasks.tasks.filter(task => {
+      const overdueTasks = allTasks.tasks.filter(task => {
         if (!task.aiRecommendation || !task.dueDate) return false;
         
         // Check if due date has passed (considering timezone)
@@ -1002,7 +1047,7 @@ export class TaskService {
       });
 
       // PRIORITY 2: Find tasks where AI recommended time matches current time (±15min tolerance)
-      const matchingTasks = todayTasks.tasks.filter(task => {
+      const matchingTasks = allTasks.tasks.filter(task => {
         if (!task.aiRecommendation) return false;
         
         const recommendedMinutes = this.parseTimeToMinutes(task.aiRecommendation.recommendedTime);
@@ -1063,7 +1108,7 @@ export class TaskService {
       }
 
       // PRIORITY 3: Find next recommended task (closest future recommendation)
-      const futureTasks = todayTasks.tasks
+      const futureTasks = allTasks.tasks
         .filter(task => task.aiRecommendation)
         .map(task => ({
           ...task,
