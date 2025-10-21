@@ -4,6 +4,11 @@
   - Added the required column `updated_at` to the `User` table without a default value. This is not possible if the table is not empty.
 
 */
+-- AlterTable
+ALTER TABLE "public"."User" ADD COLUMN     "company_description" TEXT,
+ADD COLUMN     "company_size" TEXT,
+ADD COLUMN     "founded_year" INTEGER,
+ADD COLUMN     "updated_at" TIMESTAMP(3) NOT NULL;
 
 -- CreateTable
 CREATE TABLE "public"."focus_sessions" (
