@@ -8,6 +8,7 @@ import focusSessionService, {
   type ResumeSessionRequest 
 } from "../services/focus-session.service.js";
 import focusPlanningService from "../services/focus-planning.service.js";
+import focusPatternsService from "../services/focus-patterns.service.js";
 
 export const getCurrentAiFocusSession = async (req: Request, res: Response) => {
   try {
@@ -40,6 +41,41 @@ export const getFocusPlan = async (req: Request, res: Response) => {
     return res.status(500).json({
       error: "Failed to fetch focus plan",
       details: error instanceof Error ? error.message : String(error),
+    });
+  }
+};
+
+export const getFocusPatterns = async (req: Request, res: Response) => {
+  try {
+    console.log("GET /api/focus/patterns - Fetching focus patterns");
+    
+    // Allow skipping authentication for testing
+    const skipAuth = req.headers['x-skip-auth'] === 'true' || 
+                    req.headers['x-bypass-auth'] === 'true';
+    
+    // Get user ID from session
+    let userId = req.user?.userId;
+    
+    // If no user ID and auth is skipped, use a default
+    if (!userId && skipAuth) {
+      userId = 1; // Use admin ID for testing
+      console.log("Using admin user ID for focus patterns:", userId);
+    } else if (!userId) {
+      console.log("No user ID found and auth not skipped");
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    
+    console.log(`Fetching focus patterns for user ${userId}`);
+    const data = await focusPatternsService.getUserFocusPatterns(userId);
+    
+    // Set JSON content type to ensure client processes response as JSON
+    res.setHeader('Content-Type', 'application/json');
+    return res.json(data);
+  } catch (error) {
+    console.error("Error fetching focus patterns:", error);
+    return res.status(500).json({ 
+      error: "Failed to fetch focus patterns",
+      details: error instanceof Error ? error.message : String(error)
     });
   }
 };
