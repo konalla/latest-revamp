@@ -4,33 +4,6 @@
   - Added the required column `updated_at` to the `User` table without a default value. This is not possible if the table is not empty.
 
 */
--- AlterTable (with conditional column additions)
-DO $$
-BEGIN
-    -- Add company_description column if it doesn't exist
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
-                   WHERE table_name = 'User' AND column_name = 'company_description') THEN
-        ALTER TABLE "public"."User" ADD COLUMN "company_description" TEXT;
-    END IF;
-    
-    -- Add company_size column if it doesn't exist
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
-                   WHERE table_name = 'User' AND column_name = 'company_size') THEN
-        ALTER TABLE "public"."User" ADD COLUMN "company_size" TEXT;
-    END IF;
-    
-    -- Add founded_year column if it doesn't exist
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
-                   WHERE table_name = 'User' AND column_name = 'founded_year') THEN
-        ALTER TABLE "public"."User" ADD COLUMN "founded_year" INTEGER;
-    END IF;
-    
-    -- Add updated_at column if it doesn't exist
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
-                   WHERE table_name = 'User' AND column_name = 'updated_at') THEN
-        ALTER TABLE "public"."User" ADD COLUMN "updated_at" TIMESTAMP(3) NOT NULL;
-    END IF;
-END $$;
 
 -- CreateTable
 CREATE TABLE "public"."focus_sessions" (
