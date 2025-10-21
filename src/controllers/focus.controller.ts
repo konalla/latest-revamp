@@ -11,7 +11,7 @@ import focusPlanningService from "../services/focus-planning.service.js";
 
 export const getCurrentAiFocusSession = async (req: Request, res: Response) => {
   try {
-    const userId = req.user?.id || req.user?.userId;
+    const userId = req.user?.userId;
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
 
     const session = await focusSessionService.getCurrentFocusSession(userId);
@@ -25,7 +25,7 @@ export const getCurrentAiFocusSession = async (req: Request, res: Response) => {
 export const getFocusPlan = async (req: Request, res: Response) => {
   try {
     const bypassMode = req.headers["x-bypass-auth"] === "true" || (req.headers["X-Bypass-Auth" as any] as any) === "true";
-    let userId = req.user?.id || req.user?.userId;
+    let userId = req.user?.userId;
     if (bypassMode && !userId) {
       userId = 1;
     } else if (!userId) {
@@ -46,7 +46,7 @@ export const getFocusPlan = async (req: Request, res: Response) => {
 
 export const createFocusSession = async (req: Request, res: Response) => {
   try {
-    const userId = req.user?.id || req.user?.userId;
+    const userId = req.user?.userId;
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
 
     const data: CreateFocusSessionRequest = req.body;
@@ -71,10 +71,10 @@ export const createFocusSession = async (req: Request, res: Response) => {
 
 export const updateSessionStatus = async (req: Request, res: Response) => {
   try {
-    const userId = req.user?.id || req.user?.userId;
+    const userId = req.user?.userId;
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
 
-    const sessionId = parseInt(req.params.id);
+    const sessionId = parseInt(req.params.id || '0');
     if (isNaN(sessionId)) {
       return res.status(400).json({ message: "Invalid session ID" });
     }
@@ -98,10 +98,10 @@ export const updateSessionStatus = async (req: Request, res: Response) => {
 
 export const endFocusSession = async (req: Request, res: Response) => {
   try {
-    const userId = req.user?.id || req.user?.userId;
+    const userId = req.user?.userId;
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
 
-    const sessionId = parseInt(req.params.id);
+    const sessionId = parseInt(req.params.id || '0');
     if (isNaN(sessionId)) {
       return res.status(400).json({ message: "Invalid session ID" });
     }
@@ -131,10 +131,10 @@ export const endFocusSession = async (req: Request, res: Response) => {
 
 export const pauseSession = async (req: Request, res: Response) => {
   try {
-    const userId = req.user?.id || req.user?.userId;
+    const userId = req.user?.userId;
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
 
-    const sessionId = parseInt(req.params.id);
+    const sessionId = parseInt(req.params.id || '0');
     if (isNaN(sessionId)) {
       return res.status(400).json({ message: "Invalid session ID" });
     }
@@ -169,10 +169,10 @@ export const pauseSession = async (req: Request, res: Response) => {
 
 export const resumeSession = async (req: Request, res: Response) => {
   try {
-    const userId = req.user?.id || req.user?.userId;
+    const userId = req.user?.userId;
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
 
-    const sessionId = parseInt(req.params.id);
+    const sessionId = parseInt(req.params.id || '0');
     if (isNaN(sessionId)) {
       return res.status(400).json({ message: "Invalid session ID" });
     }

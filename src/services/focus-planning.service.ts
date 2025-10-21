@@ -55,7 +55,7 @@ export class FocusPlanningService {
         console.error("Error generating AI recommendations:", err);
       }
 
-      return { categoryPlans, recommendedOrder, aiRecommendations };
+      return { categoryPlans, recommendedOrder, aiRecommendations: aiRecommendations || {} };
     } catch (error) {
       console.error("Error generating focus plan:", error);
       return { categoryPlans: [], recommendedOrder: [] };
@@ -104,7 +104,7 @@ export class FocusPlanningService {
     const topScores = categoryPlans
       .map((cp) => ({
         category: cp.category,
-        score: cp.tasks.length ? this.computeTaskScore(cp.tasks[0]) : 0,
+        score: cp.tasks.length && cp.tasks[0] ? this.computeTaskScore(cp.tasks[0]) : 0,
       }))
       .sort((a, b) => b.score - a.score)
       .map((x) => x.category);

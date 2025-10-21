@@ -84,7 +84,7 @@ export class CognitiveLoadService {
       console.log(`Creating cognitive load meter for user ${userId}`);
       
       // Check if meter already exists for this user
-      const existingMeter = await prisma.cognitiveLoadMeter.findUnique({
+      const existingMeter = await (prisma as any).cognitiveLoadMeter.findUnique({
         where: { userId }
       });
       
@@ -179,11 +179,11 @@ export class CognitiveLoadService {
         where: { userId }
       });
       
-      const focusSessions = await prisma.focusSession.findMany({
+      const focusSessions = await (prisma as any).focusSession.findMany({
         where: { userId }
       });
       
-      const productivityPatterns = await prisma.userProductivityPatterns.findUnique({
+      const productivityPatterns = await (prisma as any).userProductivityPatterns.findUnique({
         where: { userId }
       });
 
@@ -230,7 +230,7 @@ export class CognitiveLoadService {
         where: { userId }
       });
       
-      const focusSessions = await prisma.focusSession.findMany({
+      const focusSessions = await (prisma as any).focusSession.findMany({
         where: { userId }
       });
       
@@ -288,11 +288,11 @@ export class CognitiveLoadService {
       const loadMeter = await this.getUserCognitiveLoadMeter(userId);
       
       // Get user's productivity patterns and focus preferences
-      const productivityPatterns = await prisma.userProductivityPatterns.findUnique({
+      const productivityPatterns = await (prisma as any).userProductivityPatterns.findUnique({
         where: { userId }
       });
       
-      const focusPreferences = await prisma.userFocusPreferences.findUnique({
+      const focusPreferences = await (prisma as any).userFocusPreferences.findUnique({
         where: { userId }
       });
       
@@ -474,7 +474,7 @@ export class CognitiveLoadService {
       });
 
       // Adjust based on recent focus session activity
-      const totalSessionTime = recentSessions.reduce((sum, session) => sum + (session.duration || 0), 0);
+      const totalSessionTime = recentSessions.reduce((sum: number, session: any) => sum + (session.duration || 0), 0);
       const avgSessionTime = recentSessions.length > 0 ? totalSessionTime / recentSessions.length : 0;
       
       // If user has been very active in focus sessions, reduce workload (they're being productive)
@@ -652,8 +652,8 @@ export class CognitiveLoadService {
     const sessionsByDay: Record<string, number> = {};
     recentSessions.forEach(session => {
       const day = new Date(session.createdAt).toISOString().split('T')[0];
-      if (!sessionsByDay[day]) sessionsByDay[day] = 0;
-      sessionsByDay[day] += session.duration || 0;
+      if (day && !sessionsByDay[day]) sessionsByDay[day] = 0;
+      if (day) sessionsByDay[day] += session.duration || 0;
     });
     
     // Check for days with excessive focus time (more than 6 hours)
@@ -793,8 +793,10 @@ export class CognitiveLoadService {
       if (newSum !== 100) {
         const diff = 100 - newSum;
         const largestCategory = Object.entries(distribution)
-          .sort((a, b) => b[1] - a[1])[0][0] as keyof TaskTypeDistribution;
-        distribution[largestCategory] += diff;
+          .sort((a, b) => b[1] - a[1])[0]?.[0] as keyof TaskTypeDistribution;
+        if (largestCategory) {
+          distribution[largestCategory] += diff;
+        }
       }
     }
     
@@ -992,10 +994,11 @@ export class CognitiveLoadService {
       // Generate time blocks based on peak hours
       peakHours.forEach((hour, index) => {
         const activities = ["Deep Work", "Creative Work", "Execution", "Reflection"];
+        const activity = activities[index % activities.length] || "Deep Work";
         timeBlocks.push({
           startHour: hour,
           endHour: hour + 2,
-          recommendedActivity: activities[index % activities.length]
+          recommendedActivity: activity
         });
       });
     } else {
