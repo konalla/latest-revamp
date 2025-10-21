@@ -43,12 +43,15 @@ export class CognitiveLoadService {
         where: { userId }
       });
       
-      // If meter doesn't exist, create a new one with default values
+      // If meter doesn't exist, create a new one with calculated values
       if (!meter) {
         console.log(`No cognitive load meter found for user ${userId}, creating a new one`);
         
+        // Calculate actual workload score from current tasks
+        const calculatedWorkloadScore = await this.recalculateWorkloadScore(userId);
+        
         const meterData: CreateCognitiveLoadMeterRequest = {
-          currentWorkloadScore: 50, // Default starting value
+          currentWorkloadScore: calculatedWorkloadScore, // Use calculated value instead of default
           cognitiveCapacity: 100,
           sustainableCapacity: 75,
           burnoutRiskScore: 0,
@@ -62,7 +65,7 @@ export class CognitiveLoadService {
           currentStatus: WorkloadCapacityStatus.OPTIMAL
         };
         
-        console.log(`Creating cognitive load meter for user ${userId} with data:`, meterData);
+        console.log(`Creating cognitive load meter for user ${userId} with calculated workload: ${calculatedWorkloadScore}`);
         meter = await this.createCognitiveLoadMeter(userId, meterData);
       }
       
@@ -529,6 +532,22 @@ export class CognitiveLoadService {
     const forecasts: DailyForecastEntry[] = [];
     const today = new Date();
     
+    // Handle case when no tasks exist
+    if (!tasks || tasks.length === 0) {
+      for (let i = 0; i < days; i++) {
+        const forecastDate = new Date();
+        forecastDate.setDate(today.getDate() + i);
+        
+        forecasts.push({
+          date: forecastDate.toISOString(),
+          predictedWorkload: loadMeter.currentWorkloadScore, // Use current meter value
+          confidenceScore: Math.max(50, 100 - (i * 5)),
+          sustainableThreshold: loadMeter.sustainableCapacity
+        });
+      }
+      return forecasts;
+    }
+    
     for (let i = 0; i < days; i++) {
       const forecastDate = new Date();
       forecastDate.setDate(today.getDate() + i);
@@ -549,8 +568,12 @@ export class CognitiveLoadService {
       const taskImpact = dueTasks.length * 5; // Each task adds 5 points to workload
       predictedWorkload = Math.min(100, Math.max(0, predictedWorkload + taskImpact));
       
-      // Add some randomness to simulate real-world variations
-      const randomVariation = Math.floor(Math.random() * 10) - 5; // -5 to +5
+      // Add minimal randomness only if there are tasks or historical data
+      // For users with no tasks, keep predictions stable
+      let randomVariation = 0;
+      if (dueTasks.length > 0 || loadMeter.workloadHistory.length > 0) {
+        randomVariation = Math.floor(Math.random() * 6) - 3; // Reduced to -3 to +3
+      }
       predictedWorkload = Math.min(100, Math.max(0, predictedWorkload + randomVariation));
       
       // Calculate confidence score based on historical data
@@ -637,6 +660,16 @@ export class CognitiveLoadService {
    * Calculate burnout risk factors
    */
   private calculateBurnoutRiskFactors(tasks: any[], focusSessions: any[], loadMeter: CognitiveLoadMeterResponse): RiskFactors {
+    // Handle case when no tasks exist
+    if (!tasks || tasks.length === 0) {
+      return {
+        workloadIntensity: { score: 0, weight: 0.3 },
+        recoveryDeficit: { score: 0, weight: 0.3 },
+        workloadVariability: { score: 0, weight: 0.2 },
+        currentWorkloadLevel: { score: loadMeter.currentWorkloadScore / 10, weight: 0.2 }
+      };
+    }
+    
     // 1. Workload intensity (0-10)
     const activeTaskCount = tasks.filter(task => !task.completed).length;
     const workloadIntensity = Math.min(10, activeTaskCount / 2);
@@ -663,7 +696,7 @@ export class CognitiveLoadService {
     // 3. Workload consistency (0-10, higher = higher risk)
     const workloadHistory = loadMeter.workloadHistory;
     
-    let workloadVariability = 5; // Default medium
+    let workloadVariability = 0; // Default to low risk when no history
     if (workloadHistory.length > 1) {
       // Calculate standard deviation of workload
       const mean = workloadHistory.reduce((sum, w) => sum + w.workload, 0) / workloadHistory.length;
@@ -672,9 +705,12 @@ export class CognitiveLoadService {
       
       // Scale to 0-10 (higher variability = higher risk)
       workloadVariability = Math.min(10, stdDev / 5);
+    } else if (workloadHistory.length === 1) {
+      // Single data point = low variability
+      workloadVariability = 1;
     }
     
-    // 4. Current workload level (0-10)
+    // 4. Current workload level (0-10) - scale based on actual workload
     const currentWorkloadRisk = loadMeter.currentWorkloadScore / 10;
     
     return {
@@ -714,6 +750,12 @@ export class CognitiveLoadService {
    */
   private generateRecoveryRecommendations(riskFactors: RiskFactors, loadMeter: CognitiveLoadMeterResponse): string[] {
     const recommendations: string[] = [];
+    
+    // Check if user has no active tasks (workload intensity = 0)
+    if (riskFactors.workloadIntensity.score === 0) {
+      recommendations.push("You have no active tasks - this is a great time to plan your next priorities or take a well-deserved break");
+      return recommendations;
+    }
     
     if (riskFactors.workloadIntensity.score > 7) {
       recommendations.push("Consider reducing your active task count to prevent cognitive overload");
