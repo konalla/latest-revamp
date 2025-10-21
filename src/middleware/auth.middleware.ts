@@ -20,8 +20,10 @@ export const authenticateToken = (req: Request, res: Response, next: NextFunctio
   }
 
   try {
-    const user = verifyToken(token);
-    req.user = user;
+    const user = verifyToken(token) as any;
+    // Normalize payload to ensure req.user.id is present even if token has userId
+    const normalized = { ...user, id: user?.id ?? user?.userId };
+    req.user = normalized;
     next();
   } catch (error) {
     return res.status(403).json({ message: "Invalid or expired token" });
@@ -35,8 +37,9 @@ export const optionalAuth = (req: Request, res: Response, next: NextFunction) =>
 
   if (token) {
     try {
-      const user = verifyToken(token);
-      req.user = user;
+      const user = verifyToken(token) as any;
+      const normalized = { ...user, id: user?.id ?? user?.userId };
+      req.user = normalized;
     } catch (error) {
       // Token exists but is invalid - continue without user
       req.user = undefined as any;

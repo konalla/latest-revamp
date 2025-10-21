@@ -5,6 +5,20 @@ import { WorkCategory } from "./ai-recommendation.service.js";
 
 export class TaskService {
   /**
+   * Map AI category to task category format
+   */
+  private mapAICategoryToTaskCategory(aiCategory: WorkCategory): string {
+    const categoryMap: { [key: string]: string } = {
+      [WorkCategory.DEEP_WORK]: "deepWork",
+      [WorkCategory.CREATIVE_WORK]: "creative", 
+      [WorkCategory.REFLECTIVE_WORK]: "reflection",
+      [WorkCategory.EXECUTIVE_WORK]: "execution"
+    };
+    
+    return categoryMap[aiCategory] || "execution"; // Default fallback
+  }
+
+  /**
    * Create multiple tasks in bulk with AI classification and optimization
    */
   async createBulkTasks(bulkData: BulkTaskRequest, userId: number): Promise<BulkTaskResponse> {
@@ -36,14 +50,6 @@ export class TaskService {
             userId
           );
 
-          // Convert AI category to database category format
-          const categoryMap: { [key: string]: string } = {
-            [WorkCategory.DEEP_WORK]: "deepWork",
-            [WorkCategory.CREATIVE_WORK]: "creativeWork", 
-            [WorkCategory.REFLECTIVE_WORK]: "reflectiveWork",
-            [WorkCategory.EXECUTIVE_WORK]: "executiveWork"
-          };
-
           // Determine priority based on AI analysis and original priority
           let finalPriority = taskItem.priority;
           let importance = false;
@@ -74,7 +80,7 @@ export class TaskService {
           // Create task data
           const taskData: CreateTaskRequest = {
             title: taskItem.title,
-            category: taskItem.category || categoryMap[aiRecommendation.category] || "",
+            category: taskItem.category || this.mapAICategoryToTaskCategory(aiRecommendation.category),
             duration: Math.max(taskItem.duration, 15), // Minimum 15 minutes
             priority: finalPriority,
             position: index,
@@ -282,6 +288,14 @@ export class TaskService {
         userId
       );
 
+      const mappedCategory = this.mapAICategoryToTaskCategory(recommendation.category);
+
+      // Update the task's category to match the AI recommendation
+      await prisma.task.update({
+        where: { id: taskId },
+        data: { category: mappedCategory }
+      });
+
       // Update existing AI recommendation or create new one
       await (prisma as any).aIRecommendation.upsert({
         where: {
@@ -302,7 +316,7 @@ export class TaskService {
         }
       });
 
-      console.log(`AI recommendation generated for task ${taskId}: ${recommendation.category} at ${recommendation.recommendedTime}`);
+      console.log(`AI recommendation generated for task ${taskId}: ${recommendation.category} -> ${mappedCategory} at ${recommendation.recommendedTime}`);
     } catch (error) {
       console.error(`Error generating AI recommendation for task ${taskId}:`, error);
     }

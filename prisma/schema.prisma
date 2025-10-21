@@ -69,6 +69,7 @@ model User {
   okrs                       Okr[]
   tasks                      Task[]
   userSettings               UserSettings?
+  focusSessions              FocusSession[]
 }
 
 model Project {
@@ -214,4 +215,36 @@ model UserSettings {
   // Relations
   userId                 Int       @unique
   user                   User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model FocusSession {
+  id                      Int      @id @default(autoincrement())
+  userId                  Int      @map("user_id")
+  sessionType             String   @map("session_type")
+  status                  String   @default("active")
+  intention               Json     @default("{}")
+  startedAt               DateTime @default(now()) @map("started_at")
+  endedAt                 DateTime? @map("ended_at")
+  duration                Int      @default(0)
+  completed               Boolean  @default(false)
+  notes                   String?
+  tasksCompleted          Int      @default(0) @map("tasks_completed")
+  createdAt               DateTime @default(now()) @map("created_at")
+
+  // AI Analytics
+  aiScore                 Int?     @map("ai_score")
+  distractions            Int      @default(0)
+  environment             String?
+  mood                    String?
+  energyLevel             String?  @map("energy_level")
+  cognitiveFlowScore      Int?     @map("cognitive_flow_score")
+  contextSwitchCount      Int      @default(0) @map("context_switch_count")
+  flowState               String?  @map("flow_state")
+  taskGroupEffectiveness  Json     @default("{}") @map("task_group_effectiveness")
+
+  // Relations
+  user                    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, sessionType, status, startedAt], name: "focus_sessions_user_type_status_started_at_idx")
+  @@map("focus_sessions")
 }

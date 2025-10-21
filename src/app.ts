@@ -12,6 +12,7 @@ import taskRoutes from "./routes/task.routes.js";
 import aiRecommendationRoutes from "./routes/ai-recommendation.routes.js";
 import userSettingsRoutes from "./routes/user-settings.routes.js";
 import profileRoutes from "./routes/profile.routes.js";
+import focusRoutes from "./routes/focus.routes.js";
 
 const app = express();
 
@@ -39,5 +40,6 @@ app.use("/api/tasks", taskRoutes);
 app.use("/api/ai-recommendations", aiRecommendationRoutes);
 app.use("/api/user-settings", userSettingsRoutes);
 app.use("/api/profile", profileRoutes);
+app.use("/api", focusRoutes);
 
 export default app;
