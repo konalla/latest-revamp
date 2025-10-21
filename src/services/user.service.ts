@@ -47,6 +47,37 @@ const createUser = async (data: CreateUserRequest) => {
       }
     });
 
+    // Create default user productivity patterns
+    await (tx as any).userProductivityPatterns.create({
+      data: {
+        userId: user.id,
+        hourlyPatterns: {},
+        dayOfWeekPatterns: {},
+        taskSwitchingMetrics: {},
+        taskCompletionRate: 0.0,
+        averageFocusSessionDuration: 25,
+        peakProductivityHours: [],
+        energyPattern: null,
+        contextSwitchingProfile: null,
+        recoveryPattern: null
+      }
+    });
+
+    // Create default user focus preferences
+    await (tx as any).userFocusPreferences.create({
+      data: {
+        userId: user.id,
+        workingHours: {},
+        cognitiveLoadPreferences: {},
+        preferredFocusDuration: 25,
+        preferredBreakDuration: 5,
+        maxConsecutiveSessions: 4,
+        breakFrequency: 5,
+        deepWorkPreferences: {},
+        environmentPreferences: {}
+      }
+    });
+
     return user;
   });
 };

@@ -2,8 +2,14 @@ import prisma from "../config/prisma.js";
 import type { CreateTaskRequest, UpdateTaskRequest, TaskQueryParams, TaskResponse, TaskListResponse, TodayTasksResponse, TodayTaskResponse, BulkTaskRequest, BulkTaskResponse, BulkTaskItem } from "../types/task.types.js";
 import { aiRecommendationService } from "./ai-recommendation.service.js";
 import { WorkCategory } from "./ai-recommendation.service.js";
+import { CognitiveLoadService } from "./cognitive-load.service.js";
 
 export class TaskService {
+  private cognitiveLoadService: CognitiveLoadService;
+
+  constructor() {
+    this.cognitiveLoadService = new CognitiveLoadService();
+  }
   /**
    * Map AI category to task category format
    */
@@ -696,6 +702,16 @@ export class TaskService {
       },
     },
   });
+
+    // Update cognitive load meter after task completion change
+    try {
+      await this.cognitiveLoadService.updateCognitiveLoadMeter(userId, {
+        currentWorkloadScore: undefined // Will be recalculated based on current tasks
+      });
+    } catch (error) {
+      console.error('Error updating cognitive load meter after task completion:', error);
+      // Don't throw error - task completion should still succeed
+    }
 
     return updatedTask as TaskResponse;
   }

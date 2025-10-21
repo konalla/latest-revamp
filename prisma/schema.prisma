@@ -70,6 +70,9 @@ model User {
   tasks                      Task[]
   userSettings               UserSettings?
   focusSessions              FocusSession[]
+  cognitiveLoadMeter         CognitiveLoadMeter?
+  userProductivityPatterns   UserProductivityPatterns?
+  userFocusPreferences       UserFocusPreferences?
 }
 
 model Project {
@@ -247,4 +250,72 @@ model FocusSession {
 
   @@index([userId, sessionType, status, startedAt], name: "focus_sessions_user_type_status_started_at_idx")
   @@map("focus_sessions")
+}
+
+model CognitiveLoadMeter {
+  id                              Int      @id @default(autoincrement())
+  userId                          Int      @map("user_id")
+  currentWorkloadScore            Int      @default(50) @map("current_workload_score")
+  cognitiveCapacity               Int      @default(100) @map("cognitive_capacity")
+  sustainableCapacity             Int      @default(75) @map("sustainable_capacity")
+  burnoutRiskScore                Int      @default(0) @map("burnout_risk_score")
+  burnoutRiskLevel                String   @default("NONE") @map("burnout_risk_level")
+  recoveryRate                    Int      @default(5) @map("recovery_rate")
+  workloadHistory                 Json     @default("[]") @map("workload_history")
+  capacityUtilization             Json     @default("[]") @map("capacity_utilization")
+  recommendedTaskLimit            Int?     @map("recommended_task_limit")
+  recommendedFocusSessionDuration Int?    @map("recommended_focus_session_duration")
+  recommendedBreakFrequency       Int?     @map("recommended_break_frequency")
+  currentStatus                   String   @default("OPTIMAL") @map("current_status")
+  createdAt                       DateTime @default(now()) @map("created_at")
+  updatedAt                       DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  user                            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId])
+  @@map("cognitive_load_meters")
+}
+
+model UserProductivityPatterns {
+  id                              Int      @id @default(autoincrement())
+  userId                          Int      @map("user_id")
+  hourlyPatterns                  Json     @default("{}") @map("hourly_patterns")
+  dayOfWeekPatterns               Json     @default("{}") @map("day_of_week_patterns")
+  taskSwitchingMetrics            Json     @default("{}") @map("task_switching_metrics")
+  taskCompletionRate              Float    @default(0.0) @map("task_completion_rate")
+  averageFocusSessionDuration     Int      @default(25) @map("average_focus_session_duration")
+  peakProductivityHours           Json     @default("[]") @map("peak_productivity_hours")
+  energyPattern                   String?  @map("energy_pattern")
+  contextSwitchingProfile         String?  @map("context_switching_profile")
+  recoveryPattern                 String?  @map("recovery_pattern")
+  createdAt                       DateTime @default(now()) @map("created_at")
+  updatedAt                       DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  user                            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId])
+  @@map("user_productivity_patterns")
+}
+
+model UserFocusPreferences {
+  id                              Int      @id @default(autoincrement())
+  userId                          Int      @map("user_id")
+  workingHours                    Json     @default("{}") @map("working_hours")
+  cognitiveLoadPreferences        Json     @default("{}") @map("cognitive_load_preferences")
+  preferredFocusDuration          Int      @default(25) @map("preferred_focus_duration")
+  preferredBreakDuration          Int      @default(5) @map("preferred_break_duration")
+  maxConsecutiveSessions          Int      @default(4) @map("max_consecutive_sessions")
+  breakFrequency                  Int      @default(5) @map("break_frequency")
+  deepWorkPreferences             Json     @default("{}") @map("deep_work_preferences")
+  environmentPreferences          Json     @default("{}") @map("environment_preferences")
+  createdAt                       DateTime @default(now()) @map("created_at")
+  updatedAt                       DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  user                            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId])
+  @@map("user_focus_preferences")
 }

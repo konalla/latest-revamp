@@ -13,6 +13,7 @@ import aiRecommendationRoutes from "./routes/ai-recommendation.routes.js";
 import userSettingsRoutes from "./routes/user-settings.routes.js";
 import profileRoutes from "./routes/profile.routes.js";
 import focusRoutes from "./routes/focus.routes.js";
+import cognitiveLoadRoutes from "./routes/cognitive-load.routes.js";
 
 const app = express();
 
@@ -41,5 +42,6 @@ app.use("/api/ai-recommendations", aiRecommendationRoutes);
 app.use("/api/user-settings", userSettingsRoutes);
 app.use("/api/profile", profileRoutes);
 app.use("/api", focusRoutes);
+app.use("/api/cognitive-load", cognitiveLoadRoutes);
 
 export default app;
