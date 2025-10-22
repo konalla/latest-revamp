@@ -67,6 +67,16 @@ export class CognitiveLoadService {
         
         console.log(`Creating cognitive load meter for user ${userId} with calculated workload: ${calculatedWorkloadScore}`);
         meter = await this.createCognitiveLoadMeter(userId, meterData);
+      } else {
+        // For existing meters, recalculate workload score to ensure accuracy
+        console.log(`Recalculating workload for existing meter for user ${userId}`);
+        const recalculatedScore = await this.recalculateWorkloadScore(userId);
+        
+        // Only update if the score has changed significantly (more than 5 points difference)
+        if (Math.abs(meter.currentWorkloadScore - recalculatedScore) > 5) {
+          console.log(`Updating workload score from ${meter.currentWorkloadScore} to ${recalculatedScore}`);
+          meter = await this.updateCognitiveLoadMeter(userId, { currentWorkloadScore: recalculatedScore });
+        }
       }
       
       return this.mapDatabaseToResponse(meter);
@@ -448,6 +458,8 @@ export class CognitiveLoadService {
         }
       });
 
+      console.log(`Recalculating workload for user ${userId}: Found ${activeTasks.length} active tasks`);
+
       // Get recent focus sessions (last 7 days)
       const sevenDaysAgo = new Date();
       sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
@@ -460,6 +472,8 @@ export class CognitiveLoadService {
           }
         }
       });
+
+      console.log(`Found ${recentSessions.length} recent focus sessions`);
 
       // Calculate base workload from active tasks
       let workloadScore = 0;
@@ -476,19 +490,28 @@ export class CognitiveLoadService {
         workloadScore += taskWeight;
       });
 
+      console.log(`Base workload score from tasks: ${workloadScore}`);
+
       // Adjust based on recent focus session activity
       const totalSessionTime = recentSessions.reduce((sum: number, session: any) => sum + (session.duration || 0), 0);
       const avgSessionTime = recentSessions.length > 0 ? totalSessionTime / recentSessions.length : 0;
       
+      console.log(`Total session time: ${totalSessionTime}, Average: ${avgSessionTime}`);
+      
       // If user has been very active in focus sessions, reduce workload (they're being productive)
       if (avgSessionTime > 60) { // More than 1 hour average
         workloadScore *= 0.8; // Reduce workload by 20%
-      } else if (avgSessionTime < 15) { // Less than 15 minutes average
+        console.log(`Applied productivity bonus: ${workloadScore}`);
+      } else if (avgSessionTime < 15 && recentSessions.length > 0) { // Only apply penalty if there are sessions
         workloadScore *= 1.2; // Increase workload by 20%
+        console.log(`Applied low activity penalty: ${workloadScore}`);
       }
 
       // Cap the score between 0 and 100
-      return Math.max(0, Math.min(100, Math.round(workloadScore)));
+      const finalScore = Math.max(0, Math.min(100, Math.round(workloadScore)));
+      console.log(`Final calculated workload score: ${finalScore}`);
+      
+      return finalScore;
     } catch (error) {
       console.error(`Error recalculating workload score for user ${userId}:`, error);
       return 50; // Return default score if calculation fails
