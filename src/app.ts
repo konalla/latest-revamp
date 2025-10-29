@@ -15,6 +15,8 @@ import profileRoutes from "./routes/profile.routes.js";
 import focusRoutes from "./routes/focus.routes.js";
 import cognitiveLoadRoutes from "./routes/cognitive-load.routes.js";
 import analyticsRoutes from "./routes/analytics.routes.js";
+import workspaceRoutes from "./routes/workspace.routes.js";
+import teamRoutes from "./routes/team.routes.js";
 
 const app = express();
 
@@ -45,5 +47,7 @@ app.use("/api/profile", profileRoutes);
 app.use("/api", focusRoutes);
 app.use("/api/cognitive-load", cognitiveLoadRoutes);
 app.use("/api/analytics", analyticsRoutes);
+app.use("/api", workspaceRoutes);
+app.use("/api", teamRoutes);
 
 export default app;

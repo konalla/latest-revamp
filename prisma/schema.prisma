@@ -73,6 +73,10 @@ model User {
   cognitiveLoadMeter         CognitiveLoadMeter?
   userProductivityPatterns   UserProductivityPatterns?
   userFocusPreferences       UserFocusPreferences?
+
+  // Workspace/Team relations
+  ownedWorkspaces            Workspace[]
+  teamMemberships            TeamMembership[]
 }
 
 model Project {
@@ -318,4 +322,47 @@ model UserFocusPreferences {
 
   @@unique([userId])
   @@map("user_focus_preferences")
+}
+
+enum TeamRole {
+  ADMIN
+  MEMBER
+}
+
+model Workspace {
+  id         Int       @id @default(autoincrement())
+  name       String
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  // Relations
+  ownerId    Int       @unique
+  owner      User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  team       Team?
+}
+
+model Team {
+  id          Int              @id @default(autoincrement())
+  name        String
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  // Relations
+  workspaceId Int              @unique
+  workspace   Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  memberships TeamMembership[]
+}
+
+model TeamMembership {
+  id        Int      @id @default(autoincrement())
+  role      TeamRole @default(MEMBER)
+  createdAt DateTime @default(now())
+
+  // Relations
+  userId    Int
+  teamId    Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, teamId])
 }
