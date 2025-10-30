@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { ensureWorkspaceAndTeamForUser, getMyWorkspace, getMyTeam, renameWorkspace, renameTeam } from "../services/workspace.service.js";
+import { ensureWorkspaceAndTeamForUser, getMyWorkspace, getMyTeam, renameWorkspace, renameTeam, createWorkspaceAndTeam } from "../services/workspace.service.js";
 
 export const bootstrapMine = async (req: Request, res: Response) => {
   try {
@@ -26,8 +26,16 @@ export const getMine = async (req: Request, res: Response) => {
 export const getMyTeamController = async (req: Request, res: Response) => {
   try {
     const userId = req.user!.id as number;
-    const team = await getMyTeam(userId);
-    res.status(200).json(team);
+    const result = await getMyTeam(userId);
+    if (!result || result.teams.length === 0) {
+      return res.status(200).json({ 
+        teams: [], 
+        totalTeams: 0,
+        adminTeams: [],
+        memberTeams: []
+      });
+    }
+    res.status(200).json(result);
   } catch (error: any) {
     res.status(400).json({ message: error.message });
   }
@@ -54,6 +62,16 @@ export const renameMyTeam = async (req: Request, res: Response) => {
     res.status(200).json(team);
   } catch (error: any) {
     res.status(403).json({ message: error.message });
+  }
+};
+
+export const createWorkspaceAndTeamController = async (req: Request, res: Response) => {
+  try {
+    const userId = req.user!.id as number;
+    const result = await createWorkspaceAndTeam(userId);
+    res.status(result.created ? 201 : 200).json(result);
+  } catch (error: any) {
+    res.status(400).json({ message: error.message });
   }
 };
 
