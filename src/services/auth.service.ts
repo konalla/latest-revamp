@@ -2,6 +2,7 @@ import bcrypt from "bcrypt";
 import prisma from "../config/prisma.js";
 import type { LoginRequest, RegisterRequest, AuthResponse } from "../types/auth.types.js";
 import { generateToken } from "../utils/jwt.utils.js";
+import { ensureWorkspaceAndTeamForUser } from "./workspace.service.js";
 
 const SALT_ROUNDS = 10;
 
@@ -45,6 +46,9 @@ const register = async (data: RegisterRequest): Promise<AuthResponse> => {
     }
   });
 
+  // Ensure workspace and team exist for this user
+  await ensureWorkspaceAndTeamForUser(user.id, user.name, user.username);
+
   // Generate JWT token
   const token = generateToken({
     userId: user.id,
@@ -79,6 +83,13 @@ const login = async (data: LoginRequest): Promise<AuthResponse> => {
 
   if (!isPasswordValid) {
     throw new Error("Invalid credentials");
+  }
+
+  // Ensure workspace/team backfill for existing users
+  try {
+    await ensureWorkspaceAndTeamForUser(user.id, user.name, user.username);
+  } catch (e) {
+    // Non-fatal for login
   }
 
   // Generate JWT token
