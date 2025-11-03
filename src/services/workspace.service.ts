@@ -38,7 +38,7 @@ export const ensureWorkspaceAndTeamForUser = async (userId: number, name: string
       const team = await tx.team.create({ data: { name: teamName, workspaceId: workspace.id } });
 
       // Owner becomes ADMIN member of their team
-      await tx.teamMembership.create({ data: { userId, teamId: team.id, role: "ADMIN" } });
+      await tx.teamMembership.create({ data: { userId, teamId: team.id, role: "ADMIN", status: "ACTIVE" } });
 
       workspace = { ...workspace, team } as any;
     } else if (!workspace.team) {
@@ -47,7 +47,7 @@ export const ensureWorkspaceAndTeamForUser = async (userId: number, name: string
       const team = await tx.team.create({ data: { name: teamName, workspaceId: workspace.id } });
       await tx.teamMembership.upsert({
         where: { userId_teamId: { userId, teamId: team.id } },
-        create: { userId, teamId: team.id, role: "ADMIN" },
+        create: { userId, teamId: team.id, role: "ADMIN", status: "ACTIVE" },
         update: { role: "ADMIN" }
       });
       workspace = { ...workspace, team } as any;
@@ -55,7 +55,7 @@ export const ensureWorkspaceAndTeamForUser = async (userId: number, name: string
       // Ensure admin membership exists
       await tx.teamMembership.upsert({
         where: { userId_teamId: { userId, teamId: workspace.team.id } },
-        create: { userId, teamId: workspace.team.id, role: "ADMIN" },
+        create: { userId, teamId: workspace.team.id, role: "ADMIN", status: "ACTIVE" },
         update: { role: "ADMIN" }
       });
     }
@@ -97,10 +97,11 @@ export const getMyTeam = async (userId: number) => {
   
   if (!memberships || memberships.length === 0) return { teams: [] };
   
-  // Return teams with role information
+  // Return teams with role and status information
   const teams = memberships.map(membership => ({
     ...membership.team,
     role: membership.role, // ADMIN or MEMBER
+    status: membership.status, // ACTIVE, INACTIVE, SUSPENDED, UNDER_REVIEW
     membershipId: membership.id,
     joinedAt: membership.createdAt
   }));

@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { addMember, listMembers, searchUsers } from "../services/team.service.js";
+import { addMember, listMembers, searchUsers, removeMember, updateMemberStatus } from "../services/team.service.js";
 
 export const getMembers = async (req: Request, res: Response) => {
   try {
@@ -29,6 +29,39 @@ export const addMemberController = async (req: Request, res: Response) => {
     const { userId: userIdToAdd } = req.body as { userId: number };
     if (!userIdToAdd) return res.status(400).json({ message: "userId required" });
     const result = await addMember(userId, Number(userIdToAdd));
+    res.status(200).json(result);
+  } catch (error: any) {
+    res.status(403).json({ message: error.message });
+  }
+};
+
+export const removeMemberController = async (req: Request, res: Response) => {
+  try {
+    const userId = req.user!.id as number;
+    const { userId: userIdToRemove } = req.params as { userId: string };
+    if (!userIdToRemove) return res.status(400).json({ message: "userId parameter required" });
+    const result = await removeMember(userId, Number(userIdToRemove));
+    res.status(200).json(result);
+  } catch (error: any) {
+    res.status(403).json({ message: error.message });
+  }
+};
+
+export const updateMemberStatusController = async (req: Request, res: Response) => {
+  try {
+    const userId = req.user!.id as number;
+    const { userId: userIdToUpdate } = req.params as { userId: string };
+    const { status } = req.body as { status: "ACTIVE" | "INACTIVE" | "SUSPENDED" | "UNDER_REVIEW" };
+    
+    if (!userIdToUpdate) return res.status(400).json({ message: "userId parameter required" });
+    if (!status) return res.status(400).json({ message: "status is required" });
+    
+    const validStatuses = ["ACTIVE", "INACTIVE", "SUSPENDED", "UNDER_REVIEW"];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ message: `Invalid status. Must be one of: ${validStatuses.join(", ")}` });
+    }
+    
+    const result = await updateMemberStatus(userId, Number(userIdToUpdate), status);
     res.status(200).json(result);
   } catch (error: any) {
     res.status(403).json({ message: error.message });

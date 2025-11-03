@@ -329,6 +329,13 @@ enum TeamRole {
   MEMBER
 }
 
+enum TeamMemberStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  UNDER_REVIEW
+}
+
 model Workspace {
   id         Int       @id @default(autoincrement())
   name       String
@@ -354,15 +361,17 @@ model Team {
 }
 
 model TeamMembership {
-  id        Int      @id @default(autoincrement())
-  role      TeamRole @default(MEMBER)
-  createdAt DateTime @default(now())
+  id        Int              @id @default(autoincrement())
+  role      TeamRole         @default(MEMBER)
+  status    TeamMemberStatus @default(ACTIVE)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
 
   // Relations
   userId    Int
   teamId    Int
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team      Team             @relation(fields: [teamId], references: [id], onDelete: Cascade)
 
   @@unique([userId, teamId])
 }
