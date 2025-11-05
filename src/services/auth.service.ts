@@ -3,6 +3,7 @@ import prisma from "../config/prisma.js";
 import type { LoginRequest, RegisterRequest, AuthResponse } from "../types/auth.types.js";
 import { generateToken } from "../utils/jwt.utils.js";
 import { ensureWorkspaceAndTeamForUser } from "./workspace.service.js";
+import { subscriptionService } from "./subscription.service.js";
 
 const SALT_ROUNDS = 10;
 
@@ -48,6 +49,14 @@ const register = async (data: RegisterRequest): Promise<AuthResponse> => {
 
   // Ensure workspace and team exist for this user
   await ensureWorkspaceAndTeamForUser(user.id, user.name, user.username);
+
+  // Initialize trial subscription for new user
+  try {
+    await subscriptionService.initializeTrial(user.id);
+  } catch (error) {
+    console.error("Error initializing trial subscription:", error);
+    // Don't fail registration if trial initialization fails
+  }
 
   // Generate JWT token
   const token = generateToken({

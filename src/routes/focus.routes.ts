@@ -10,26 +10,27 @@ import {
   getFocusPatterns
 } from "../controllers/focus.controller.js";
 import { authenticateToken, optionalAuth } from "../middleware/auth.middleware.js";
+import { requireWriteAccess } from "../middleware/subscription.middleware.js";
 
 const router = Router();
 
 // GET /api/ai-focus/session - requires auth
 router.get("/ai-focus/session", authenticateToken, getCurrentAiFocusSession);
 
-// POST /api/ai-focus/session - Create Focus Session
-router.post("/ai-focus/session", authenticateToken, createFocusSession);
+// POST /api/ai-focus/session - Create Focus Session (requires write access)
+router.post("/ai-focus/session", authenticateToken, requireWriteAccess, createFocusSession);
 
-// PUT /api/ai-focus/session/{id} - Update Session Status
-router.put("/ai-focus/session/:id", authenticateToken, updateSessionStatus);
+// PUT /api/ai-focus/session/{id} - Update Session Status (requires write access)
+router.put("/ai-focus/session/:id", authenticateToken, requireWriteAccess, updateSessionStatus);
 
-// POST /api/ai-focus/session/{id}/end - End Focus Session
-router.post("/ai-focus/session/:id/end", authenticateToken, endFocusSession);
+// POST /api/ai-focus/session/{id}/end - End Focus Session (requires write access)
+router.post("/ai-focus/session/:id/end", authenticateToken, requireWriteAccess, endFocusSession);
 
-// POST /api/ai-focus/session/{id}/pause - Pause Session
-router.post("/ai-focus/session/:id/pause", authenticateToken, pauseSession);
+// POST /api/ai-focus/session/{id}/pause - Pause Session (requires write access)
+router.post("/ai-focus/session/:id/pause", authenticateToken, requireWriteAccess, pauseSession);
 
-// POST /api/ai-focus/session/{id}/resume - Resume Session
-router.post("/ai-focus/session/:id/resume", authenticateToken, resumeSession);
+// POST /api/ai-focus/session/{id}/resume - Resume Session (requires write access)
+router.post("/ai-focus/session/:id/resume", authenticateToken, requireWriteAccess, resumeSession);
 
 // GET /api/focus/plan - optional auth with bypass header support
 router.get("/focus/plan", optionalAuth, getFocusPlan);

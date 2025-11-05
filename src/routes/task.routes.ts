@@ -1,6 +1,7 @@
 import { Router } from "express";
 import * as taskController from "../controllers/task.controller.js";
 import { authenticateToken } from "../middleware/auth.middleware.js";
+import { requireTaskCreationAccess, requireWriteAccess } from "../middleware/subscription.middleware.js";
 
 const router = Router();
 
@@ -28,25 +29,25 @@ router.get("/okr/:okrId", taskController.getTasksByOkr);
 // GET /api/tasks/:id - Get specific task by ID (only if it belongs to logged-in user)
 router.get("/:id", taskController.getTask);
 
-// POST /api/tasks - Create a new task for logged-in user
-router.post("/", taskController.createTask);
+// POST /api/tasks - Create a new task for logged-in user (requires task creation access)
+router.post("/", requireTaskCreationAccess, taskController.createTask);
 
-// POST /api/tasks/bulk - Create multiple tasks in bulk with AI classification
-router.post("/bulk", taskController.createBulkTasks);
+// POST /api/tasks/bulk - Create multiple tasks in bulk with AI classification (requires task creation access)
+router.post("/bulk", requireTaskCreationAccess, taskController.createBulkTasks);
 
-// PATCH /api/tasks/:id - Restore task (set completed: false)
-router.patch("/:id", taskController.restoreTask);
+// PATCH /api/tasks/:id - Restore task (set completed: false) (requires write access)
+router.patch("/:id", requireWriteAccess, taskController.restoreTask);
 
-// PUT /api/tasks/:id - Update task by ID (only if it belongs to logged-in user)
-router.put("/:id", taskController.updateTask);
+// PUT /api/tasks/:id - Update task by ID (only if it belongs to logged-in user) (requires write access)
+router.put("/:id", requireWriteAccess, taskController.updateTask);
 
-// PUT /api/tasks/:id/toggle - Toggle task completion status
-router.put("/:id/toggle", taskController.toggleTaskCompletion);
+// PUT /api/tasks/:id/toggle - Toggle task completion status (requires write access)
+router.put("/:id/toggle", requireWriteAccess, taskController.toggleTaskCompletion);
 
-// PUT /api/tasks/positions - Update multiple task positions (for drag-and-drop reordering)
-router.put("/positions", taskController.updateTaskPositions);
+// PUT /api/tasks/positions - Update multiple task positions (for drag-and-drop reordering) (requires write access)
+router.put("/positions", requireWriteAccess, taskController.updateTaskPositions);
 
-// DELETE /api/tasks/:id - Delete task by ID (only if it belongs to logged-in user)
-router.delete("/:id", taskController.deleteTask);
+// DELETE /api/tasks/:id - Delete task by ID (only if it belongs to logged-in user) (requires write access)
+router.delete("/:id", requireWriteAccess, taskController.deleteTask);
 
 export default router;

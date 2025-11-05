@@ -1,4 +1,5 @@
 import prisma from "../config/prisma.js";
+import { subscriptionService } from "./subscription.service.js";
 
 // Check if user is workspace owner
 const isWorkspaceOwner = async (userId: number): Promise<boolean> => {
@@ -68,7 +69,7 @@ export const listMembers = async (userId: number, teamId: number) => {
     include: { user: { select: { id: true, username: true, name: true, email: true } } },
     orderBy: { createdAt: "asc" }
   });
-  return members.map(m => ({ 
+  return members.map((m: any) => ({ 
     id: m.user.id, 
     username: m.user.username, 
     name: m.user.name, 
@@ -82,7 +83,7 @@ export const searchUsers = async (userId: number, teamId: number, query: string,
   await verifyTeamAccess(userId, teamId);
   
   const existing = await prisma.teamMembership.findMany({ where: { teamId }, select: { userId: true } });
-  const existingIds = new Set(existing.map(e => e.userId));
+  const existingIds = new Set(existing.map((e: any) => e.userId));
 
   const users = await prisma.user.findMany({
     where: {
@@ -95,7 +96,17 @@ export const searchUsers = async (userId: number, teamId: number, query: string,
     select: { id: true, username: true, name: true, email: true }
   });
 
-  return users.filter(u => !existingIds.has(u.id));
+  // Filter out users who don't have active subscriptions
+  const usersWithActiveSubscriptions = await Promise.all(
+    users.map(async (user: any) => {
+      const hasActive = await subscriptionService.hasActiveSubscription(user.id);
+      return hasActive.hasActive ? user : null;
+    })
+  );
+
+  return usersWithActiveSubscriptions
+    .filter(u => u !== null && !existingIds.has(u!.id))
+    .map(u => u!);
 };
 
 export const addMember = async (userId: number, teamId: number, userIdToAdd: number) => {

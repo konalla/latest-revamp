@@ -17,6 +17,8 @@ import cognitiveLoadRoutes from "./routes/cognitive-load.routes.js";
 import analyticsRoutes from "./routes/analytics.routes.js";
 import workspaceRoutes from "./routes/workspace.routes.js";
 import teamRoutes from "./routes/team.routes.js";
+import subscriptionRoutes from "./routes/subscription.routes.js";
+import webhookRoutes from "./routes/webhook.routes.js";
 
 const app = express();
 
@@ -28,6 +30,12 @@ app.use(cors({
   allowedHeaders: ["Content-Type", "Authorization"]
 }));
 
+// Webhook routes need raw body for Stripe signature verification
+// This must be before express.json() middleware
+// Express v5: use express.raw() with proper type
+app.use("/api/webhooks", express.raw({ type: "application/json" }), webhookRoutes);
+
+// JSON body parser for all other routes
 app.use(express.json());
 
 // Serve static files from uploads directory
@@ -49,5 +57,6 @@ app.use("/api/cognitive-load", cognitiveLoadRoutes);
 app.use("/api/analytics", analyticsRoutes);
 app.use("/api", workspaceRoutes);
 app.use("/api", teamRoutes);
+app.use("/api/subscriptions", subscriptionRoutes);
 
 export default app;

@@ -3,6 +3,7 @@ import type { CreateTaskRequest, UpdateTaskRequest, TaskQueryParams, TaskRespons
 import { aiRecommendationService } from "./ai-recommendation.service.js";
 import { WorkCategory } from "./ai-recommendation.service.js";
 import { CognitiveLoadService } from "./cognitive-load.service.js";
+import { subscriptionService } from "./subscription.service.js";
 
 export class TaskService {
   private cognitiveLoadService: CognitiveLoadService;
@@ -167,6 +168,13 @@ export class TaskService {
         });
       });
 
+      // Increment task count for each created task
+      for (let i = 0; i < createdTasks.length; i++) {
+        subscriptionService.incrementTaskCount(userId).catch((error: any) => {
+          console.error("Error incrementing task count:", error);
+        });
+      }
+
       return {
         tasks: createdTasks as TaskResponse[],
         message: `Successfully created and categorized ${createdTasks.length} tasks using intelligent priority analysis.`
@@ -237,6 +245,11 @@ export class TaskService {
     // Generate AI recommendation asynchronously (non-blocking)
     this.generateAIRecommendationAsync(task.id, userId).catch((error: any) => {
       console.error("Error generating AI recommendation for new task:", error);
+    });
+
+    // Increment task count for subscription tracking
+    subscriptionService.incrementTaskCount(userId).catch((error: any) => {
+      console.error("Error incrementing task count:", error);
     });
 
     return task as TaskResponse;
