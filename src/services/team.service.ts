@@ -1,9 +1,25 @@
 import prisma from "../config/prisma.js";
 
 const getAdminTeamId = async (userId: number): Promise<number> => {
-  const ws = await prisma.workspace.findUnique({ where: { ownerId: userId }, include: { team: true } });
-  if (!ws || !ws.team) throw new Error("Admin team not found");
-  return ws.team.id;
+  const ws = await prisma.workspace.findUnique({ where: { ownerId: userId }, include: { teams: true } });
+  if (!ws || !ws.teams || ws.teams.length === 0) throw new Error("Admin team not found");
+  // Return the first team (the original one created at registration)
+  return ws.teams[0].id;
+};
+
+// Check if user is workspace owner
+const isWorkspaceOwner = async (userId: number): Promise<boolean> => {
+  const workspace = await prisma.workspace.findUnique({ where: { ownerId: userId } });
+  return !!workspace;
+};
+
+// Get workspace for user (must be owner)
+const getWorkspaceForOwner = async (userId: number) => {
+  const workspace = await prisma.workspace.findUnique({ where: { ownerId: userId } });
+  if (!workspace) {
+    throw new Error("Workspace not found. Only workspace owners can manage teams.");
+  }
+  return workspace;
 };
 
 export const listMembers = async (adminUserId: number) => {
@@ -116,6 +132,148 @@ export const updateMemberStatus = async (
       status: updated.status
     }
   };
+};
+
+// Team CRUD operations for workspace owners
+
+export const createTeam = async (userId: number, name: string) => {
+  // Verify user is workspace owner
+  const workspace = await getWorkspaceForOwner(userId);
+
+  // Check if team name already exists in this workspace
+  const existingTeam = await prisma.team.findFirst({
+    where: {
+      workspaceId: workspace.id,
+      name: name.trim()
+    }
+  });
+
+  if (existingTeam) {
+    throw new Error("A team with this name already exists in your workspace");
+  }
+
+  // Create team and add creator as ADMIN
+  return await prisma.$transaction(async (tx) => {
+    const team = await tx.team.create({
+      data: {
+        name: name.trim(),
+        workspaceId: workspace.id
+      }
+    });
+
+    // Creator becomes ADMIN of the new team
+    await tx.teamMembership.create({
+      data: {
+        userId,
+        teamId: team.id,
+        role: "ADMIN",
+        status: "ACTIVE"
+      }
+    });
+
+    return team;
+  });
+};
+
+export const updateTeam = async (userId: number, teamId: number, name: string) => {
+  // Verify user is workspace owner
+  const workspace = await getWorkspaceForOwner(userId);
+
+  // Verify team belongs to this workspace
+  const team = await prisma.team.findFirst({
+    where: {
+      id: teamId,
+      workspaceId: workspace.id
+    }
+  });
+
+  if (!team) {
+    throw new Error("Team not found or you don't have permission to update it");
+  }
+
+  // Check if another team with this name exists in this workspace
+  const existingTeam = await prisma.team.findFirst({
+    where: {
+      workspaceId: workspace.id,
+      name: name.trim(),
+      id: { not: teamId }
+    }
+  });
+
+  if (existingTeam) {
+    throw new Error("A team with this name already exists in your workspace");
+  }
+
+  return await prisma.team.update({
+    where: { id: teamId },
+    data: { name: name.trim() }
+  });
+};
+
+export const deleteTeam = async (userId: number, teamId: number) => {
+  // Verify user is workspace owner
+  const workspace = await getWorkspaceForOwner(userId);
+
+  // Verify team belongs to this workspace
+  const team = await prisma.team.findFirst({
+    where: {
+      id: teamId,
+      workspaceId: workspace.id
+    }
+  });
+
+  if (!team) {
+    throw new Error("Team not found or you don't have permission to delete it");
+  }
+
+  // Delete team (cascade will handle memberships and related data)
+  await prisma.team.delete({
+    where: { id: teamId }
+  });
+
+  return { message: "Team deleted successfully" };
+};
+
+export const getTeamsInWorkspace = async (userId: number) => {
+  // Verify user is workspace owner
+  const workspace = await getWorkspaceForOwner(userId);
+
+  // Get all teams in the workspace with member counts
+  const teams = await prisma.team.findMany({
+    where: { workspaceId: workspace.id },
+    include: {
+      memberships: {
+        include: {
+          user: {
+            select: {
+              id: true,
+              username: true,
+              name: true,
+              email: true
+            }
+          }
+        }
+      }
+    },
+    orderBy: { createdAt: "asc" }
+  });
+
+  return teams.map(team => ({
+    id: team.id,
+    name: team.name,
+    workspaceId: team.workspaceId,
+    createdAt: team.createdAt,
+    updatedAt: team.updatedAt,
+    memberCount: team.memberships.length,
+    members: team.memberships.map(m => ({
+      id: m.user.id,
+      username: m.user.username,
+      name: m.user.name,
+      email: m.user.email,
+      role: m.role,
+      status: m.status
+    }))
+  }));
 };
 
 

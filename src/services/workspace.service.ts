@@ -28,7 +28,7 @@ const findAvailableName = async (table: "workspace" | "team", baseName: string):
 export const ensureWorkspaceAndTeamForUser = async (userId: number, name: string, username: string) => {
   return await prisma.$transaction(async (tx) => {
     // One workspace per owner enforced by unique(ownerId)
-    let workspace = await tx.workspace.findUnique({ where: { ownerId: userId }, include: { team: true } });
+    let workspace = await tx.workspace.findUnique({ where: { ownerId: userId }, include: { teams: true } });
     if (!workspace) {
       const { workspaceBase, teamBase } = generateBaseNames(name, username);
       const workspaceName = await findAvailableName("workspace", workspaceBase);
@@ -40,8 +40,8 @@ export const ensureWorkspaceAndTeamForUser = async (userId: number, name: string
       // Owner becomes ADMIN member of their team
       await tx.teamMembership.create({ data: { userId, teamId: team.id, role: "ADMIN", status: "ACTIVE" } });
 
-      workspace = { ...workspace, team } as any;
-    } else if (!workspace.team) {
+      workspace = { ...workspace, teams: [team] } as any;
+    } else if (!workspace.teams || workspace.teams.length === 0) {
       const { teamBase } = generateBaseNames(name, username);
       const teamName = await findAvailableName("team", teamBase);
       const team = await tx.team.create({ data: { name: teamName, workspaceId: workspace.id } });
@@ -50,12 +50,13 @@ export const ensureWorkspaceAndTeamForUser = async (userId: number, name: string
         create: { userId, teamId: team.id, role: "ADMIN", status: "ACTIVE" },
         update: { role: "ADMIN" }
       });
-      workspace = { ...workspace, team } as any;
+      workspace = { ...workspace, teams: [team] } as any;
     } else {
-      // Ensure admin membership exists
+      // Ensure admin membership exists for the first team (original team)
+      const firstTeam = workspace.teams[0];
       await tx.teamMembership.upsert({
-        where: { userId_teamId: { userId, teamId: workspace.team.id } },
-        create: { userId, teamId: workspace.team.id, role: "ADMIN", status: "ACTIVE" },
+        where: { userId_teamId: { userId, teamId: firstTeam.id } },
+        create: { userId, teamId: firstTeam.id, role: "ADMIN", status: "ACTIVE" },
         update: { role: "ADMIN" }
       });
     }
@@ -65,7 +66,7 @@ export const ensureWorkspaceAndTeamForUser = async (userId: number, name: string
 };
 
 export const getMyWorkspace = async (userId: number) => {
-  return prisma.workspace.findUnique({ where: { ownerId: userId }, include: { team: true } });
+  return prisma.workspace.findUnique({ where: { ownerId: userId }, include: { teams: true } });
 };
 
 export const renameWorkspace = async (userId: number, newName: string) => {
@@ -76,10 +77,10 @@ export const renameWorkspace = async (userId: number, newName: string) => {
 };
 
 export const renameTeam = async (userId: number, newName: string) => {
-  const ws = await prisma.workspace.findUnique({ where: { ownerId: userId }, include: { team: true } });
-  if (!ws || !ws.team) throw new Error("Team not found");
-  // owner implied admin
-  return prisma.team.update({ where: { id: ws.team.id }, data: { name: newName } });
+  const ws = await prisma.workspace.findUnique({ where: { ownerId: userId }, include: { teams: true } });
+  if (!ws || !ws.teams || ws.teams.length === 0) throw new Error("Team not found");
+  // owner implied admin - rename the first team (original team)
+  return prisma.team.update({ where: { id: ws.teams[0].id }, data: { name: newName } });
 };
 
 export const getMyTeam = async (userId: number) => {
@@ -115,9 +116,9 @@ export const getMyTeam = async (userId: number) => {
 };
 
 export const isAdminOfOwnTeam = async (userId: number): Promise<boolean> => {
-  const ws = await prisma.workspace.findUnique({ where: { ownerId: userId }, include: { team: true } });
-  if (!ws || !ws.team) return false;
-  const admin = await prisma.teamMembership.findUnique({ where: { userId_teamId: { userId, teamId: ws.team.id } } });
+  const ws = await prisma.workspace.findUnique({ where: { ownerId: userId }, include: { teams: true } });
+  if (!ws || !ws.teams || ws.teams.length === 0) return false;
+  const admin = await prisma.teamMembership.findUnique({ where: { userId_teamId: { userId, teamId: ws.teams[0].id } } });
   return !!admin && admin.role === "ADMIN";
 };
 
@@ -135,14 +136,14 @@ export const createWorkspaceAndTeam = async (userId: number) => {
   // Check if workspace already exists
   const existingWorkspace = await prisma.workspace.findUnique({ 
     where: { ownerId: userId },
-    include: { team: true }
+    include: { teams: true }
   });
 
   if (existingWorkspace) {
-    // Return existing workspace and team
+    // Return existing workspace and first team
     return {
       workspace: existingWorkspace,
-      team: existingWorkspace.team,
+      team: existingWorkspace.teams && existingWorkspace.teams.length > 0 ? existingWorkspace.teams[0] : null,
       created: false,
       message: "Workspace and team already exist"
     };
@@ -153,7 +154,7 @@ export const createWorkspaceAndTeam = async (userId: number) => {
   
   return {
     workspace: workspaceData,
-    team: workspaceData.team,
+    team: workspaceData.teams && workspaceData.teams.length > 0 ? workspaceData.teams[0] : null,
     created: true,
     message: "Workspace and team created successfully"
   };
