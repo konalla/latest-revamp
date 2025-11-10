@@ -21,6 +21,9 @@ model User {
   // Profile Information
   phone_number               String?
   company_name               String?
+  company_size               String?
+  company_description        String?
+  founded_year               Int?
   website                    String?
   profile_photo_url          String?
   job_title                  String?
@@ -41,6 +44,16 @@ model User {
   profile_completion_percentage Int   @default(20)
   last_profile_update        DateTime @default(now())
 
+  // Work Duration Preferences (AI Recommendation System)
+  deep_work_start_time       String   @default("09:00")
+  deep_work_end_time         String   @default("12:00")
+  creative_work_start_time   String   @default("12:00")
+  creative_work_end_time     String   @default("15:00")
+  reflective_work_start_time String   @default("15:00")
+  reflective_work_end_time   String   @default("18:00")
+  executive_work_start_time  String   @default("18:00")
+  executive_work_end_time    String   @default("21:00")
+
   // Credits System
   credits                    Int      @default(100)
   credit_refresh_period      String   @default("monthly")
@@ -48,12 +61,22 @@ model User {
   last_credit_refresh        DateTime @default(now())
 
   created_at                 DateTime @default(now())
+  updated_at                 DateTime @updatedAt
   
   // Relations
   projects                   Project[]
   objectives                 Objective[]
   okrs                       Okr[]
   tasks                      Task[]
+  userSettings               UserSettings?
+  focusSessions              FocusSession[]
+  cognitiveLoadMeter         CognitiveLoadMeter?
+  userProductivityPatterns   UserProductivityPatterns?
+  userFocusPreferences       UserFocusPreferences?
+
+  // Workspace/Team relations
+  ownedWorkspaces            Workspace[]
+  teamMemberships            TeamMembership[]
 }
 
 model Project {
@@ -69,9 +92,13 @@ model Project {
   userId      Int
   is_private  Boolean  @default(false)
   visibility  String   @default("private")
+  workspaceId Int?
+  teamId      Int?
   
   // Relations
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace   Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  team        Team?    @relation(fields: [teamId], references: [id], onDelete: Cascade)
   plans       Plan[]
   tasks       Task[]
   objectives  Objective[]
@@ -87,12 +114,16 @@ model Objective {
   end_date    DateTime?
   created_at  DateTime @default(now())
   position    Int      @default(0)
+  workspaceId Int?
+  teamId      Int?
 
   // Relations
   userId      Int
   projectId   Int?
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   project     Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  workspace   Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  team        Team?    @relation(fields: [teamId], references: [id], onDelete: Cascade)
   plans       Plan[]
   okrs        Okr[]
   tasks       Task[]
@@ -135,11 +166,15 @@ model Okr {
   confidenceScore Int       @default(3)
   keyResults      Json      @default("[]")
   progressHistory Json      @default("[]")
+  workspaceId     Int?
+  teamId          Int?
 
   // Relations
   user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   objective       Objective? @relation(fields: [objectiveId], references: [id], onDelete: Cascade)
   plan            Plan?     @relation(fields: [planId], references: [id], onDelete: Cascade)
+  workspace       Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  team            Team?    @relation(fields: [teamId], references: [id], onDelete: Cascade)
   tasks           Task[]
 }
 
@@ -153,6 +188,7 @@ model Task {
   position               Int
   createdAt              DateTime  @default(now())
   completed              Boolean   @default(false)
+  dueDate                DateTime?
 
   // Eisenhower Matrix
   importance             Boolean   @default(false)
@@ -164,10 +200,202 @@ model Task {
   objectiveId            Int?
   okrId                  Int?
   planId                 Int?      // Added optional Plan reference
+  workspaceId            Int?
+  teamId                 Int?
 
   user                  User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   project               Project?   @relation(fields: [projectId], references: [id], onDelete: Cascade)
   objective             Objective? @relation(fields: [objectiveId], references: [id], onDelete: Cascade)
   okr                   Okr?       @relation(fields: [okrId], references: [id], onDelete: Cascade)
   plan                  Plan?      @relation(fields: [planId], references: [id], onDelete: Cascade)
+  workspace             Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  team                  Team?     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  
+  // AI Recommendation relation
+  aiRecommendation       AIRecommendation?
+}
+
+model AIRecommendation {
+  id                     Int       @id @default(autoincrement())
+  taskId                 Int       @unique
+  category               String    // DEEP_WORK, CREATIVE_WORK, REFLECTIVE_WORK, EXECUTIVE_WORK
+  recommendedTime        String    // Time in HH:MM format
+  confidence             Float     // 0.0 to 1.0
+  reasoning              String?   // Optional reasoning text
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  // Relations
+  task                   Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+}
+
+model UserSettings {
+  id                     Int       @id @default(autoincrement())
+  language               String    @default("english")
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  // Relations
+  userId                 Int       @unique
+  user                   User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model FocusSession {
+  id                      Int      @id @default(autoincrement())
+  userId                  Int      @map("user_id")
+  sessionType             String   @map("session_type")
+  status                  String   @default("active")
+  intention               Json     @default("{}")
+  startedAt               DateTime @default(now()) @map("started_at")
+  endedAt                 DateTime? @map("ended_at")
+  duration                Int      @default(0)
+  completed               Boolean  @default(false)
+  notes                   String?
+  tasksCompleted          Int      @default(0) @map("tasks_completed")
+  createdAt               DateTime @default(now()) @map("created_at")
+
+  // AI Analytics
+  aiScore                 Int?     @map("ai_score")
+  distractions            Int      @default(0)
+  environment             String?
+  mood                    String?
+  energyLevel             String?  @map("energy_level")
+  cognitiveFlowScore      Int?     @map("cognitive_flow_score")
+  contextSwitchCount      Int      @default(0) @map("context_switch_count")
+  flowState               String?  @map("flow_state")
+  taskGroupEffectiveness  Json     @default("{}") @map("task_group_effectiveness")
+
+  // Relations
+  user                    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, sessionType, status, startedAt], name: "focus_sessions_user_type_status_started_at_idx")
+  @@map("focus_sessions")
+}
+
+model CognitiveLoadMeter {
+  id                              Int      @id @default(autoincrement())
+  userId                          Int      @map("user_id")
+  currentWorkloadScore            Int      @default(50) @map("current_workload_score")
+  cognitiveCapacity               Int      @default(100) @map("cognitive_capacity")
+  sustainableCapacity             Int      @default(75) @map("sustainable_capacity")
+  burnoutRiskScore                Int      @default(0) @map("burnout_risk_score")
+  burnoutRiskLevel                String   @default("NONE") @map("burnout_risk_level")
+  recoveryRate                    Int      @default(5) @map("recovery_rate")
+  workloadHistory                 Json     @default("[]") @map("workload_history")
+  capacityUtilization             Json     @default("[]") @map("capacity_utilization")
+  recommendedTaskLimit            Int?     @map("recommended_task_limit")
+  recommendedFocusSessionDuration Int?    @map("recommended_focus_session_duration")
+  recommendedBreakFrequency       Int?     @map("recommended_break_frequency")
+  currentStatus                   String   @default("OPTIMAL") @map("current_status")
+  createdAt                       DateTime @default(now()) @map("created_at")
+  updatedAt                       DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  user                            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId])
+  @@map("cognitive_load_meters")
+}
+
+model UserProductivityPatterns {
+  id                              Int      @id @default(autoincrement())
+  userId                          Int      @map("user_id")
+  hourlyPatterns                  Json     @default("{}") @map("hourly_patterns")
+  dayOfWeekPatterns               Json     @default("{}") @map("day_of_week_patterns")
+  taskSwitchingMetrics            Json     @default("{}") @map("task_switching_metrics")
+  taskCompletionRate              Float    @default(0.0) @map("task_completion_rate")
+  averageFocusSessionDuration     Int      @default(25) @map("average_focus_session_duration")
+  peakProductivityHours           Json     @default("[]") @map("peak_productivity_hours")
+  energyPattern                   String?  @map("energy_pattern")
+  contextSwitchingProfile         String?  @map("context_switching_profile")
+  recoveryPattern                 String?  @map("recovery_pattern")
+  createdAt                       DateTime @default(now()) @map("created_at")
+  updatedAt                       DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  user                            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId])
+  @@map("user_productivity_patterns")
+}
+
+model UserFocusPreferences {
+  id                              Int      @id @default(autoincrement())
+  userId                          Int      @map("user_id")
+  workingHours                    Json     @default("{}") @map("working_hours")
+  cognitiveLoadPreferences        Json     @default("{}") @map("cognitive_load_preferences")
+  preferredFocusDuration          Int      @default(25) @map("preferred_focus_duration")
+  preferredBreakDuration          Int      @default(5) @map("preferred_break_duration")
+  maxConsecutiveSessions          Int      @default(4) @map("max_consecutive_sessions")
+  breakFrequency                  Int      @default(5) @map("break_frequency")
+  deepWorkPreferences             Json     @default("{}") @map("deep_work_preferences")
+  environmentPreferences          Json     @default("{}") @map("environment_preferences")
+  createdAt                       DateTime @default(now()) @map("created_at")
+  updatedAt                       DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  user                            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId])
+  @@map("user_focus_preferences")
+}
+
+enum TeamRole {
+  ADMIN
+  MEMBER
+}
+
+enum TeamMemberStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  UNDER_REVIEW
+}
+
+model Workspace {
+  id         Int       @id @default(autoincrement())
+  name       String
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  // Relations
+  ownerId    Int       @unique
+  owner      User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  teams      Team[]
+  projects   Project[]
+  objectives Objective[]
+  okrs       Okr[]
+  tasks      Task[]
+}
+
+model Team {
+  id          Int              @id @default(autoincrement())
+  name        String
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  // Relations
+  workspaceId Int
+  workspace   Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  memberships TeamMembership[]
+  projects    Project[]
+  objectives  Objective[]
+  okrs        Okr[]
+  tasks       Task[]
+}
+
+model TeamMembership {
+  id        Int              @id @default(autoincrement())
+  role      TeamRole         @default(MEMBER)
+  status    TeamMemberStatus @default(ACTIVE)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  // Relations
+  userId    Int
+  teamId    Int
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team      Team             @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, teamId])
 }

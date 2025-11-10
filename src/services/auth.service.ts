@@ -2,17 +2,28 @@ import bcrypt from "bcrypt";
 import prisma from "../config/prisma.js";
 import type { LoginRequest, RegisterRequest, AuthResponse } from "../types/auth.types.js";
 import { generateToken } from "../utils/jwt.utils.js";
+import { ensureWorkspaceAndTeamForUser } from "./workspace.service.js";
 
 const SALT_ROUNDS = 10;
 
 const register = async (data: RegisterRequest): Promise<AuthResponse> => {
-  // Check if user already exists
-  const existingUser = await prisma.user.findUnique({
+  // Check if user with email already exists
+  const existingUserByEmail = await prisma.user.findUnique({
     where: { email: data.email }
   });
 
-  if (existingUser) {
-    throw new Error("User with this email already exists");
+  // Check if user with username already exists
+  const existingUserByUsername = await prisma.user.findUnique({
+    where: { username: data.username }
+  });
+
+  // Handle duplicate user scenarios
+  if (existingUserByEmail && existingUserByUsername) {
+    throw new Error("Both email and username already exist");
+  } else if (existingUserByEmail) {
+    throw new Error("Email already exists");
+  } else if (existingUserByUsername) {
+    throw new Error("Username already exists");
   }
 
   // Hash the password
@@ -34,6 +45,9 @@ const register = async (data: RegisterRequest): Promise<AuthResponse> => {
       role: true,
     }
   });
+
+  // Ensure workspace and team exist for this user
+  await ensureWorkspaceAndTeamForUser(user.id, user.name, user.username);
 
   // Generate JWT token
   const token = generateToken({
@@ -69,6 +83,13 @@ const login = async (data: LoginRequest): Promise<AuthResponse> => {
 
   if (!isPasswordValid) {
     throw new Error("Invalid credentials");
+  }
+
+  // Ensure workspace/team backfill for existing users
+  try {
+    await ensureWorkspaceAndTeamForUser(user.id, user.name, user.username);
+  } catch (e) {
+    // Non-fatal for login
   }
 
   // Generate JWT token

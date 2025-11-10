@@ -194,6 +194,8 @@ iqniti-backend/
    npx prisma migrate dev
    ```
 
+   npx prisma migrate deploy
+
 4. **Port already in use**
    - Change the `PORT` in your `.env` file
    - Or kill the process using the port: `lsof -ti:3000 | xargs kill`
