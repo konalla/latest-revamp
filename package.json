@@ -1,0 +1,43 @@
+{
+  "name": "iqniti-backend",
+  "version": "1.0.0",
+  "main": "./dist/server.js",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "postinstall": "npx prisma generate",
+    "prisma": "node --experimental-wasm-reftypes ./node_modules/.bin/prisma"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "devDependencies": {
+    "@types/express": "^5.0.3",
+    "@types/node": "^24.3.1",
+    "nodemon": "^3.1.10",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  },
+  "dependencies": {
+    "@langchain/openai": "^0.3.15",
+    "@prisma/client": "^6.17.1",
+    "@types/bcrypt": "^6.0.0",
+    "@types/cors": "^2.8.19",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/multer": "^2.0.0",
+    "bcrypt": "^6.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.2",
+    "express": "^5.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "langchain": "^0.3.7",
+    "multer": "^2.0.2",
+    "prisma": "^6.16.0",
+    "reflect-metadata": "^0.2.2",
+    "zod": "^3.22.4"
+  }
+}

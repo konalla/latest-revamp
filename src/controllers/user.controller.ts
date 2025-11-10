@@ -1,0 +1,131 @@
+import type { Request, Response } from "express";
+import * as userService from "../services/user.service.js";
+import type { CreateUserRequest } from "../types/user.types.js";
+
+const createUser = async (req: Request<{}, {}, CreateUserRequest>, res: Response) => {
+  try {
+    const user = await userService.createUser(req.body);
+    res.status(201).json(user);
+  } catch (error: any) {
+    res.status(400).json({ message: error.message });
+  }
+};
+
+const getUsers = async (req: Request, res: Response) => {
+  const users = await userService.getAllUsers();
+  res.json(users);
+};
+
+const getUser = async (req: Request, res: Response) => {
+  const user = await userService.getUserById(parseInt(req.params.id!));
+  if (!user) return res.status(404).json({ message: "User not found" });
+  res.json(user);
+};
+
+const updateUser = async (req: Request, res: Response) => {
+  try {
+    const user = await userService.updateUser(parseInt(req.params.id!), req.body);
+    res.json(user);
+  } catch (error: any) {
+    res.status(400).json({ message: error.message });
+  }
+};
+
+const deleteUser = async (req: Request, res: Response) => {
+  try {
+    await userService.deleteUser(parseInt(req.params.id!));
+    res.json({ message: "User deleted successfully" });
+  } catch (error: any) {
+    res.status(400).json({ message: error.message });
+  }
+};
+
+const getCurrentUser = async (req: Request, res: Response) => {
+  try {
+    // req.user is available from JWT middleware
+    if (!req.user) {
+      return res.status(401).json({ message: "User not authenticated" });
+    }
+    
+    const user = await userService.getUserById(req.user.userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    
+    // Don't return password
+    const { password, ...userWithoutPassword } = user;
+    
+    // Add default language for now
+    const response = {
+      ...userWithoutPassword,
+      language: "english"
+    };
+    
+    res.json(response);
+  } catch (error: any) {
+    res.status(400).json({ message: error.message });
+  }
+};
+
+const changePassword = async (req: Request, res: Response) => {
+  try {
+    // req.user is available from JWT middleware
+    if (!req.user) {
+      return res.status(401).json({ message: "User not authenticated" });
+    }
+    
+    const result = await userService.changePassword(req.user.userId, req.body);
+    res.json(result);
+  } catch (error: any) {
+    res.status(400).json({ message: error.message });
+  }
+};
+
+const uploadProfilePhoto = async (req: Request, res: Response) => {
+  try {
+    // req.user is available from JWT middleware
+    if (!req.user) {
+      return res.status(401).json({ 
+        success: false, 
+        message: "User not authenticated" 
+      });
+    }
+
+    // Check if file was uploaded
+    if (!req.file) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "No file uploaded" 
+      });
+    }
+
+    // Generate the photo URL path
+    const photoUrl = `/uploads/profile/${req.file.filename}`;
+    
+    // Update user profile photo URL in database
+    const updatedUser = await userService.updateProfilePhoto(req.user.userId, photoUrl);
+
+    // Return success response
+    res.status(200).json({
+      success: true,
+      photoUrl: photoUrl,
+      user: updatedUser
+    });
+  } catch (error: any) {
+    res.status(500).json({ 
+      success: false, 
+      message: error.message || "Failed to upload profile photo" 
+    });
+  }
+};
+
+export {
+  createUser,
+  getUsers,
+  getUser,
+  updateUser,
+  deleteUser,
+  getCurrentUser,
+  changePassword,
+  uploadProfilePhoto,
+};
