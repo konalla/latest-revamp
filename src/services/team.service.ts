@@ -1,12 +1,5 @@
 import prisma from "../config/prisma.js";
 
-const getAdminTeamId = async (userId: number): Promise<number> => {
-  const ws = await prisma.workspace.findUnique({ where: { ownerId: userId }, include: { teams: true } });
-  if (!ws || !ws.teams || ws.teams.length === 0) throw new Error("Admin team not found");
-  // Return the first team (the original one created at registration)
-  return ws.teams[0].id;
-};
-
 // Check if user is workspace owner
 const isWorkspaceOwner = async (userId: number): Promise<boolean> => {
   const workspace = await prisma.workspace.findUnique({ where: { ownerId: userId } });
@@ -22,8 +15,54 @@ const getWorkspaceForOwner = async (userId: number) => {
   return workspace;
 };
 
-export const listMembers = async (adminUserId: number) => {
-  const teamId = await getAdminTeamId(adminUserId);
+// Check if user can manage a team (workspace owner or team ADMIN)
+const canManageTeam = async (userId: number, teamId: number): Promise<boolean> => {
+  // Check if user is workspace owner
+  const workspace = await prisma.workspace.findFirst({
+    where: {
+      ownerId: userId,
+      teams: {
+        some: { id: teamId }
+      }
+    }
+  });
+  
+  if (workspace) {
+    return true; // Workspace owner can manage any team in their workspace
+  }
+  
+  // Check if user is ADMIN of the team
+  const membership = await prisma.teamMembership.findUnique({
+    where: {
+      userId_teamId: { userId, teamId }
+    }
+  });
+  
+  return membership?.role === "ADMIN";
+};
+
+// Verify team exists and user has permission to manage it
+const verifyTeamAccess = async (userId: number, teamId: number) => {
+  const team = await prisma.team.findUnique({
+    where: { id: teamId },
+    include: { workspace: true }
+  });
+  
+  if (!team) {
+    throw new Error("Team not found");
+  }
+  
+  const hasAccess = await canManageTeam(userId, teamId);
+  if (!hasAccess) {
+    throw new Error("You don't have permission to manage this team");
+  }
+  
+  return team;
+};
+
+export const listMembers = async (userId: number, teamId: number) => {
+  await verifyTeamAccess(userId, teamId);
+  
   const members = await prisma.teamMembership.findMany({
     where: { teamId },
     include: { user: { select: { id: true, username: true, name: true, email: true } } },
@@ -39,8 +78,9 @@ export const listMembers = async (adminUserId: number) => {
   }));
 };
 
-export const searchUsers = async (adminUserId: number, query: string, limit = 20) => {
-  const teamId = await getAdminTeamId(adminUserId);
+export const searchUsers = async (userId: number, teamId: number, query: string, limit = 20) => {
+  await verifyTeamAccess(userId, teamId);
+  
   const existing = await prisma.teamMembership.findMany({ where: { teamId }, select: { userId: true } });
   const existingIds = new Set(existing.map(e => e.userId));
 
@@ -58,25 +98,29 @@ export const searchUsers = async (adminUserId: number, query: string, limit = 20
   return users.filter(u => !existingIds.has(u.id));
 };
 
-export const addMember = async (adminUserId: number, userIdToAdd: number) => {
-  const teamId = await getAdminTeamId(adminUserId);
-  if (adminUserId === userIdToAdd) {
-    // Admin already a member
+export const addMember = async (userId: number, teamId: number, userIdToAdd: number) => {
+  await verifyTeamAccess(userId, teamId);
+  
+  // Check if user is already a member
+  const existing = await prisma.teamMembership.findUnique({
+    where: { userId_teamId: { userId: userIdToAdd, teamId } }
+  });
+  
+  if (existing) {
     return { message: "User already in team" };
   }
-  await prisma.teamMembership.upsert({
-    where: { userId_teamId: { userId: userIdToAdd, teamId } },
-    create: { userId: userIdToAdd, teamId, role: "MEMBER", status: "ACTIVE" },
-    update: { role: "MEMBER", status: "ACTIVE" }
+  
+  await prisma.teamMembership.create({
+    data: { userId: userIdToAdd, teamId, role: "MEMBER", status: "ACTIVE" }
   });
   return { message: "User added to team" };
 };
 
-export const removeMember = async (adminUserId: number, userIdToRemove: number) => {
-  const teamId = await getAdminTeamId(adminUserId);
+export const removeMember = async (userId: number, teamId: number, userIdToRemove: number) => {
+  await verifyTeamAccess(userId, teamId);
   
-  // Prevent admin from removing themselves
-  if (adminUserId === userIdToRemove) {
+  // Prevent user from removing themselves
+  if (userId === userIdToRemove) {
     throw new Error("Cannot remove yourself from the team");
   }
 
@@ -98,11 +142,12 @@ export const removeMember = async (adminUserId: number, userIdToRemove: number) 
 };
 
 export const updateMemberStatus = async (
-  adminUserId: number, 
+  userId: number,
+  teamId: number,
   userIdToUpdate: number, 
   status: "ACTIVE" | "INACTIVE" | "SUSPENDED" | "UNDER_REVIEW"
 ) => {
-  const teamId = await getAdminTeamId(adminUserId);
+  await verifyTeamAccess(userId, teamId);
 
   // Check if the member exists
   const membership = await prisma.teamMembership.findUnique({

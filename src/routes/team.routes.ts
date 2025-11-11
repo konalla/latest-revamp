@@ -4,11 +4,12 @@ import { addMemberController, getMembers, searchUsersController, removeMemberCon
 
 const router = Router();
 
-router.get("/team/members", authenticateToken, getMembers);
-router.get("/team/search-users", authenticateToken, searchUsersController);
-router.post("/team/members", authenticateToken, addMemberController);
-router.delete("/team/members/:userId", authenticateToken, removeMemberController);
-router.patch("/team/members/:userId/status", authenticateToken, updateMemberStatusController);
+// Team member management routes - all require teamId
+router.get("/team/:teamId/members", authenticateToken, getMembers);
+router.get("/team/:teamId/search-users", authenticateToken, searchUsersController);
+router.post("/team/:teamId/members", authenticateToken, addMemberController);
+router.delete("/team/:teamId/members/:userId", authenticateToken, removeMemberController);
+router.patch("/team/:teamId/members/:userId/status", authenticateToken, updateMemberStatusController);
 
 export default router;
 
