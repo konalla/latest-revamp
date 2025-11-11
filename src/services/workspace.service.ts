@@ -32,15 +32,17 @@ export const ensureWorkspaceAndTeamForUser = async (userId: number, name: string
     if (!workspace) {
       const { workspaceBase, teamBase } = generateBaseNames(name, username);
       const workspaceName = await findAvailableName("workspace", workspaceBase);
-      workspace = await tx.workspace.create({ data: { name: workspaceName, ownerId: userId } });
+      const createdWorkspace = await tx.workspace.create({ data: { name: workspaceName, ownerId: userId } });
 
       const teamName = await findAvailableName("team", teamBase);
-      const team = await tx.team.create({ data: { name: teamName, workspaceId: workspace.id } });
+      const team = await tx.team.create({ data: { name: teamName, workspaceId: createdWorkspace.id } });
 
       // Owner becomes ADMIN member of their team
       await tx.teamMembership.create({ data: { userId, teamId: team.id, role: "ADMIN", status: "ACTIVE" } });
 
-      workspace = { ...workspace, teams: [team] } as any;
+      // Fetch the workspace with teams included
+      workspace = await tx.workspace.findUnique({ where: { id: createdWorkspace.id }, include: { teams: true } });
+      if (!workspace) throw new Error("Failed to create workspace");
     } else if (!workspace.teams || workspace.teams.length === 0) {
       const { teamBase } = generateBaseNames(name, username);
       const teamName = await findAvailableName("team", teamBase);
@@ -50,15 +52,19 @@ export const ensureWorkspaceAndTeamForUser = async (userId: number, name: string
         create: { userId, teamId: team.id, role: "ADMIN", status: "ACTIVE" },
         update: { role: "ADMIN" }
       });
-      workspace = { ...workspace, teams: [team] } as any;
+      // Fetch the workspace with teams included
+      workspace = await tx.workspace.findUnique({ where: { id: workspace.id }, include: { teams: true } });
+      if (!workspace) throw new Error("Failed to update workspace");
     } else {
       // Ensure admin membership exists for the first team (original team)
       const firstTeam = workspace.teams[0];
-      await tx.teamMembership.upsert({
-        where: { userId_teamId: { userId, teamId: firstTeam.id } },
-        create: { userId, teamId: firstTeam.id, role: "ADMIN", status: "ACTIVE" },
-        update: { role: "ADMIN" }
-      });
+      if (firstTeam) {
+        await tx.teamMembership.upsert({
+          where: { userId_teamId: { userId, teamId: firstTeam.id } },
+          create: { userId, teamId: firstTeam.id, role: "ADMIN", status: "ACTIVE" },
+          update: { role: "ADMIN" }
+        });
+      }
     }
 
     return workspace;
@@ -80,7 +86,9 @@ export const renameTeam = async (userId: number, newName: string) => {
   const ws = await prisma.workspace.findUnique({ where: { ownerId: userId }, include: { teams: true } });
   if (!ws || !ws.teams || ws.teams.length === 0) throw new Error("Team not found");
   // owner implied admin - rename the first team (original team)
-  return prisma.team.update({ where: { id: ws.teams[0].id }, data: { name: newName } });
+  const firstTeam = ws.teams[0];
+  if (!firstTeam) throw new Error("Team not found");
+  return prisma.team.update({ where: { id: firstTeam.id }, data: { name: newName } });
 };
 
 export const getMyTeam = async (userId: number) => {
@@ -118,7 +126,9 @@ export const getMyTeam = async (userId: number) => {
 export const isAdminOfOwnTeam = async (userId: number): Promise<boolean> => {
   const ws = await prisma.workspace.findUnique({ where: { ownerId: userId }, include: { teams: true } });
   if (!ws || !ws.teams || ws.teams.length === 0) return false;
-  const admin = await prisma.teamMembership.findUnique({ where: { userId_teamId: { userId, teamId: ws.teams[0].id } } });
+  const firstTeam = ws.teams[0];
+  if (!firstTeam) return false;
+  const admin = await prisma.teamMembership.findUnique({ where: { userId_teamId: { userId, teamId: firstTeam.id } } });
   return !!admin && admin.role === "ADMIN";
 };
 
@@ -151,6 +161,10 @@ export const createWorkspaceAndTeam = async (userId: number) => {
 
   // Create workspace and team
   const workspaceData = await ensureWorkspaceAndTeamForUser(user.id, user.name, user.username);
+  
+  if (!workspaceData) {
+    throw new Error("Failed to create workspace");
+  }
   
   return {
     workspace: workspaceData,

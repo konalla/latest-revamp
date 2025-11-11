@@ -4,7 +4,10 @@ import { createTeam, updateTeam, deleteTeam, getTeamsInWorkspace } from "../serv
 
 export const bootstrapMine = async (req: Request, res: Response) => {
   try {
-    const userId = req.user!.id as number;
+    const userId = req.user?.id ?? req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
     const name = (req.user as any)?.name ?? "";
     const username = (req.user as any)?.username ?? "";
     const ws = await ensureWorkspaceAndTeamForUser(userId, name, username);
@@ -16,7 +19,10 @@ export const bootstrapMine = async (req: Request, res: Response) => {
 
 export const getMine = async (req: Request, res: Response) => {
   try {
-    const userId = req.user!.id as number;
+    const userId = req.user?.id ?? req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
     const ws = await getMyWorkspace(userId);
     res.status(200).json(ws);
   } catch (error: any) {
@@ -26,7 +32,10 @@ export const getMine = async (req: Request, res: Response) => {
 
 export const getMyTeamController = async (req: Request, res: Response) => {
   try {
-    const userId = req.user!.id as number;
+    const userId = req.user?.id ?? req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
     const result = await getMyTeam(userId);
     if (!result || result.teams.length === 0) {
       return res.status(200).json({ 
@@ -44,7 +53,10 @@ export const getMyTeamController = async (req: Request, res: Response) => {
 
 export const renameMyWorkspace = async (req: Request, res: Response) => {
   try {
-    const userId = req.user!.id as number;
+    const userId = req.user?.id ?? req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
     const { name } = req.body as { name: string };
     if (!name || !name.trim()) return res.status(400).json({ message: "Name required" });
     const ws = await renameWorkspace(userId, name.trim());
@@ -56,7 +68,10 @@ export const renameMyWorkspace = async (req: Request, res: Response) => {
 
 export const renameMyTeam = async (req: Request, res: Response) => {
   try {
-    const userId = req.user!.id as number;
+    const userId = req.user?.id ?? req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
     const { name } = req.body as { name: string };
     if (!name || !name.trim()) return res.status(400).json({ message: "Name required" });
     const team = await renameTeam(userId, name.trim());
@@ -68,7 +83,10 @@ export const renameMyTeam = async (req: Request, res: Response) => {
 
 export const createWorkspaceAndTeamController = async (req: Request, res: Response) => {
   try {
-    const userId = req.user!.id as number;
+    const userId = req.user?.id ?? req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
     const result = await createWorkspaceAndTeam(userId);
     res.status(result.created ? 201 : 200).json(result);
   } catch (error: any) {
@@ -79,7 +97,10 @@ export const createWorkspaceAndTeamController = async (req: Request, res: Respon
 // Team management controllers (workspace owner only)
 export const createTeamController = async (req: Request, res: Response) => {
   try {
-    const userId = req.user!.id as number;
+    const userId = req.user?.id ?? req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
     const { name } = req.body as { name: string };
     
     if (!name || !name.trim()) {
@@ -98,14 +119,22 @@ export const createTeamController = async (req: Request, res: Response) => {
 
 export const updateTeamController = async (req: Request, res: Response) => {
   try {
-    const userId = req.user!.id as number;
-    const teamId = parseInt(req.params.teamId);
-    const { name } = req.body as { name: string };
-
-    if (!teamId || isNaN(teamId)) {
+    const userId = req.user?.id ?? req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    
+    const teamIdParam = req.params.teamId;
+    if (!teamIdParam) {
+      return res.status(400).json({ message: "teamId is required" });
+    }
+    
+    const teamId = parseInt(teamIdParam);
+    if (isNaN(teamId)) {
       return res.status(400).json({ message: "Invalid team ID" });
     }
 
+    const { name } = req.body as { name: string };
     if (!name || !name.trim()) {
       return res.status(400).json({ message: "Team name is required" });
     }
@@ -122,10 +151,18 @@ export const updateTeamController = async (req: Request, res: Response) => {
 
 export const deleteTeamController = async (req: Request, res: Response) => {
   try {
-    const userId = req.user!.id as number;
-    const teamId = parseInt(req.params.teamId);
-
-    if (!teamId || isNaN(teamId)) {
+    const userId = req.user?.id ?? req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    
+    const teamIdParam = req.params.teamId;
+    if (!teamIdParam) {
+      return res.status(400).json({ message: "teamId is required" });
+    }
+    
+    const teamId = parseInt(teamIdParam);
+    if (isNaN(teamId)) {
       return res.status(400).json({ message: "Invalid team ID" });
     }
 
@@ -138,7 +175,10 @@ export const deleteTeamController = async (req: Request, res: Response) => {
 
 export const getTeamsInWorkspaceController = async (req: Request, res: Response) => {
   try {
-    const userId = req.user!.id as number;
+    const userId = req.user?.id ?? req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
     const teams = await getTeamsInWorkspace(userId);
     res.status(200).json({
       teams,

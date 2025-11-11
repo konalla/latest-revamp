@@ -6,7 +6,7 @@ import type { UserJWTPayload } from "../types/auth.types.js";
 declare global {
   namespace Express {
     interface Request {
-      user?: UserJWTPayload;
+      user?: UserJWTPayload & { id?: number };
     }
   }
 }
