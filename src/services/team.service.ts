@@ -18,17 +18,13 @@ const getWorkspaceForOwner = async (userId: number) => {
 
 // Check if user can manage a team (workspace owner or team ADMIN)
 const canManageTeam = async (userId: number, teamId: number): Promise<boolean> => {
-  // Check if user is workspace owner
-  const workspace = await prisma.workspace.findFirst({
-    where: {
-      ownerId: userId,
-      teams: {
-        some: { id: teamId }
-      }
-    }
+  // First check if user is workspace owner by checking if the team belongs to their workspace
+  const team = await prisma.team.findUnique({
+    where: { id: teamId },
+    include: { workspace: true }
   });
   
-  if (workspace) {
+  if (team && team.workspace.ownerId === userId) {
     return true; // Workspace owner can manage any team in their workspace
   }
   
@@ -97,16 +93,21 @@ export const searchUsers = async (userId: number, teamId: number, query: string,
   });
 
   // Filter out users who don't have active subscriptions
-  const usersWithActiveSubscriptions = await Promise.all(
-    users.map(async (user: any) => {
-      const hasActive = await subscriptionService.hasActiveSubscription(user.id);
-      return hasActive.hasActive ? user : null;
-    })
-  );
+  // COMMENTED OUT: Temporarily disabled subscription filtering
+  // const usersWithActiveSubscriptions = await Promise.all(
+  //   users.map(async (user: any) => {
+  //     const hasActive = await subscriptionService.hasActiveSubscription(user.id);
+  //     return hasActive.hasActive ? user : null;
+  //   })
+  // );
 
-  return usersWithActiveSubscriptions
-    .filter(u => u !== null && !existingIds.has(u!.id))
-    .map(u => u!);
+  // return usersWithActiveSubscriptions
+  //   .filter(u => u !== null && !existingIds.has(u!.id))
+  //   .map(u => u!);
+
+  // Return all users (excluding existing team members) without subscription check
+  return users
+    .filter(u => !existingIds.has(u.id));
 };
 
 export const addMember = async (userId: number, teamId: number, userIdToAdd: number) => {
@@ -329,6 +330,166 @@ export const getTeamsInWorkspace = async (userId: number) => {
       role: m.role,
       status: m.status
     }))
+  }));
+};
+
+// Get team details by ID (for team members/admins to view)
+export const getTeamById = async (userId: number, teamId: number) => {
+  // Check if user is a member of the team or workspace owner
+  const team = await prisma.team.findUnique({
+    where: { id: teamId },
+    include: {
+      workspace: true,
+      memberships: {
+        include: {
+          user: {
+            select: {
+              id: true,
+              username: true,
+              name: true,
+              email: true
+            }
+          }
+        }
+      }
+    }
+  });
+
+  if (!team) {
+    throw new Error("Team not found");
+  }
+
+  // Check if user is workspace owner
+  const isOwner = team.workspace.ownerId === userId;
+  
+  // Check if user is a member of the team
+  const membership = await prisma.teamMembership.findUnique({
+    where: {
+      userId_teamId: { userId, teamId }
+    }
+  });
+
+  if (!isOwner && !membership) {
+    throw new Error("You don't have permission to view this team");
+  }
+
+  return {
+    id: team.id,
+    name: team.name,
+    workspaceId: team.workspaceId,
+    workspace: {
+      id: team.workspace.id,
+      name: team.workspace.name,
+      ownerId: team.workspace.ownerId
+    },
+    createdAt: team.createdAt,
+    updatedAt: team.updatedAt,
+    memberCount: team.memberships.length,
+    members: team.memberships.map(m => ({
+      id: m.user.id,
+      username: m.user.username,
+      name: m.user.name,
+      email: m.user.email,
+      role: m.role,
+      status: m.status
+    })),
+    userRole: membership?.role || null,
+    userStatus: membership?.status || null
+  };
+};
+
+// Update member role (promote/demote)
+export const updateMemberRole = async (
+  userId: number,
+  teamId: number,
+  userIdToUpdate: number,
+  role: "ADMIN" | "MEMBER"
+) => {
+  await verifyTeamAccess(userId, teamId);
+
+  // Check if the member exists
+  const membership = await prisma.teamMembership.findUnique({
+    where: { userId_teamId: { userId: userIdToUpdate, teamId } },
+    include: { user: { select: { id: true, username: true, name: true, email: true } } }
+  });
+
+  if (!membership) {
+    throw new Error("Member not found in team");
+  }
+
+  // Prevent removing the last admin
+  if (membership.role === "ADMIN" && role === "MEMBER") {
+    const adminCount = await prisma.teamMembership.count({
+      where: {
+        teamId,
+        role: "ADMIN",
+        status: "ACTIVE"
+      }
+    });
+
+    if (adminCount <= 1) {
+      throw new Error("Cannot remove the last admin from the team");
+    }
+  }
+
+  // Update the role
+  const updated = await prisma.teamMembership.update({
+    where: { userId_teamId: { userId: userIdToUpdate, teamId } },
+    data: { role },
+    include: { user: { select: { id: true, username: true, name: true, email: true } } }
+  });
+
+  return {
+    message: "Member role updated successfully",
+    member: {
+      id: updated.user.id,
+      username: updated.user.username,
+      name: updated.user.name,
+      email: updated.user.email,
+      role: updated.role,
+      status: updated.status
+    }
+  };
+};
+
+// Get teams for a specific user (workspace owner only)
+export const getUserTeams = async (workspaceOwnerId: number, targetUserId: number) => {
+  // Verify requester is workspace owner
+  const workspace = await getWorkspaceForOwner(workspaceOwnerId);
+
+  // Get all teams in the workspace
+  const workspaceTeams = await prisma.team.findMany({
+    where: { workspaceId: workspace.id },
+    select: { id: true }
+  });
+
+  const teamIds = workspaceTeams.map(t => t.id);
+
+  // Get memberships for the target user in this workspace's teams
+  const memberships = await prisma.teamMembership.findMany({
+    where: {
+      userId: targetUserId,
+      teamId: { in: teamIds }
+    },
+    include: {
+      team: {
+        include: {
+          workspace: true
+        }
+      }
+    }
+  });
+
+  return memberships.map(m => ({
+    id: m.team.id,
+    name: m.team.name,
+    workspaceId: m.team.workspaceId,
+    createdAt: m.team.createdAt,
+    updatedAt: m.team.updatedAt,
+    role: m.role,
+    status: m.status,
+    membershipId: m.id,
+    joinedAt: m.createdAt
   }));
 };
 

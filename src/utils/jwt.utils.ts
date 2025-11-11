@@ -2,7 +2,7 @@ import jwt from "jsonwebtoken";
 import type { UserJWTPayload } from "../types/auth.types.js";
 
 const JWT_SECRET: string = process.env.JWT_SECRET || "your-super-secret-jwt-key-change-this-in-production";
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "7d";
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "3d";
 
 export const generateToken = (payload: UserJWTPayload): string => {
   return jwt.sign(payload, JWT_SECRET, {
