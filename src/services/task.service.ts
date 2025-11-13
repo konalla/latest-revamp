@@ -892,8 +892,11 @@ export class TaskService {
       // Rank tasks by priority: urgency + importance, then AI recommended time, then due time
       const rankedTasks = this.rankTasksByPriority(processedTasks as TodayTaskResponse[]);
 
+      // Return only top 3 tasks
+      const top3Tasks = rankedTasks.slice(0, 3);
+
       return {
-        tasks: rankedTasks,
+        tasks: top3Tasks,
         total: tasks.length,
         generatedRecommendations,
         failedRecommendations
@@ -905,24 +908,43 @@ export class TaskService {
   }
 
   /**
-   * Rank tasks by priority: urgency + importance, then AI recommended time, then due time
+   * Rank tasks by priority: priority field, urgency, importance, due date, AI confidence
    */
   private rankTasksByPriority(tasks: TodayTaskResponse[]): TodayTaskResponse[] {
+    // Helper to get priority numeric value
+    const getPriorityValue = (priority: string): number => {
+      switch (priority?.toLowerCase()) {
+        case 'high': return 3;
+        case 'medium': return 2;
+        case 'low': return 1;
+        default: return 1;
+      }
+    };
+
     return tasks.sort((a, b) => {
-      // First: Urgency + Importance (Eisenhower Matrix)
-      const aPriority = (a.urgency ? 2 : 0) + (a.importance ? 1 : 0);
-      const bPriority = (b.urgency ? 2 : 0) + (b.importance ? 1 : 0);
-      
-      if (aPriority !== bPriority) {
-        return bPriority - aPriority; // Higher priority first
+      // First: Priority field (high > medium > low)
+      const aPriorityValue = getPriorityValue(a.priority);
+      const bPriorityValue = getPriorityValue(b.priority);
+      if (aPriorityValue !== bPriorityValue) {
+        return bPriorityValue - aPriorityValue; // Higher priority first
       }
 
-      // Second: AI recommended time (if available)
+      // Second: Urgency
+      if (a.urgency !== b.urgency) {
+        return b.urgency ? 1 : -1; // Urgent tasks first
+      }
+
+      // Third: Importance
+      if (a.importance !== b.importance) {
+        return b.importance ? 1 : -1; // Important tasks first
+      }
+
+      // Fourth: AI recommendation confidence (if available)
       if (a.aiRecommendation && b.aiRecommendation) {
-        const aTime = this.parseTimeToMinutes(a.aiRecommendation.recommendedTime);
-        const bTime = this.parseTimeToMinutes(b.aiRecommendation.recommendedTime);
-        if (aTime !== bTime) {
-          return aTime - bTime; // Earlier time first
+        const aConfidence = a.aiRecommendation.confidence || 0;
+        const bConfidence = b.aiRecommendation.confidence || 0;
+        if (aConfidence !== bConfidence) {
+          return bConfidence - aConfidence; // Higher confidence first
         }
       } else if (a.aiRecommendation && !b.aiRecommendation) {
         return -1; // Tasks with AI recommendations come first
@@ -930,8 +952,23 @@ export class TaskService {
         return 1;
       }
 
-      // Third: Due time
-      return a.dueDate.getTime() - b.dueDate.getTime();
+      // Fifth: AI recommended time (if available and confidence is same)
+      if (a.aiRecommendation && b.aiRecommendation) {
+        const aTime = this.parseTimeToMinutes(a.aiRecommendation.recommendedTime);
+        const bTime = this.parseTimeToMinutes(b.aiRecommendation.recommendedTime);
+        if (aTime !== bTime) {
+          return aTime - bTime; // Earlier time first
+        }
+      }
+
+      // Sixth: Due time (earlier due dates first)
+      if (a.dueDate && b.dueDate) {
+        return a.dueDate.getTime() - b.dueDate.getTime();
+      }
+      if (a.dueDate && !b.dueDate) return -1;
+      if (!a.dueDate && b.dueDate) return 1;
+
+      return 0;
     }).map((task, index) => ({
       ...task,
       rank: index + 1
