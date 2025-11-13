@@ -8,8 +8,9 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "", {
 export class SubscriptionService {
   /**
    * Initialize trial subscription for new user
+   * This is called after payment method is set up via setupClarityPlan
    */
-  async initializeTrial(userId: number): Promise<any> {
+  async initializeTrial(userId: number, stripeCustomerId?: string, stripeSubscriptionId?: string): Promise<any> {
     try {
       // Check if user already has a subscription
       const existingSubscription = await prisma.subscription.findUnique({
@@ -59,6 +60,8 @@ export class SubscriptionService {
           trialEnd: trialEnd,
           tasksCreatedThisPeriod: 0,
           lastTaskCountReset: now,
+          stripeCustomerId: stripeCustomerId || null,
+          stripeSubscriptionId: stripeSubscriptionId || null,
         },
         include: {
           subscriptionPlan: true,
@@ -93,6 +96,83 @@ export class SubscriptionService {
       }
       
       throw new Error(`Failed to initialize trial: ${error.message}`);
+    }
+  }
+
+  /**
+   * Setup Clarity Plan - Create Stripe customer and $0 subscription
+   * This collects payment method without charging
+   */
+  async setupClarityPlan(userId: number): Promise<{ url: string; sessionId: string }> {
+    try {
+      // Get user
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+      });
+
+      if (!user) {
+        throw new Error("User not found");
+      }
+
+      // Check if subscription already exists
+      const existingSubscription = await prisma.subscription.findUnique({
+        where: { userId },
+      });
+
+      if (existingSubscription && existingSubscription.stripeSubscriptionId) {
+        throw new Error("Subscription already set up");
+      }
+
+      // Get trial plan
+      const trialPlan = await prisma.subscriptionPlan.findUnique({
+        where: { name: "trial" },
+      });
+
+      if (!trialPlan || !trialPlan.stripePriceId) {
+        throw new Error("Clarity Plan not found or Stripe Price ID not configured");
+      }
+
+      // Get or create Stripe customer
+      let stripeCustomerId: string;
+      if (existingSubscription?.stripeCustomerId) {
+        stripeCustomerId = existingSubscription.stripeCustomerId;
+      } else {
+        const customer = await stripe.customers.create({
+          email: user.email,
+          name: user.name,
+          metadata: {
+            userId: userId.toString(),
+          },
+        });
+        stripeCustomerId = customer.id;
+      }
+
+      // Create checkout session in setup mode to collect payment method
+      const session = await stripe.checkout.sessions.create({
+        customer: stripeCustomerId,
+        payment_method_types: ["card"],
+        mode: "setup",
+        success_url: `${process.env.FRONTEND_URL}/subscription/setup-success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${process.env.FRONTEND_URL}/subscription/setup-cancel`,
+        metadata: {
+          userId: userId.toString(),
+          planName: "trial",
+        },
+        setup_intent_data: {
+          metadata: {
+            userId: userId.toString(),
+            planName: "trial",
+          },
+        },
+      });
+
+      return {
+        url: session.url || "",
+        sessionId: session.id,
+      };
+    } catch (error: any) {
+      console.error("Error setting up Clarity Plan:", error);
+      throw new Error(`Failed to setup Clarity Plan: ${error.message}`);
     }
   }
 
@@ -754,11 +834,17 @@ export class SubscriptionService {
           break;
 
         case "invoice.payment_succeeded":
+        case "invoice.paid": // Alternative event name
+        case "invoice_payment.paid": // Another alternative event name
           await this.handleInvoicePaymentSucceeded(event.data.object as Stripe.Invoice);
           break;
 
         case "invoice.payment_failed":
           await this.handleInvoicePaymentFailed(event.data.object as Stripe.Invoice);
+          break;
+
+        case "invoice.payment_action_required":
+          await this.handleInvoicePaymentActionRequired(event.data.object as Stripe.Invoice);
           break;
 
         default:
@@ -772,14 +858,71 @@ export class SubscriptionService {
 
   /**
    * Handle checkout session completed
+   * Handles both subscription checkout and setup (payment method collection) sessions
    */
   private async handleCheckoutSessionCompleted(session: Stripe.Checkout.Session): Promise<void> {
     try {
       const userId = parseInt(session.metadata?.userId || "0");
       const planName = session.metadata?.planName || "";
 
-      if (!userId || !planName) {
-        throw new Error("Missing userId or planName in session metadata");
+      if (!userId) {
+        throw new Error("Missing userId in session metadata");
+      }
+
+      // Handle setup mode (payment method collection for Clarity Plan)
+      if (session.mode === "setup") {
+        const setupIntent = await stripe.setupIntents.retrieve(session.setup_intent as string);
+        const customerId = session.customer as string;
+
+        // Get or create subscription
+        let subscription = await prisma.subscription.findUnique({
+          where: { userId },
+        });
+
+        // Get trial plan
+        const trialPlan = await prisma.subscriptionPlan.findUnique({
+          where: { name: "trial" },
+        });
+
+        if (!trialPlan || !trialPlan.stripePriceId) {
+          throw new Error("Clarity Plan not found or Stripe Price ID not configured");
+        }
+
+        // Create $0 subscription in Stripe with saved payment method
+        const stripeSubscription = await stripe.subscriptions.create({
+          customer: customerId,
+          items: [{ price: trialPlan.stripePriceId }],
+          payment_behavior: "default_incomplete",
+          payment_settings: {
+            payment_method_types: ["card"],
+            save_default_payment_method: "on_subscription",
+          },
+          metadata: {
+            userId: userId.toString(),
+            planName: "trial",
+          },
+        });
+
+        // Update or create subscription
+        if (subscription) {
+          await prisma.subscription.update({
+            where: { id: subscription.id },
+            data: {
+              stripeCustomerId: customerId,
+              stripeSubscriptionId: stripeSubscription.id,
+            },
+          });
+        } else {
+          // Initialize trial with Stripe IDs
+          await this.initializeTrial(userId, customerId, stripeSubscription.id);
+        }
+
+        return;
+      }
+
+      // Handle subscription mode (Pro Plan purchase)
+      if (!planName) {
+        throw new Error("Missing planName in session metadata");
       }
 
       // Get subscription
@@ -813,8 +956,17 @@ export class SubscriptionService {
 
       // Update subscription
       const now = new Date();
-      const periodStart = new Date(stripeSubscription.current_period_start * 1000);
-      const periodEnd = new Date(stripeSubscription.current_period_end * 1000);
+      // Safely handle period dates - check if they exist and are valid
+      const periodStart = stripeSubscription.current_period_start
+        ? new Date(stripeSubscription.current_period_start * 1000)
+        : now;
+      const periodEnd = stripeSubscription.current_period_end
+        ? new Date(stripeSubscription.current_period_end * 1000)
+        : null;
+
+      // Validate dates before using
+      const validPeriodStart = periodStart && !isNaN(periodStart.getTime()) ? periodStart : now;
+      const validPeriodEnd = periodEnd && !isNaN(periodEnd.getTime()) ? periodEnd : null;
 
       await prisma.subscription.update({
         where: { id: subscription.id },
@@ -823,14 +975,18 @@ export class SubscriptionService {
           status: "ACTIVE",
           stripeSubscriptionId: stripeSubscriptionId,
           stripeCustomerId: stripeSubscription.customer as string,
-          currentPeriodStart: periodStart,
-          currentPeriodEnd: periodEnd,
+          currentPeriodStart: validPeriodStart,
+          currentPeriodEnd: validPeriodEnd,
           trialStart: subscription.status === "TRIAL" ? subscription.trialStart : null,
           trialEnd: null, // End trial when subscription starts
           tasksCreatedThisPeriod: 0, // Reset task count
-          lastTaskCountReset: periodStart,
+          lastTaskCountReset: validPeriodStart,
           cancelAtPeriodEnd: false,
           canceledAt: null,
+          // Reset payment retry tracking on successful payment
+          paymentRetryCount: 0,
+          lastPaymentRetryAt: null,
+          paymentFailureReason: null,
         },
       });
 
@@ -879,14 +1035,23 @@ export class SubscriptionService {
         return;
       }
 
-      const periodStart = new Date(stripeSubscription.current_period_start * 1000);
-      const periodEnd = new Date(stripeSubscription.current_period_end * 1000);
+      // Safely handle period dates - check if they exist and are valid
+      const periodStart = stripeSubscription.current_period_start
+        ? new Date(stripeSubscription.current_period_start * 1000)
+        : null;
+      const periodEnd = stripeSubscription.current_period_end
+        ? new Date(stripeSubscription.current_period_end * 1000)
+        : null;
+
+      // Validate dates before using
+      const validPeriodStart = periodStart && !isNaN(periodStart.getTime()) ? periodStart : null;
+      const validPeriodEnd = periodEnd && !isNaN(periodEnd.getTime()) ? periodEnd : null;
 
       await prisma.subscription.update({
         where: { id: subscription.id },
         data: {
-          currentPeriodStart: periodStart,
-          currentPeriodEnd: periodEnd,
+          currentPeriodStart: validPeriodStart,
+          currentPeriodEnd: validPeriodEnd,
           cancelAtPeriodEnd: stripeSubscription.cancel_at_period_end || false,
         },
       });
@@ -928,6 +1093,7 @@ export class SubscriptionService {
 
   /**
    * Handle invoice payment succeeded
+   * Resets retry count on successful payment
    */
   private async handleInvoicePaymentSucceeded(invoice: Stripe.Invoice): Promise<void> {
     try {
@@ -944,17 +1110,29 @@ export class SubscriptionService {
         return;
       }
 
-      // Update subscription status to active
+      // Safely handle period dates from invoice
+      const periodStart = invoice.period_start
+        ? new Date(invoice.period_start * 1000)
+        : null;
+      const periodEnd = invoice.period_end
+        ? new Date(invoice.period_end * 1000)
+        : null;
+
+      // Validate dates before using
+      const validPeriodStart = periodStart && !isNaN(periodStart.getTime()) ? periodStart : null;
+      const validPeriodEnd = periodEnd && !isNaN(periodEnd.getTime()) ? periodEnd : null;
+
+      // Update subscription status to active and reset retry tracking
       await prisma.subscription.update({
         where: { id: subscription.id },
         data: {
           status: "ACTIVE",
-          currentPeriodStart: invoice.period_start
-            ? new Date(invoice.period_start * 1000)
-            : undefined,
-          currentPeriodEnd: invoice.period_end
-            ? new Date(invoice.period_end * 1000)
-            : undefined,
+          currentPeriodStart: validPeriodStart,
+          currentPeriodEnd: validPeriodEnd,
+          // Reset payment retry tracking on successful payment
+          paymentRetryCount: 0,
+          lastPaymentRetryAt: null,
+          paymentFailureReason: null,
         },
       });
 
@@ -985,6 +1163,7 @@ export class SubscriptionService {
 
   /**
    * Handle invoice payment failed
+   * Tracks retry attempts (max 3) and updates subscription status accordingly
    */
   private async handleInvoicePaymentFailed(invoice: Stripe.Invoice): Promise<void> {
     try {
@@ -1001,11 +1180,19 @@ export class SubscriptionService {
         return;
       }
 
-      // Update subscription status to past_due
+      // Increment retry count
+      const newRetryCount = subscription.paymentRetryCount + 1;
+      const failureReason = invoice.last_payment_error?.message || "Payment failed";
+      const now = new Date();
+
+      // Update subscription with retry tracking
       await prisma.subscription.update({
         where: { id: subscription.id },
         data: {
           status: "PAST_DUE",
+          paymentRetryCount: newRetryCount,
+          lastPaymentRetryAt: now,
+          paymentFailureReason: failureReason,
         },
       });
 
@@ -1025,12 +1212,104 @@ export class SubscriptionService {
             status: "failed",
             stripePaymentIntentId: invoice.payment_intent as string,
             stripeInvoiceId: invoice.id,
-            failureReason: invoice.last_payment_error?.message || "Payment failed",
+            failureReason: failureReason,
           },
         });
       }
+
+      // Log retry attempt
+      console.log(`Payment failed for subscription ${subscription.id}. Retry attempt: ${newRetryCount}/3`);
     } catch (error: any) {
       console.error("Error handling invoice payment failed:", error);
+    }
+  }
+
+  /**
+   * Handle invoice payment action required
+   * This is triggered when payment requires user action after retries
+   */
+  private async handleInvoicePaymentActionRequired(invoice: Stripe.Invoice): Promise<void> {
+    try {
+      const subscriptionId = invoice.subscription as string;
+      if (!subscriptionId) {
+        return;
+      }
+
+      const subscription = await prisma.subscription.findUnique({
+        where: { stripeSubscriptionId: subscriptionId },
+      });
+
+      if (!subscription) {
+        return;
+      }
+
+      // If retry count >= 3, subscription requires manual payment update
+      if (subscription.paymentRetryCount >= 3) {
+        await prisma.subscription.update({
+          where: { id: subscription.id },
+          data: {
+            status: "PAST_DUE",
+            paymentFailureReason: invoice.last_payment_error?.message || "Payment requires user action after 3 retry attempts",
+          },
+        });
+
+        console.log(`Payment action required for subscription ${subscription.id} after ${subscription.paymentRetryCount} retries`);
+      }
+    } catch (error: any) {
+      console.error("Error handling invoice payment action required:", error);
+    }
+  }
+
+  /**
+   * Create payment method update session
+   * Allows user to update payment method after payment failures
+   */
+  async createPaymentMethodUpdateSession(userId: number): Promise<{ url: string; sessionId: string }> {
+    try {
+      // Get user
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+      });
+
+      if (!user) {
+        throw new Error("User not found");
+      }
+
+      // Get subscription
+      const subscription = await prisma.subscription.findUnique({
+        where: { userId },
+      });
+
+      if (!subscription || !subscription.stripeCustomerId) {
+        throw new Error("Subscription or Stripe customer not found");
+      }
+
+      // Create checkout session in setup mode to update payment method
+      const session = await stripe.checkout.sessions.create({
+        customer: subscription.stripeCustomerId,
+        payment_method_types: ["card"],
+        mode: "setup",
+        success_url: `${process.env.FRONTEND_URL}/subscription/payment-update-success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${process.env.FRONTEND_URL}/subscription/payment-update-cancel`,
+        metadata: {
+          userId: userId.toString(),
+          subscriptionId: subscription.id.toString(),
+        },
+        setup_intent_data: {
+          metadata: {
+            userId: userId.toString(),
+            subscriptionId: subscription.id.toString(),
+          },
+        },
+      });
+
+      return {
+        url: session.url || "",
+        sessionId: session.id,
+      };
+    } catch (error: any) {
+      console.error("Error creating payment method update session:", error);
+      throw new Error(`Failed to create payment method update session: ${error.message}`);
     }
   }
 }

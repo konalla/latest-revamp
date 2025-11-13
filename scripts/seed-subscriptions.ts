@@ -21,8 +21,8 @@ async function main() {
   const trialPlan = await prisma.subscriptionPlan.upsert({
     where: { name: "trial" },
     update: {
-      displayName: "Free Trial",
-      description: "3-day free trial with 50 tasks",
+      displayName: "Clarity Plan",
+      description: "Free plan with 3-day trial and 50 tasks",
       price: 0,
       currency: "USD",
       billingInterval: "trial",
@@ -33,8 +33,8 @@ async function main() {
     },
     create: {
       name: "trial",
-      displayName: "Free Trial",
-      description: "3-day free trial with 50 tasks",
+      displayName: "Clarity Plan",
+      description: "Free plan with 3-day trial and 50 tasks",
       price: 0,
       currency: "USD",
       billingInterval: "trial",
@@ -45,14 +45,14 @@ async function main() {
     },
   });
 
-  console.log("Created trial plan");
+  console.log("Created Clarity Plan (trial plan)");
 
   const monthlyPlan = await prisma.subscriptionPlan.upsert({
     where: { name: "monthly" },
     update: {
-      displayName: "Monthly Plan",
+      displayName: "Pro Plan - Monthly",
       description: "Monthly subscription with 1000 tasks per month",
-      price: 9.99,
+      price: 18.00,
       currency: "USD",
       billingInterval: "monthly",
       trialDays: null,
@@ -63,9 +63,9 @@ async function main() {
     },
     create: {
       name: "monthly",
-      displayName: "Monthly Plan",
+      displayName: "Pro Plan - Monthly",
       description: "Monthly subscription with 1000 tasks per month",
-      price: 9.99,
+      price: 18.00,
       currency: "USD",
       billingInterval: "monthly",
       trialDays: null,
@@ -75,14 +75,14 @@ async function main() {
     },
   });
 
-  console.log("Created monthly plan");
+  console.log("Created Pro Plan - Monthly");
 
   const yearlyPlan = await prisma.subscriptionPlan.upsert({
     where: { name: "yearly" },
     update: {
-      displayName: "Yearly Plan",
+      displayName: "Pro Plan - Yearly",
       description: "Yearly subscription with 10000 tasks per year",
-      price: 99.99,
+      price: 180.00,
       currency: "USD",
       billingInterval: "yearly",
       trialDays: null,
@@ -93,9 +93,9 @@ async function main() {
     },
     create: {
       name: "yearly",
-      displayName: "Yearly Plan",
+      displayName: "Pro Plan - Yearly",
       description: "Yearly subscription with 10000 tasks per year",
-      price: 99.99,
+      price: 180.00,
       currency: "USD",
       billingInterval: "yearly",
       trialDays: null,
@@ -105,12 +105,13 @@ async function main() {
     },
   });
 
-  console.log("Created yearly plan");
+  console.log("Created Pro Plan - Yearly");
 
   console.log("Seeding completed!");
   console.log("\nIMPORTANT: After creating products in Stripe Dashboard, update the stripePriceId and stripeProductId fields:");
-  console.log("- Monthly Plan ID:", monthlyPlan.id);
-  console.log("- Yearly Plan ID:", yearlyPlan.id);
+  console.log("- Clarity Plan ID:", trialPlan.id);
+  console.log("- Pro Plan - Monthly ID:", monthlyPlan.id);
+  console.log("- Pro Plan - Yearly ID:", yearlyPlan.id);
 }
 
 main()

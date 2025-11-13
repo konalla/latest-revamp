@@ -25,5 +25,11 @@ router.get("/access", authenticateToken, subscriptionController.getAccessStatus.
 // Check if can add team members
 router.get("/can-add-team-members", authenticateToken, subscriptionController.canAddTeamMembers.bind(subscriptionController));
 
+// Setup Clarity Plan (collect payment method for free plan)
+router.post("/setup-clarity-plan", authenticateToken, subscriptionController.setupClarityPlan.bind(subscriptionController));
+
+// Update payment method
+router.post("/update-payment-method", authenticateToken, subscriptionController.updatePaymentMethod.bind(subscriptionController));
+
 export default router;
 

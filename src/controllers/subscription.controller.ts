@@ -174,6 +174,52 @@ export class SubscriptionController {
   }
 
   /**
+   * Setup Clarity Plan - Create Stripe customer and collect payment method
+   */
+  async setupClarityPlan(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = (req as any).user?.id;
+      if (!userId) {
+        res.status(401).json({ error: "Unauthorized" });
+        return;
+      }
+
+      const { url, sessionId } = await subscriptionService.setupClarityPlan(userId);
+
+      res.status(200).json({
+        checkoutUrl: url,
+        sessionId,
+      });
+    } catch (error: any) {
+      console.error("Error setting up Clarity Plan:", error);
+      res.status(500).json({ error: error.message || "Failed to setup Clarity Plan" });
+    }
+  }
+
+  /**
+   * Create payment method update session
+   */
+  async updatePaymentMethod(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = (req as any).user?.id;
+      if (!userId) {
+        res.status(401).json({ error: "Unauthorized" });
+        return;
+      }
+
+      const { url, sessionId } = await subscriptionService.createPaymentMethodUpdateSession(userId);
+
+      res.status(200).json({
+        checkoutUrl: url,
+        sessionId,
+      });
+    } catch (error: any) {
+      console.error("Error creating payment method update session:", error);
+      res.status(500).json({ error: error.message || "Failed to create payment method update session" });
+    }
+  }
+
+  /**
    * Calculate warnings for subscription
    */
   private calculateWarnings(subscription: any): {
@@ -182,6 +228,7 @@ export class SubscriptionController {
     tasksWarning?: string;
     gracePeriod?: string;
     renewalNeeded?: string;
+    paymentRetryWarning?: string;
   } {
     const warnings: any = {};
     const now = new Date();
@@ -231,6 +278,16 @@ export class SubscriptionController {
 
       if (daysUntilRenewal <= 7 && daysUntilRenewal > 0) {
         warnings.renewalNeeded = `Your subscription will renew in ${daysUntilRenewal} day${daysUntilRenewal === 1 ? "" : "s"}.`;
+      }
+    }
+
+    // Payment retry warnings
+    if (subscription.status === "PAST_DUE" && subscription.paymentRetryCount !== undefined) {
+      const retryCount = subscription.paymentRetryCount || 0;
+      if (retryCount > 0 && retryCount < 3) {
+        warnings.paymentRetryWarning = `Payment failed. We'll retry automatically. Retry attempt ${retryCount} of 3. Please ensure your payment method has sufficient funds.`;
+      } else if (retryCount >= 3) {
+        warnings.paymentRetryWarning = `Payment failed after 3 attempts. Please update your payment method to continue your subscription.`;
       }
     }
 

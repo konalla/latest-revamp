@@ -81,40 +81,56 @@ npx tsx scripts/seed-subscriptions.ts
 
 This creates:
 - Stripe payment provider
-- Trial plan (3 days, 50 tasks)
-- Monthly plan ($9.99, 1000 tasks/month)
-- Yearly plan ($99.99, 10000 tasks/year)
+- Clarity Plan (trial plan: 3 days, 50 tasks, $0)
+- Pro Plan - Monthly ($18.00, 1000 tasks/month)
+- Pro Plan - Yearly ($180.00, 10000 tasks/year)
 
 ---
 
 ## Step 5: Create Stripe Products & Prices
 
 1. Go to Stripe Dashboard → Products
-2. Create two products:
+2. Create **three products**:
 
-   **Product 1: Monthly Plan**
-   - Name: "Monthly Plan"
+   **Product 1: Clarity Plan (Free Plan)**
+   - Name: "Clarity Plan"
+   - Description: "Free plan with 3-day trial and 50 tasks"
+   - Pricing: $0.00 USD, Recurring Monthly
+   - **Important**: Stripe allows $0 subscriptions, but you may need to use a minimum charge ($0.01) or handle it differently
+   - Alternative: Create as $0.01/month if Stripe doesn't support $0
+   - Copy the Price ID (starts with `price_`)
+   - Copy the Product ID (starts with `prod_`)
+
+   **Product 2: Pro Plan - Monthly**
+   - Name: "Pro Plan - Monthly"
    - Description: "Monthly subscription with 1000 tasks per month"
-   - Pricing: $9.99 USD, Recurring Monthly
+   - Pricing: $18.00 USD, Recurring Monthly
    - Copy the Price ID (starts with `price_`)
+   - Copy the Product ID (starts with `prod_`)
 
-   **Product 2: Yearly Plan**
-   - Name: "Yearly Plan"
+   **Product 3: Pro Plan - Yearly**
+   - Name: "Pro Plan - Yearly"
    - Description: "Yearly subscription with 10000 tasks per year"
-   - Pricing: $99.99 USD, Recurring Yearly
+   - Pricing: $180.00 USD, Recurring Yearly
    - Copy the Price ID (starts with `price_`)
+   - Copy the Product ID (starts with `prod_`)
 
 3. Update database with Stripe Price IDs:
 
 ```sql
--- Update monthly plan
+-- Update Clarity Plan (trial)
 UPDATE "SubscriptionPlan" 
-SET "stripePriceId" = 'price_xxxxx', "stripeProductId" = 'prod_xxxxx'
+SET "stripePriceId" = 'price_clarity_xxxxx', "stripeProductId" = 'prod_clarity_xxxxx'
+WHERE name = 'trial';
+
+-- Update Pro Plan - Monthly
+UPDATE "SubscriptionPlan" 
+SET "stripePriceId" = 'price_monthly_xxxxx', "stripeProductId" = 'prod_monthly_xxxxx'
 WHERE name = 'monthly';
 
--- Update yearly plan
+-- Update Pro Plan - Yearly
 UPDATE "SubscriptionPlan" 
-SET "stripePriceId" = 'price_yyyyy', "stripeProductId" = 'prod_yyyyy'
+SET "stripePriceId" = 'price_yearly_xxxxx', "stripeProductId" = 'prod_yearly_xxxxx'
 WHERE name = 'yearly';
 ```
 
@@ -122,6 +138,11 @@ Or use Prisma Studio:
 ```bash
 npx prisma studio
 ```
+
+**Note on $0 Subscriptions:**
+- Stripe supports $0 recurring subscriptions
+- If you encounter issues, you can use $0.01 as minimum charge
+- The backend will handle $0 subscriptions correctly
 
 ---
 
@@ -132,12 +153,13 @@ npx prisma studio
 3. Endpoint URL: `https://your-backend-url/api/webhooks/stripe`
    - For local testing, use Stripe CLI (see below)
 4. Select events to listen to:
-   - `checkout.session.completed`
+   - `checkout.session.completed` (handles both subscription and setup mode)
    - `customer.subscription.created`
    - `customer.subscription.updated`
    - `customer.subscription.deleted`
    - `invoice.payment_succeeded`
    - `invoice.payment_failed`
+   - `invoice.payment_action_required` (NEW - for payment retry handling)
 5. Copy the "Signing secret" → Add to `.env` as `STRIPE_WEBHOOK_SECRET`
 
 ### Local Testing with Stripe CLI:
@@ -165,17 +187,27 @@ Copy the webhook signing secret from the CLI output.
 npm run dev
 ```
 
-2. **Test trial initialization**:
+2. **Test Clarity Plan setup**:
    - Register a new user
-   - Check that trial subscription is created automatically
-   - Verify trial ends in 3 days
+   - User should be redirected to payment setup page
+   - Complete payment method setup (no charge)
+   - Check that Clarity Plan subscription is created in Stripe
+   - Verify trial starts and ends in 3 days
 
-3. **Test subscription purchase**:
-   - Create checkout session via API
+3. **Test Pro Plan purchase**:
+   - User with Clarity Plan clicks "Upgrade to Pro"
+   - Create checkout session via API (monthly or yearly)
    - Complete payment in Stripe Checkout
-   - Verify webhook updates subscription status
+   - Verify webhook updates subscription status to ACTIVE
+   - Verify auto-renewal is enabled
 
-4. **Test task limits**:
+4. **Test payment failure and retries**:
+   - Use Stripe test card: `4000 0000 0000 0002` (card declined)
+   - Wait for payment failure webhook
+   - Verify retry count increments
+   - After 3 failures, verify user is prompted to update payment method
+
+5. **Test task limits**:
    - Create tasks up to limit
    - Verify task creation is blocked when limit reached
 
@@ -238,9 +270,16 @@ npm run dev
    - Any other write operations
 
 3. **Monitor Subscriptions**: Set up monitoring for:
-   - Failed payments
+   - Failed payments and retry attempts
+   - Subscriptions requiring payment method update (retryCount >= 3)
    - Expiring subscriptions
    - Grace period warnings
+   - Auto-renewal status
+
+4. **Configure Payment Retry Settings**:
+   - Go to Stripe Dashboard → Settings → Billing → Automatic retries
+   - Configure retry schedule (default: days 1, 3, 5, 7 after failure)
+   - Backend tracks retries via webhooks (max 3 attempts)
 
 ---
 

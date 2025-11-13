@@ -465,6 +465,9 @@ model Subscription {
   canceledAt            DateTime?
   tasksCreatedThisPeriod Int               @default(0) // Track tasks created in current billing period
   lastTaskCountReset    DateTime?          // When task count was last reset
+  paymentRetryCount      Int               @default(0) // Track payment retry attempts (max 3)
+  lastPaymentRetryAt     DateTime?         // Timestamp of last payment retry
+  paymentFailureReason   String?           // Reason for payment failure
   createdAt             DateTime          @default(now())
   updatedAt             DateTime          @updatedAt
   
