@@ -1005,18 +1005,15 @@ export class TaskService {
       // Get today's tasks with AI recommendations AND overdue tasks
       const todayTasks = await this.getTodayTasksWithAIRecommendations(userId, timezone);
       
-      // Also get overdue tasks (due before today but within last 7 days) with AI recommendations
+      // Also get ALL overdue tasks (due before today) with AI recommendations
       const currentTime = new Date();
       const todayStart = new Date(currentTime.toLocaleDateString('en-CA', { timeZone: timezone }));
-      const sevenDaysAgo = new Date(todayStart);
-      sevenDaysAgo.setDate(todayStart.getDate() - 7);
       
       const overdueTasksFromDB = await prisma.task.findMany({
         where: {
           userId,
           dueDate: {
-            gte: sevenDaysAgo, // Due date within last 7 days
-            lt: todayStart // Due date before today
+            lt: todayStart // Due date before today (all overdue tasks, no 7-day restriction)
           },
           completed: false,
           aiRecommendation: {

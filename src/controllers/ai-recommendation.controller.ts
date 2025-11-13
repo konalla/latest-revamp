@@ -525,25 +525,35 @@ const getNowRecommendedTask = async (req: Request, res: Response) => {
 };
 
 /**
- * Get tasks with AI recommendations from the last 7 days, ordered by due date
+ * Get all past pending tasks with AI recommendations, ordered by priority (urgency, importance, due date)
  */
-const getLast7DaysTasksWithAIRecommendations = async (req: Request, res: Response) => {
+const getPastTasksWithAIRecommendations = async (req: Request, res: Response) => {
   try {
     if (!req.user) {
       return res.status(401).json({ message: "User not authenticated" });
     }
 
-    // Calculate date range for last 7 days (excluding today)
-    const today = new Date();
-    const endDate = new Date(today);
-    endDate.setDate(today.getDate() - 1); // Yesterday
-    endDate.setHours(23, 59, 59, 999); // End of yesterday
+    // Get pagination parameters
+    const page = req.query.page ? parseInt(req.query.page as string) : 1;
+    const limit = req.query.limit ? parseInt(req.query.limit as string) : 20;
     
-    const startDate = new Date(today);
-    startDate.setDate(today.getDate() - 7); // 7 days ago
-    startDate.setHours(0, 0, 0, 0); // Start of day
+    // Validate pagination parameters
+    if (page < 1) {
+      return res.status(400).json({ message: "Page must be greater than 0" });
+    }
+    if (limit < 1 || limit > 100) {
+      return res.status(400).json({ message: "Limit must be between 1 and 100" });
+    }
 
-    // Get tasks with AI recommendations from last 7 days (excluding today)
+    // Get timezone from query parameter, default to UTC
+    const timezone = (req.query.timezone as string) || 'UTC';
+
+    // Calculate start of today in user's timezone (to exclude today's tasks)
+    const currentTime = new Date();
+    const todayStart = new Date(currentTime.toLocaleDateString('en-CA', { timeZone: timezone }));
+
+    // Get all past tasks (due date before today) with AI recommendations
+    // Note: We fetch all tasks first to ensure proper sorting, then paginate in memory
     const tasks = await prisma.task.findMany({
       where: {
         userId: req.user.userId,
@@ -552,18 +562,9 @@ const getLast7DaysTasksWithAIRecommendations = async (req: Request, res: Respons
           isNot: null // Only tasks with AI recommendations
         },
         dueDate: {
-          gte: startDate,
-          lte: endDate
+          lt: todayStart // Due date before today (all past tasks)
         }
       },
-      orderBy: [
-        {
-          dueDate: 'asc' // Order by due date ascending
-        },
-        {
-          createdAt: 'asc' // Secondary sort by creation date for tasks without due date
-        }
-      ],
       include: {
         aiRecommendation: true,
         project: {
@@ -576,37 +577,63 @@ const getLast7DaysTasksWithAIRecommendations = async (req: Request, res: Respons
     const tasksWithDueDate = tasks.filter(task => task.dueDate !== null);
     const tasksWithoutDueDate = tasks.filter(task => task.dueDate === null);
 
-    // Sort tasks with due date by due date ascending
+    // Sort tasks with due date by urgency, importance, then due date ascending
     tasksWithDueDate.sort((a, b) => {
+      // First by urgency
+      if (a.urgency !== b.urgency) {
+        return b.urgency ? 1 : -1;
+      }
+      // Then by importance
+      if (a.importance !== b.importance) {
+        return b.importance ? 1 : -1;
+      }
+      // Then by due date
       if (a.dueDate && b.dueDate) {
         return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
       }
       return 0;
     });
 
-    // Sort tasks without due date by creation date ascending
+    // Sort tasks without due date by urgency, importance, then creation date ascending
     tasksWithoutDueDate.sort((a, b) => {
+      // First by urgency
+      if (a.urgency !== b.urgency) {
+        return b.urgency ? 1 : -1;
+      }
+      // Then by importance
+      if (a.importance !== b.importance) {
+        return b.importance ? 1 : -1;
+      }
+      // Then by creation date
       return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
     });
 
     // Combine: tasks with due date first, then tasks without due date
     const orderedTasks = [...tasksWithDueDate, ...tasksWithoutDueDate];
+    const total = orderedTasks.length;
+
+    // Apply pagination
+    const skip = (page - 1) * limit;
+    const paginatedTasks = orderedTasks.slice(skip, skip + limit);
 
     res.json({
-      message: "Last 7 days tasks with AI recommendations retrieved successfully",
+      message: "Past tasks with AI recommendations retrieved successfully",
       data: {
-        tasks: orderedTasks,
-        dateRange: {
-          startDate: startDate.toISOString(),
-          endDate: endDate.toISOString()
-        },
-        total: orderedTasks.length
+        tasks: paginatedTasks,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+          hasNextPage: skip + limit < total,
+          hasPreviousPage: page > 1
+        }
       }
     });
   } catch (error: any) {
-    console.error("Error retrieving last 7 days tasks with AI recommendations:", error);
+    console.error("Error retrieving past tasks with AI recommendations:", error);
     res.status(500).json({ 
-      message: "Failed to retrieve last 7 days tasks with AI recommendations",
+      message: "Failed to retrieve past tasks with AI recommendations",
       error: error.message 
     });
   }
@@ -621,5 +648,5 @@ export {
   getUserWorkPreferences,
   updateUserWorkPreferences,
   getTasksWithAIRecommendations,
-  getLast7DaysTasksWithAIRecommendations
+  getPastTasksWithAIRecommendations
 };
