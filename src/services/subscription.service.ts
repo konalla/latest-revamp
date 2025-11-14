@@ -207,6 +207,17 @@ export class SubscriptionService {
         subscription = await this.initializeTrial(userId);
       }
 
+      // Check if subscription is canceled but still within billing period
+      // In this case, user should use resume endpoint instead of creating new checkout
+      if (subscription.status === "CANCELED") {
+        const now = new Date();
+        if (subscription.currentPeriodEnd && now < subscription.currentPeriodEnd) {
+          throw new Error(
+            "Your subscription is canceled but still active within the billing period. Please use the resume endpoint to reactivate it without additional charges."
+          );
+        }
+      }
+
       // Get target plan
       const targetPlan = await prisma.subscriptionPlan.findUnique({
         where: { name: planName },
@@ -412,6 +423,15 @@ export class SubscriptionService {
         return {
           canCreate: false,
           reason: "Subscription expired. Please renew to continue creating tasks.",
+          subscription: updatedSubscription,
+        };
+      }
+
+      // Check if subscription is canceled (immediate view-only mode)
+      if (updatedSubscription.status === "CANCELED") {
+        return {
+          canCreate: false,
+          reason: "Subscription canceled. Please renew to continue creating tasks.",
           subscription: updatedSubscription,
         };
       }
