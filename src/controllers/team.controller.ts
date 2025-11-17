@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { addMember, listMembers, searchUsers, removeMember, updateMemberStatus } from "../services/team.service.js";
+import { addMember, listMembers, searchUsers, removeMember, updateMemberStatus, getTeamById, updateMemberRole, getUserTeams } from "../services/team.service.js";
 
 export const getMembers = async (req: Request, res: Response) => {
   try {
@@ -143,6 +143,91 @@ export const updateMemberStatusController = async (req: Request, res: Response) 
     
     const result = await updateMemberStatus(userId, teamId, Number(userIdToUpdate), status);
     res.status(200).json(result);
+  } catch (error: any) {
+    res.status(403).json({ message: error.message });
+  }
+};
+
+export const getTeamByIdController = async (req: Request, res: Response) => {
+  try {
+    const userId = req.user?.id ?? req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    
+    const teamIdParam = req.params.teamId;
+    if (!teamIdParam) {
+      return res.status(400).json({ message: "teamId is required" });
+    }
+    
+    const teamId = parseInt(teamIdParam);
+    if (isNaN(teamId)) {
+      return res.status(400).json({ message: "Invalid teamId" });
+    }
+    
+    const team = await getTeamById(userId, teamId);
+    res.status(200).json(team);
+  } catch (error: any) {
+    res.status(403).json({ message: error.message });
+  }
+};
+
+export const updateMemberRoleController = async (req: Request, res: Response) => {
+  try {
+    const userId = req.user?.id ?? req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    
+    const teamIdParam = req.params.teamId;
+    if (!teamIdParam) {
+      return res.status(400).json({ message: "teamId is required" });
+    }
+    
+    const teamId = parseInt(teamIdParam);
+    if (isNaN(teamId)) {
+      return res.status(400).json({ message: "Invalid teamId" });
+    }
+    
+    const { userId: userIdToUpdate } = req.params as { userId: string };
+    if (!userIdToUpdate) {
+      return res.status(400).json({ message: "userId parameter required" });
+    }
+    
+    const { role } = req.body as { role: "ADMIN" | "MEMBER" };
+    if (!role) {
+      return res.status(400).json({ message: "role is required" });
+    }
+    
+    const validRoles = ["ADMIN", "MEMBER"];
+    if (!validRoles.includes(role)) {
+      return res.status(400).json({ message: `Invalid role. Must be one of: ${validRoles.join(", ")}` });
+    }
+    
+    const result = await updateMemberRole(userId, teamId, Number(userIdToUpdate), role);
+    res.status(200).json(result);
+  } catch (error: any) {
+    res.status(403).json({ message: error.message });
+  }
+};
+
+export const getUserTeamsController = async (req: Request, res: Response) => {
+  try {
+    const userId = req.user?.id ?? req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    
+    const { userId: targetUserId } = req.params as { userId: string };
+    if (!targetUserId) {
+      return res.status(400).json({ message: "userId parameter required" });
+    }
+    
+    const teams = await getUserTeams(userId, Number(targetUserId));
+    res.status(200).json({
+      teams,
+      totalTeams: teams.length
+    });
   } catch (error: any) {
     res.status(403).json({ message: error.message });
   }

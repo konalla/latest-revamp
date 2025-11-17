@@ -77,6 +77,9 @@ model User {
   // Workspace/Team relations
   ownedWorkspaces            Workspace[]
   teamMemberships            TeamMembership[]
+  
+  // Subscription relation
+  subscription               Subscription?
 }
 
 model Project {
@@ -398,4 +401,105 @@ model TeamMembership {
   team      Team             @relation(fields: [teamId], references: [id], onDelete: Cascade)
 
   @@unique([userId, teamId])
+}
+
+// ============================================
+// Subscription & Payment Models
+// ============================================
+
+model PaymentProvider {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique  // "stripe", "paypal", etc.
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  subscriptions Subscription[]
+  payments      Payment[]
+}
+
+model SubscriptionPlan {
+  id                    Int      @id @default(autoincrement())
+  name                  String   @unique  // "trial", "monthly", "yearly"
+  displayName           String   // "Free Trial", "Monthly Plan", "Yearly Plan"
+  description           String?
+  price                 Float    // Price in USD (0 for trial)
+  currency              String   @default("USD")
+  billingInterval       String   // "trial", "monthly", "yearly"
+  trialDays             Int?     // 3 for trial plan
+  maxTasks              Int?     // 50 for trial, 1000 for monthly, 10000 for yearly
+  features              Json     @default("{}") // Feature flags as JSON
+  isActive              Boolean  @default(true)
+  stripePriceId         String?  // Stripe Price ID (set manually in Stripe Dashboard)
+  stripeProductId       String?  // Stripe Product ID (set manually in Stripe Dashboard)
+  createdAt             DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+  
+  subscriptions         Subscription[]
+}
+
+enum SubscriptionStatus {
+  TRIAL
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  EXPIRED
+  INCOMPLETE
+  GRACE_PERIOD
+}
+
+model Subscription {
+  id                    Int                @id @default(autoincrement())
+  userId                Int                @unique
+  subscriptionPlanId    Int
+  paymentProviderId     Int
+  status                SubscriptionStatus @default(TRIAL)
+  stripeSubscriptionId  String?            @unique  // Stripe Subscription ID
+  stripeCustomerId      String?            // Stripe Customer ID
+  currentPeriodStart    DateTime?
+  currentPeriodEnd      DateTime?
+  trialStart            DateTime?          // When trial started
+  trialEnd              DateTime?          // When trial ends (3 days from trialStart)
+  gracePeriodEnd        DateTime?          // When grace period ends (3 days after subscription expires)
+  cancelAtPeriodEnd     Boolean            @default(false)
+  canceledAt            DateTime?
+  tasksCreatedThisPeriod Int               @default(0) // Track tasks created in current billing period
+  lastTaskCountReset    DateTime?          // When task count was last reset
+  paymentRetryCount      Int               @default(0) // Track payment retry attempts (max 3)
+  lastPaymentRetryAt     DateTime?         // Timestamp of last payment retry
+  paymentFailureReason   String?           // Reason for payment failure
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+  
+  user                  User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subscriptionPlan      SubscriptionPlan   @relation(fields: [subscriptionPlanId], references: [id])
+  paymentProvider       PaymentProvider    @relation(fields: [paymentProviderId], references: [id])
+  payments              Payment[]
+  
+  @@index([userId, status])
+  @@index([status, currentPeriodEnd])
+}
+
+model Payment {
+  id                    Int      @id @default(autoincrement())
+  subscriptionId        Int
+  paymentProviderId     Int
+  amount                Float    // Amount charged
+  currency              String   @default("USD")
+  paymentType           String   // "subscription", "one_time", "refund", "partial_refund"
+  paymentMethod         String?  // "card", "bank_transfer", etc.
+  status                String   // "pending", "succeeded", "failed", "refunded", "partially_refunded"
+  stripePaymentIntentId String?  // Stripe Payment Intent ID or Charge ID
+  stripeInvoiceId       String?  // Stripe Invoice ID
+  receiptUrl            String?  // Link to receipt
+  failureReason         String?  // If payment failed
+  metadata              Json     @default("{}") // Additional metadata
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  
+  subscription          Subscription      @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  paymentProvider       PaymentProvider   @relation(fields: [paymentProviderId], references: [id])
+  
+  @@index([subscriptionId, status])
+  @@index([stripePaymentIntentId])
 }

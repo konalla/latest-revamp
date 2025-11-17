@@ -1,6 +1,7 @@
 import { Router } from "express";
 import * as projectController from "../controllers/project.controller.js";
 import { authenticateToken } from "../middleware/auth.middleware.js";
+import { requireWriteAccess } from "../middleware/subscription.middleware.js";
 
 const router = Router();
 
@@ -16,14 +17,14 @@ router.get("/stats", projectController.getProjectStats);
 // GET /api/projects/:id - Get specific project by ID (only if it belongs to logged-in user)
 router.get("/:id", projectController.getProject);
 
-// POST /api/projects - Create a new project for logged-in user
-router.post("/", projectController.createProject);
+// POST /api/projects - Create a new project for logged-in user (requires write access)
+router.post("/", requireWriteAccess, projectController.createProject);
 
-// PUT /api/projects/:id - Update project by ID (only if it belongs to logged-in user)
-router.put("/:id", projectController.updateProject);
+// PUT /api/projects/:id - Update project by ID (only if it belongs to logged-in user) (requires write access)
+router.put("/:id", requireWriteAccess, projectController.updateProject);
 
-// DELETE /api/projects/:id - Delete project by ID (only if it belongs to logged-in user)
-router.delete("/:id", projectController.deleteProject);
+// DELETE /api/projects/:id - Delete project by ID (only if it belongs to logged-in user) (requires write access)
+router.delete("/:id", requireWriteAccess, projectController.deleteProject);
 
 // GET /api/projects/:id/tasks - Get all tasks for a specific project
 router.get("/:id/tasks", projectController.getProjectTasks);

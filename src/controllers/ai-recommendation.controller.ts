@@ -525,24 +525,44 @@ const getNowRecommendedTask = async (req: Request, res: Response) => {
 };
 
 /**
+ * Calculate task priority score for ranking
+ * Higher score = higher priority
+ */
+const calculateTaskPriorityScore = (task: any): number => {
+  // Priority value: high=3, medium=2, low=1
+  const priorityValue = task.priority === 'high' ? 3 : task.priority === 'medium' ? 2 : 1;
+  
+  // Urgency: true=2, false=0
+  const urgencyValue = task.urgency ? 2 : 0;
+  
+  // Importance: true=1, false=0
+  const importanceValue = task.importance ? 1 : 0;
+  
+  // AI recommendation confidence (0-1, normalized to 0-0.5)
+  const confidenceValue = task.aiRecommendation?.confidence ? task.aiRecommendation.confidence * 0.5 : 0;
+  
+  // Due date urgency: earlier due dates get higher score
+  // For past tasks, more overdue = higher priority
+  let dueDateValue = 0;
+  if (task.dueDate) {
+    const now = new Date();
+    const dueDate = new Date(task.dueDate);
+    const daysOverdue = Math.floor((now.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24));
+    // Cap at 30 days for scoring (older tasks don't get infinitely higher scores)
+    dueDateValue = Math.min(daysOverdue / 30, 1) * 0.5;
+  }
+  
+  return priorityValue + urgencyValue + importanceValue + confidenceValue + dueDateValue;
+};
+
+/**
  * Get all past pending tasks with AI recommendations, ordered by priority (urgency, importance, due date)
+ * Returns only top 3 tasks
  */
 const getPastTasksWithAIRecommendations = async (req: Request, res: Response) => {
   try {
     if (!req.user) {
       return res.status(401).json({ message: "User not authenticated" });
-    }
-
-    // Get pagination parameters
-    const page = req.query.page ? parseInt(req.query.page as string) : 1;
-    const limit = req.query.limit ? parseInt(req.query.limit as string) : 20;
-    
-    // Validate pagination parameters
-    if (page < 1) {
-      return res.status(400).json({ message: "Page must be greater than 0" });
-    }
-    if (limit < 1 || limit > 100) {
-      return res.status(400).json({ message: "Limit must be between 1 and 100" });
     }
 
     // Get timezone from query parameter, default to UTC
@@ -553,7 +573,6 @@ const getPastTasksWithAIRecommendations = async (req: Request, res: Response) =>
     const todayStart = new Date(currentTime.toLocaleDateString('en-CA', { timeZone: timezone }));
 
     // Get all past tasks (due date before today) with AI recommendations
-    // Note: We fetch all tasks first to ensure proper sorting, then paginate in memory
     const tasks = await prisma.task.findMany({
       where: {
         userId: req.user.userId,
@@ -573,61 +592,34 @@ const getPastTasksWithAIRecommendations = async (req: Request, res: Response) =>
       } as any
     });
 
-    // Separate tasks with and without due dates for proper ordering
-    const tasksWithDueDate = tasks.filter(task => task.dueDate !== null);
-    const tasksWithoutDueDate = tasks.filter(task => task.dueDate === null);
+    // Calculate priority score for each task and sort
+    const tasksWithScores = tasks.map(task => ({
+      task,
+      score: calculateTaskPriorityScore(task)
+    }));
 
-    // Sort tasks with due date by urgency, importance, then due date ascending
-    tasksWithDueDate.sort((a, b) => {
-      // First by urgency
-      if (a.urgency !== b.urgency) {
-        return b.urgency ? 1 : -1;
+    // Sort by score (descending) and then by due date (ascending for tie-breaking)
+    tasksWithScores.sort((a, b) => {
+      if (b.score !== a.score) {
+        return b.score - a.score; // Higher score first
       }
-      // Then by importance
-      if (a.importance !== b.importance) {
-        return b.importance ? 1 : -1;
+      // If scores are equal, prioritize earlier due dates
+      if (a.task.dueDate && b.task.dueDate) {
+        return new Date(a.task.dueDate).getTime() - new Date(b.task.dueDate).getTime();
       }
-      // Then by due date
-      if (a.dueDate && b.dueDate) {
-        return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
-      }
+      if (a.task.dueDate && !b.task.dueDate) return -1;
+      if (!a.task.dueDate && b.task.dueDate) return 1;
       return 0;
     });
 
-    // Sort tasks without due date by urgency, importance, then creation date ascending
-    tasksWithoutDueDate.sort((a, b) => {
-      // First by urgency
-      if (a.urgency !== b.urgency) {
-        return b.urgency ? 1 : -1;
-      }
-      // Then by importance
-      if (a.importance !== b.importance) {
-        return b.importance ? 1 : -1;
-      }
-      // Then by creation date
-      return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
-    });
-
-    // Combine: tasks with due date first, then tasks without due date
-    const orderedTasks = [...tasksWithDueDate, ...tasksWithoutDueDate];
-    const total = orderedTasks.length;
-
-    // Apply pagination
-    const skip = (page - 1) * limit;
-    const paginatedTasks = orderedTasks.slice(skip, skip + limit);
+    // Get only top 3 tasks
+    const top3Tasks = tasksWithScores.slice(0, 3).map(item => item.task);
 
     res.json({
       message: "Past tasks with AI recommendations retrieved successfully",
       data: {
-        tasks: paginatedTasks,
-        pagination: {
-          page,
-          limit,
-          total,
-          totalPages: Math.ceil(total / limit),
-          hasNextPage: skip + limit < total,
-          hasPreviousPage: page > 1
-        }
+        tasks: top3Tasks,
+        total: tasks.length
       }
     });
   } catch (error: any) {

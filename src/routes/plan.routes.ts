@@ -11,6 +11,7 @@ import {
   getPlansForObjective
 } from '../controllers/plan.controller.js';
 import { authenticateToken } from '../middleware/auth.middleware.js';
+import { requireWriteAccess } from '../middleware/subscription.middleware.js';
 
 const router = Router();
 
@@ -18,13 +19,13 @@ const router = Router();
 router.use(authenticateToken);
 
 // Plan CRUD operations
-router.post('/', createPlan);
+router.post('/', requireWriteAccess, createPlan);
 router.get('/', getPlans);
 router.get('/stats', getPlanStats);
 router.get('/:id', getPlanById);
 router.get('/:id/details', getPlanWithDetails);
-router.put('/:id', updatePlan);
-router.delete('/:id', deletePlan);
+router.put('/:id', requireWriteAccess, updatePlan);
+router.delete('/:id', requireWriteAccess, deletePlan);
 
 // Get plans by project or objective
 router.get('/project/:projectId', getPlansForProject);

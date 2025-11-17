@@ -3,6 +3,7 @@ import prisma from "../config/prisma.js";
 import type { LoginRequest, RegisterRequest, AuthResponse } from "../types/auth.types.js";
 import { generateToken } from "../utils/jwt.utils.js";
 import { ensureWorkspaceAndTeamForUser } from "./workspace.service.js";
+import { subscriptionService } from "./subscription.service.js";
 
 const SALT_ROUNDS = 10;
 
@@ -49,6 +50,13 @@ const register = async (data: RegisterRequest): Promise<AuthResponse> => {
   // Ensure workspace and team exist for this user
   await ensureWorkspaceAndTeamForUser(user.id, user.name, user.username);
 
+  // Note: Trial subscription will be created when user sets up payment method
+  // via POST /api/subscriptions/setup-clarity-plan endpoint
+  // This allows us to collect payment method upfront for seamless upgrades
+
+  // Check if user needs to set up payment method
+  const needsPaymentSetup = true; // New users always need to set up payment
+
   // Generate JWT token
   const token = generateToken({
     userId: user.id,
@@ -59,7 +67,8 @@ const register = async (data: RegisterRequest): Promise<AuthResponse> => {
   return {
     user,
     token,
-    message: "User registered successfully"
+    message: "User registered successfully",
+    needsPaymentSetup, // Flag to indicate frontend should redirect to payment setup
   };
 };
 
@@ -92,6 +101,14 @@ const login = async (data: LoginRequest): Promise<AuthResponse> => {
     // Non-fatal for login
   }
 
+  // Check if user needs to set up payment method
+  // User needs payment setup if they don't have a subscription with Stripe customer ID
+  const subscription = await prisma.subscription.findUnique({
+    where: { userId: user.id },
+  });
+  
+  const needsPaymentSetup = !subscription || !subscription.stripeCustomerId;
+
   // Generate JWT token
   const token = generateToken({
     userId: user.id,
@@ -108,7 +125,8 @@ const login = async (data: LoginRequest): Promise<AuthResponse> => {
       role: user.role,
     },
     token,
-    message: "Login successful"
+    message: "Login successful",
+    needsPaymentSetup, // Flag to indicate if user needs to set up payment method
   };
 };
 

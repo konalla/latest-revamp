@@ -20,6 +20,7 @@ export interface AuthResponse {
   };
   token: string;
   message: string;
+  needsPaymentSetup?: boolean; // Flag to indicate if user needs to set up payment method (for new registrations)
 }
 
 export interface UserJWTPayload {

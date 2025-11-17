@@ -1,6 +1,7 @@
 import { Router } from "express";
 import * as objectiveController from "../controllers/objective.controller.js";
 import { authenticateToken } from "../middleware/auth.middleware.js";
+import { requireWriteAccess } from "../middleware/subscription.middleware.js";
 
 const router = Router();
 
@@ -25,16 +26,16 @@ router.get("/:id/tasks", objectiveController.getObjectiveTasks);
 // GET /api/objectives/:id/okrs - Get all OKRs for a specific objective
 router.get("/:id/okrs", objectiveController.getObjectiveOkrs);
 
-// POST /api/objectives - Create a new objective for logged-in user
-router.post("/", objectiveController.createObjective);
+// POST /api/objectives - Create a new objective for logged-in user (requires write access)
+router.post("/", requireWriteAccess, objectiveController.createObjective);
 
-// PUT /api/objectives/:id - Update objective by ID (only if it belongs to logged-in user)
-router.put("/:id", objectiveController.updateObjective);
+// PUT /api/objectives/:id - Update objective by ID (only if it belongs to logged-in user) (requires write access)
+router.put("/:id", requireWriteAccess, objectiveController.updateObjective);
 
-// PUT /api/objectives/positions - Update multiple objective positions (for drag-and-drop reordering)
-router.put("/positions", objectiveController.updateObjectivePositions);
+// PUT /api/objectives/positions - Update multiple objective positions (for drag-and-drop reordering) (requires write access)
+router.put("/positions", requireWriteAccess, objectiveController.updateObjectivePositions);
 
-// DELETE /api/objectives/:id - Delete objective by ID (only if it belongs to logged-in user)
-router.delete("/:id", objectiveController.deleteObjective);
+// DELETE /api/objectives/:id - Delete objective by ID (only if it belongs to logged-in user) (requires write access)
+router.delete("/:id", requireWriteAccess, objectiveController.deleteObjective);
 
 export default router;
