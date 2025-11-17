@@ -110,7 +110,12 @@ export const searchUsers = async (userId: number, teamId: number, query: string,
     .filter(u => !existingIds.has(u.id));
 };
 
-export const addMember = async (userId: number, teamId: number, userIdToAdd: number) => {
+export const addMember = async (
+  userId: number, 
+  teamId: number, 
+  userIdToAdd: number, 
+  role: "MEMBER" | "MANAGER" | "ADMIN" = "MEMBER"
+) => {
   await verifyTeamAccess(userId, teamId);
   
   // Check if user is already a member
@@ -121,11 +126,23 @@ export const addMember = async (userId: number, teamId: number, userIdToAdd: num
   if (existing) {
     return { message: "User already in team" };
   }
+
+  // Only workspace owner can assign ADMIN role
+  if (role === "ADMIN") {
+    const team = await prisma.team.findUnique({
+      where: { id: teamId },
+      include: { workspace: true }
+    });
+
+    if (!team || team.workspace.ownerId !== userId) {
+      throw new Error("Only workspace owner can assign ADMIN role");
+    }
+  }
   
   await prisma.teamMembership.create({
-    data: { userId: userIdToAdd, teamId, role: "MEMBER", status: "ACTIVE" }
+    data: { userId: userIdToAdd, teamId, role, status: "ACTIVE" }
   });
-  return { message: "User added to team" };
+  return { message: "User added to team", role };
 };
 
 export const removeMember = async (userId: number, teamId: number, userIdToRemove: number) => {
@@ -403,7 +420,7 @@ export const updateMemberRole = async (
   userId: number,
   teamId: number,
   userIdToUpdate: number,
-  role: "ADMIN" | "MEMBER"
+  role: "ADMIN" | "MEMBER" | "MANAGER"
 ) => {
   await verifyTeamAccess(userId, teamId);
 
@@ -417,8 +434,20 @@ export const updateMemberRole = async (
     throw new Error("Member not found in team");
   }
 
+  // Only workspace owner can assign ADMIN role
+  if (role === "ADMIN") {
+    const team = await prisma.team.findUnique({
+      where: { id: teamId },
+      include: { workspace: true }
+    });
+
+    if (!team || team.workspace.ownerId !== userId) {
+      throw new Error("Only workspace owner can assign ADMIN role");
+    }
+  }
+
   // Prevent removing the last admin
-  if (membership.role === "ADMIN" && role === "MEMBER") {
+  if (membership.role === "ADMIN" && role !== "ADMIN") {
     const adminCount = await prisma.teamMembership.count({
       where: {
         teamId,

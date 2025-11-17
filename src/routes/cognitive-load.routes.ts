@@ -48,4 +48,10 @@ router.put('/focus-preferences', conditionalAuth, cognitiveLoadController.update
 // Productivity Patterns endpoint
 router.get('/productivity-patterns', conditionalAuth, cognitiveLoadController.getProductivityPatterns.bind(cognitiveLoadController));
 
+// Team Cognitive Load Summary endpoint (aggregated, anonymized)
+router.get('/team/:teamId/summary', conditionalAuth, cognitiveLoadController.getTeamCognitiveLoadSummary.bind(cognitiveLoadController));
+
+// My Teams Cognitive Load Summary endpoint (aggregated across all teams user manages)
+router.get('/my-teams/summary', conditionalAuth, cognitiveLoadController.getMyTeamsCognitiveLoadSummary.bind(cognitiveLoadController));
+
 export default router;

@@ -68,12 +68,15 @@ export const addMemberController = async (req: Request, res: Response) => {
       return res.status(400).json({ message: "Invalid teamId" });
     }
     
-    const { userId: userIdToAdd } = req.body as { userId: number };
+    const { userId: userIdToAdd, role } = req.body as { userId: number; role?: "MEMBER" | "MANAGER" | "ADMIN" };
     if (!userIdToAdd) {
       return res.status(400).json({ message: "userId required" });
     }
     
-    const result = await addMember(userId, teamId, Number(userIdToAdd));
+    // Default to MEMBER if role not provided
+    const memberRole = role || "MEMBER";
+    
+    const result = await addMember(userId, teamId, Number(userIdToAdd), memberRole);
     res.status(200).json(result);
   } catch (error: any) {
     res.status(403).json({ message: error.message });
@@ -194,12 +197,12 @@ export const updateMemberRoleController = async (req: Request, res: Response) =>
       return res.status(400).json({ message: "userId parameter required" });
     }
     
-    const { role } = req.body as { role: "ADMIN" | "MEMBER" };
+    const { role } = req.body as { role: "ADMIN" | "MEMBER" | "MANAGER" };
     if (!role) {
       return res.status(400).json({ message: "role is required" });
     }
     
-    const validRoles = ["ADMIN", "MEMBER"];
+    const validRoles = ["ADMIN", "MEMBER", "MANAGER"];
     if (!validRoles.includes(role)) {
       return res.status(400).json({ message: `Invalid role. Must be one of: ${validRoles.join(", ")}` });
     }

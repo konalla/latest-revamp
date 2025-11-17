@@ -346,6 +346,7 @@ model UserFocusPreferences {
 enum TeamRole {
   ADMIN
   MEMBER
+  MANAGER
 }
 
 enum TeamMemberStatus {
