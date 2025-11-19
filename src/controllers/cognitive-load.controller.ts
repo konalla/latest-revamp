@@ -1,6 +1,9 @@
 import type { Request, Response } from "express";
 import { CognitiveLoadService } from "../services/cognitive-load.service.js";
 import type { CognitiveLoadError } from "../types/cognitive-load.types.js";
+import permissionService from "../services/permission.service.js";
+import aggregationService from "../services/aggregation.service.js";
+import prisma from "../config/prisma.js";
 
 export class CognitiveLoadController {
   private cognitiveLoadService: CognitiveLoadService;
@@ -12,12 +15,13 @@ export class CognitiveLoadController {
   /**
    * Get user's cognitive load meter
    * GET /api/cognitive-load/meter
+   * SENSITIVE data - only user can view their own data
    */
   async getCognitiveLoadMeter(req: Request, res: Response): Promise<void> {
     try {
-      const userId = req.user?.userId;
+      const requesterId = (req.user as any)?.userId || (req.user as any)?.id;
       
-      if (!userId) {
+      if (!requesterId) {
         console.error('No user ID found in cognitive load meter request');
         res.status(401).json({ 
           error: 'Unauthorized - no user ID',
@@ -26,8 +30,31 @@ export class CognitiveLoadController {
         return;
       }
 
-      console.log(`Getting cognitive load meter for user ID: ${userId}`);
-      const meterData = await this.cognitiveLoadService.getUserCognitiveLoadMeter(userId);
+      // Check if user is trying to view another user's data
+      const targetUserId = req.query.userId 
+        ? parseInt(req.query.userId as string) 
+        : requesterId;
+
+      if (targetUserId !== requesterId) {
+        // Check permission (should always fail for SENSITIVE data)
+        const permission = await permissionService.canViewUserData(
+          requesterId,
+          targetUserId,
+          "cognitive_load.meter"
+        );
+
+        if (!permission.allowed) {
+          res.status(403).json({
+            error: "Forbidden",
+            message: permission.reason || "You can only view your own cognitive load data",
+            code: "SENSITIVE_DATA_ACCESS_DENIED"
+          });
+          return;
+        }
+      }
+
+      console.log(`Getting cognitive load meter for user ID: ${targetUserId}`);
+      const meterData = await this.cognitiveLoadService.getUserCognitiveLoadMeter(targetUserId);
       
       res.json(meterData);
     } catch (error) {
@@ -340,6 +367,112 @@ export class CognitiveLoadController {
   }
 
   /**
+   * Get team cognitive load summary (aggregated, anonymized)
+   * GET /api/cognitive-load/team/:teamId/summary
+   * SENSITIVE data - only aggregated, anonymized metrics
+   */
+  async getTeamCognitiveLoadSummary(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = (req.user as any)?.userId || (req.user as any)?.id;
+      
+      if (!userId) {
+        res.status(401).json({ 
+          error: 'Unauthorized',
+          message: 'User authentication required'
+        });
+        return;
+      }
+
+      const teamId = parseInt(req.params.teamId);
+      if (!teamId || isNaN(teamId)) {
+        res.status(400).json({ 
+          error: 'Bad Request',
+          message: 'Invalid team ID'
+        });
+        return;
+      }
+
+      // Check permission - only MANAGER and ADMIN can view team cognitive load
+      const permission = await permissionService.canViewTeamAnalytics(
+        userId,
+        teamId,
+        "cognitive_load.meter"
+      );
+
+      if (!permission.allowed) {
+        res.status(403).json({
+          error: "Forbidden",
+          message: permission.reason || "You don't have permission to view team cognitive load data",
+          requiredRole: "MANAGER or ADMIN",
+          yourRole: permission.role || "MEMBER",
+          code: "TEAM_COGNITIVE_LOAD_ACCESS_DENIED"
+        });
+        return;
+      }
+
+      // Get team details (name and workspace)
+      const team = await prisma.team.findUnique({
+        where: { id: teamId },
+        include: {
+          workspace: {
+            select: {
+              id: true,
+              name: true,
+              ownerId: true
+            }
+          }
+        }
+      });
+
+      if (!team) {
+        res.status(404).json({ error: "Team not found" });
+        return;
+      }
+
+      // Get aggregated, anonymized data
+      const summary = await aggregationService.aggregateTeamCognitiveLoad(teamId);
+      
+      // Build response with role and permissions metadata
+      const response: any = {
+        ...summary,
+        // Team identification
+        team: {
+          id: team.id,
+          name: team.name,
+          workspaceId: team.workspaceId,
+          workspace: {
+            id: team.workspace.id,
+            name: team.workspace.name,
+            ownerId: team.workspace.ownerId
+          }
+        },
+        // Explicit role information
+        userRole: permission.role,
+        // Permissions object
+        permissions: {
+          canViewTeamAnalytics: true,
+          canViewTeamMembers: permission.role === "ADMIN",
+          canViewIndividualMemberData: false, // Never allowed for cognitive load
+          canManageTeamMembers: permission.role === "ADMIN"
+        },
+        // Access level description
+        accessLevel: permission.role === "ADMIN" 
+          ? "ADMIN - Full team management access" 
+          : "MANAGER - Team analytics access only"
+      };
+      
+      res.json(response);
+    } catch (error) {
+      console.error('Error getting team cognitive load summary:', error);
+      
+      res.status(500).json({
+        error: 'Failed to retrieve team cognitive load summary',
+        details: error instanceof Error ? error.message : 'Unknown error occurred'
+      });
+    }
+  }
+
+  /**
    * Health check for cognitive load service
    * GET /api/cognitive-load/health
    */
@@ -357,6 +490,61 @@ export class CognitiveLoadController {
         status: 'unhealthy',
         service: 'cognitive-load',
         error: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  }
+
+  /**
+   * Get cognitive load summary across all teams user manages (aggregated, anonymized)
+   * GET /api/cognitive-load/my-teams/summary
+   * SENSITIVE data - only aggregated, anonymized metrics across all teams
+   */
+  async getMyTeamsCognitiveLoadSummary(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = (req.user as any)?.userId || (req.user as any)?.id;
+      
+      if (!userId) {
+        res.status(401).json({ 
+          error: 'Unauthorized',
+          message: 'User authentication required'
+        });
+        return;
+      }
+
+      // Get aggregated, anonymized data across all teams
+      const summary = await aggregationService.aggregateMyTeamsCognitiveLoad(userId);
+
+      // Determine highest role across all teams
+      const userTeams = await permissionService.getUserTeams(userId);
+      const teamsWithAccess = userTeams.filter(t => t.role === "MANAGER" || t.role === "ADMIN");
+      const hasAdminRole = teamsWithAccess.some(t => t.role === "ADMIN");
+      const highestRole = hasAdminRole ? "ADMIN" : "MANAGER";
+      
+      // Build response with role and permissions metadata
+      const response: any = {
+        ...summary,
+        // Explicit role information (highest role across all teams)
+        userRole: highestRole,
+        // Permissions object
+        permissions: {
+          canViewTeamAnalytics: true,
+          canViewTeamMembers: hasAdminRole,
+          canViewIndividualMemberData: false,
+          canManageTeamMembers: hasAdminRole
+        },
+        // Access level description
+        accessLevel: hasAdminRole 
+          ? "ADMIN - Full team management access in some teams" 
+          : "MANAGER - Team analytics access only"
+      };
+      
+      res.json(response);
+    } catch (error) {
+      console.error('Error getting my teams cognitive load summary:', error);
+      
+      res.status(500).json({
+        error: 'Failed to retrieve teams cognitive load summary',
+        details: error instanceof Error ? error.message : 'Unknown error occurred'
       });
     }
   }

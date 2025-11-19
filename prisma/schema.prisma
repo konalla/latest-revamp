@@ -346,6 +346,7 @@ model UserFocusPreferences {
 enum TeamRole {
   ADMIN
   MEMBER
+  MANAGER
 }
 
 enum TeamMemberStatus {
@@ -362,7 +363,7 @@ model Workspace {
   updatedAt  DateTime  @updatedAt
 
   // Relations
-  ownerId    Int       @unique
+  ownerId    Int
   owner      User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   teams      Team[]
   projects   Project[]

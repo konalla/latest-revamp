@@ -37,4 +37,14 @@ router.get("/focus", optionalAuth, conditionalAuth, analyticsController.getFocus
 // GET /api/analytics/trends - Trends analytics
 router.get("/trends", optionalAuth, conditionalAuth, analyticsController.getTrendsAnalytics.bind(analyticsController));
 
+// GET /api/analytics/productivity/team/:teamId - Team productivity analytics (aggregated) - Returns array of all teams where user is ADMIN or MANAGER
+// Note: teamId parameter is kept for backward compatibility but is ignored - returns all teams
+router.get("/productivity/team/:teamId", optionalAuth, conditionalAuth, analyticsController.getTeamProductivityAnalytics.bind(analyticsController));
+
+// GET /api/analytics/focus/team/:teamId - Team focus analytics (aggregated)
+router.get("/focus/team/:teamId", optionalAuth, conditionalAuth, analyticsController.getTeamFocusAnalytics.bind(analyticsController));
+
+// GET /api/analytics/productivity/my-teams - Aggregate productivity across all teams user manages
+router.get("/productivity/my-teams", optionalAuth, conditionalAuth, analyticsController.getMyTeamsProductivityAnalytics.bind(analyticsController));
+
 export default router;
