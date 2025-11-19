@@ -13,7 +13,7 @@ import dataClassificationService from "../services/data-classification.service.j
  */
 export const requireTeamRole = (
   teamIdParam: string = "teamId",
-  ...allowedRoles: Array<"MEMBER" | "MANAGER" | "ADMIN">
+  ...allowedRoles: Array<"MEMBER" | "TEAM_MANAGER" | "ADMIN">
 ) => {
   return async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -92,12 +92,13 @@ export const requireTeamAccess = (teamIdParam: string = "teamId") => {
         });
       }
 
-      const isMember = await permissionService.isTeamMember(userId, teamId);
+      // Check if user has team access (member, team manager, workspace manager, or workspace owner)
+      const hasAccess = await permissionService.hasTeamAccess(userId, teamId);
 
-      if (!isMember) {
+      if (!hasAccess) {
         return res.status(403).json({
           error: "Forbidden",
-          message: "You are not a member of this team"
+          message: "You don't have access to this team"
         });
       }
 
@@ -149,7 +150,7 @@ export const requireTeamAnalyticsAccess = (
         return res.status(403).json({
           error: "Forbidden",
           message: permission.reason || "You don't have permission to view team analytics",
-          requiredRole: "MANAGER or ADMIN",
+          requiredRole: "TEAM_MANAGER or ADMIN",
           yourRole: permission.role || "MEMBER"
         });
       }

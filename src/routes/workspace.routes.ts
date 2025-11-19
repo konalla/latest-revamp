@@ -15,7 +15,10 @@ import {
   createTeamController, 
   updateTeamController, 
   deleteTeamController, 
-  getTeamsInWorkspaceController 
+  getTeamsInWorkspaceController,
+  assignWorkspaceManagerController,
+  removeWorkspaceManagerController,
+  getWorkspaceManagersController
 } from "../controllers/workspace.controller.js";
 import { requireWriteAccess } from "../middleware/subscription.middleware.js";
 
@@ -41,6 +44,11 @@ router.get("/workspace/teams", authenticateToken, getTeamsInWorkspaceController)
 router.post("/workspace/teams", authenticateToken, createTeamController);
 router.patch("/workspace/teams/:teamId", authenticateToken, updateTeamController);
 router.delete("/workspace/teams/:teamId", authenticateToken, deleteTeamController);
+
+// Workspace manager management routes (workspace owner/admin only)
+router.post("/workspaces/:workspaceId/managers", authenticateToken, requireWriteAccess, assignWorkspaceManagerController);
+router.delete("/workspaces/:workspaceId/managers", authenticateToken, requireWriteAccess, removeWorkspaceManagerController);
+router.get("/workspaces/:workspaceId/managers", authenticateToken, getWorkspaceManagersController);
 
 export default router;
 

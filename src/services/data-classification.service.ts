@@ -90,9 +90,9 @@ export class DataClassificationService {
 
   /**
    * Check if a data type can be shared based on user role
-   * Note: SENSITIVE data can be aggregated (anonymized) for MANAGER and ADMIN
+   * Note: SENSITIVE data can be aggregated (anonymized) for TEAM_MANAGER and ADMIN
    */
-  canShareDataType(dataType: string, userRole: "MEMBER" | "MANAGER" | "ADMIN"): boolean {
+  canShareDataType(dataType: string, userRole: "MEMBER" | "TEAM_MANAGER" | "ADMIN"): boolean {
     const type = this.classifyDataType(dataType);
     
     // MEMBER cannot share any data
@@ -100,10 +100,10 @@ export class DataClassificationService {
       return false;
     }
     
-    // SENSITIVE data can be aggregated (anonymized) for MANAGER and ADMIN
+    // SENSITIVE data can be aggregated (anonymized) for TEAM_MANAGER and ADMIN
     // Individual SENSITIVE data is never shared, but aggregated/anonymized versions are allowed
     if (type === DataType.SENSITIVE) {
-      return userRole === "MANAGER" || userRole === "ADMIN";
+      return userRole === "TEAM_MANAGER" || userRole === "ADMIN";
     }
     
     // NON_PERSONAL data can always be shared
@@ -111,9 +111,9 @@ export class DataClassificationService {
       return true;
     }
     
-    // PERSONAL data can be aggregated for MANAGER and ADMIN
+    // PERSONAL data can be aggregated for TEAM_MANAGER and ADMIN
     if (type === DataType.PERSONAL) {
-      return userRole === "MANAGER" || userRole === "ADMIN";
+      return userRole === "TEAM_MANAGER" || userRole === "ADMIN";
     }
     
     return false;

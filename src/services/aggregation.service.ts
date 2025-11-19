@@ -329,16 +329,16 @@ export class AggregationService {
   }
 
   /**
-   * Aggregate productivity analytics across all teams user manages (MANAGER/ADMIN)
+   * Aggregate productivity analytics across all teams user manages (TEAM_MANAGER/ADMIN)
    * Deduplicates users across teams to avoid counting the same user's tasks multiple times
    */
   async aggregateMyTeamsProductivity(userId: number, days: number = 30): Promise<any> {
-    // Get all teams where user is MANAGER or ADMIN
+    // Get all teams where user is TEAM_MANAGER or ADMIN
     const memberships = await prisma.teamMembership.findMany({
       where: {
         userId,
         status: "ACTIVE",
-        role: { in: ["MANAGER", "ADMIN"] }
+        role: { in: ["TEAM_MANAGER", "ADMIN"] }
       },
       include: {
         team: {
@@ -360,7 +360,7 @@ export class AggregationService {
           totalTasksCount: 0,
           averageTaskDuration: 0
         },
-        note: "You are not a MANAGER or ADMIN of any teams"
+        note: "You are not a TEAM_MANAGER or ADMIN of any teams"
       };
     }
 
@@ -470,15 +470,15 @@ export class AggregationService {
   }
 
   /**
-   * Aggregate cognitive load across all teams user manages (MANAGER/ADMIN)
+   * Aggregate cognitive load across all teams user manages (TEAM_MANAGER/ADMIN)
    */
   async aggregateMyTeamsCognitiveLoad(userId: number): Promise<any> {
-    // Get all teams where user is MANAGER or ADMIN
+    // Get all teams where user is TEAM_MANAGER or ADMIN
     const memberships = await prisma.teamMembership.findMany({
       where: {
         userId,
         status: "ACTIVE",
-        role: { in: ["MANAGER", "ADMIN"] }
+        role: { in: ["TEAM_MANAGER", "ADMIN"] }
       },
       include: {
         team: {
@@ -501,7 +501,7 @@ export class AggregationService {
           membersOptimal: 0,
           membersHeavy: 0
         },
-        note: "You are not a MANAGER or ADMIN of any teams"
+        note: "You are not a TEAM_MANAGER or ADMIN of any teams"
       };
     }
 

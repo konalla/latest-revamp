@@ -173,7 +173,7 @@ class AnalyticsController {
 
   /**
    * GET /api/analytics/productivity/team/:teamId - Team productivity analytics (aggregated)
-   * Returns array of all teams where user is ADMIN or MANAGER
+   * Returns array of all teams where user is ADMIN or TEAM_MANAGER
    */
   async getTeamProductivityAnalytics(req: Request, res: Response): Promise<void> {
     try {
@@ -198,15 +198,15 @@ class AnalyticsController {
         }
       }
 
-      // Get all teams where user is ADMIN or MANAGER
+      // Get all teams where user is ADMIN or TEAM_MANAGER
       const userTeams = await permissionService.getUserTeams(userId);
-      const teamsWithAccess = userTeams.filter(t => t.role === "MANAGER" || t.role === "ADMIN");
+      const teamsWithAccess = userTeams.filter(t => t.role === "TEAM_MANAGER" || t.role === "ADMIN");
 
       if (teamsWithAccess.length === 0) {
         res.json({
           teams: [],
           totalTeams: 0,
-          message: "You are not a MANAGER or ADMIN of any teams"
+          message: "You are not a TEAM_MANAGER or ADMIN of any teams"
         });
         return;
       }
@@ -262,7 +262,7 @@ class AnalyticsController {
             // Access level description
             accessLevel: role === "ADMIN" 
               ? "ADMIN - Full team management access" 
-              : "MANAGER - Team analytics access only"
+              : "TEAM_MANAGER - Team analytics access only"
           };
 
           // If ADMIN, include team member list
@@ -319,7 +319,7 @@ class AnalyticsController {
         res.status(403).json({
           error: "Forbidden",
           message: permission.reason || "You don't have permission to view team analytics",
-          requiredRole: "MANAGER or ADMIN",
+          requiredRole: "TEAM_MANAGER or ADMIN",
           yourRole: permission.role || "MEMBER"
         });
         return;
@@ -388,7 +388,7 @@ class AnalyticsController {
         // Access level description
         accessLevel: permission.role === "ADMIN" 
           ? "ADMIN - Full team management access" 
-          : "MANAGER - Team analytics access only"
+          : "TEAM_MANAGER - Team analytics access only"
       };
 
       res.json(response);
@@ -432,9 +432,9 @@ class AnalyticsController {
 
       // Determine highest role across all teams
       const userTeams = await permissionService.getUserTeams(userId);
-      const teamsWithAccess = userTeams.filter(t => t.role === "MANAGER" || t.role === "ADMIN");
+      const teamsWithAccess = userTeams.filter(t => t.role === "TEAM_MANAGER" || t.role === "ADMIN");
       const hasAdminRole = teamsWithAccess.some(t => t.role === "ADMIN");
-      const highestRole = hasAdminRole ? "ADMIN" : "MANAGER";
+      const highestRole = hasAdminRole ? "ADMIN" : "TEAM_MANAGER";
 
       // Build response with role and permissions metadata
       const response: any = {
@@ -452,7 +452,7 @@ class AnalyticsController {
         // Access level description
         accessLevel: hasAdminRole 
           ? "ADMIN - Full team management access in some teams" 
-          : "MANAGER - Team analytics access only"
+          : "TEAM_MANAGER - Team analytics access only"
       };
 
       res.json(response);

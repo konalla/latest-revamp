@@ -87,7 +87,7 @@ export const getMyWorkspace = async (userId: number) => {
   });
 };
 
-// Get all workspaces where user is owner OR has ADMIN/MANAGER role in at least one team
+// Get all workspaces where user is owner OR has ADMIN/TEAM_MANAGER role in at least one team OR is workspace manager
 export const getAllWorkspaces = async (userId: number) => {
   // Get all workspaces owned by user
   const ownedWorkspaces = await prisma.workspace.findMany({
@@ -95,14 +95,14 @@ export const getAllWorkspaces = async (userId: number) => {
     select: { id: true }
   });
 
-  // Get all teams where user is ADMIN or MANAGER and get their workspace IDs
+  // Get all teams where user is ADMIN or TEAM_MANAGER and get their workspace IDs
   const adminOrManagerTeams = await prisma.team.findMany({
     where: {
       memberships: {
         some: {
           userId: userId,
           role: {
-            in: ["ADMIN", "MANAGER"]
+            in: ["ADMIN", "TEAM_MANAGER"]
           },
           status: "ACTIVE"
         }
@@ -114,13 +114,21 @@ export const getAllWorkspaces = async (userId: number) => {
     distinct: ["workspaceId"]
   });
 
-  // Get unique workspace IDs from teams
+  // Get all workspaces where user is workspace manager
+  const workspaceManagerMemberships = await prisma.workspaceMembership.findMany({
+    where: { userId: userId },
+    select: { workspaceId: true }
+  });
+
+  // Get unique workspace IDs from teams and workspace managers
   const workspaceIdsFromTeams = adminOrManagerTeams.map(t => t.workspaceId);
+  const workspaceIdsFromManagers = workspaceManagerMemberships.map(m => m.workspaceId);
   
-  // Combine owned workspace IDs and workspace IDs from teams, remove duplicates
+  // Combine owned workspace IDs, workspace IDs from teams, and workspace IDs from managers, remove duplicates
   const allWorkspaceIds = new Set([
     ...ownedWorkspaces.map(w => w.id),
-    ...workspaceIdsFromTeams
+    ...workspaceIdsFromTeams,
+    ...workspaceIdsFromManagers
   ]);
 
   // Get all unique workspaces
@@ -131,42 +139,61 @@ export const getAllWorkspaces = async (userId: number) => {
     orderBy: { createdAt: "asc" }
   });
 
-  // For each workspace, get teams where user is ADMIN or MANAGER
-  const workspacesWithAdminOrManagerTeams = await Promise.all(
+  // For each workspace, get teams based on user's role
+  const workspacesWithTeams = await Promise.all(
     allWorkspaces.map(async (workspace) => {
-      // Get teams in this workspace where user has ADMIN or MANAGER role
-      const teams = await prisma.team.findMany({
-        where: {
-          workspaceId: workspace.id,
-          memberships: {
-            some: {
-              userId: userId,
-              role: {
-                in: ["ADMIN", "MANAGER"]
-              },
-              status: "ACTIVE"
-            }
-          }
-        },
-        include: {
-          _count: {
-            select: { memberships: true }
+      const isOwner = workspace.ownerId === userId;
+      const isWorkspaceManager = workspaceIdsFromManagers.includes(workspace.id);
+
+      let teams;
+      if (isOwner || isWorkspaceManager) {
+        // Owner or workspace manager can see all teams
+        teams = await prisma.team.findMany({
+          where: {
+            workspaceId: workspace.id
           },
-          memberships: {
-            where: {
-              userId: userId,
-              role: {
-                in: ["ADMIN", "MANAGER"]
-              }
-            },
-            select: {
-              role: true,
-              status: true
+          include: {
+            _count: {
+              select: { memberships: true }
             }
-          }
-        },
-        orderBy: { createdAt: "asc" }
-      });
+          },
+          orderBy: { createdAt: "asc" }
+        });
+      } else {
+        // Non-owner/non-workspace-manager can only see teams where they are ADMIN or TEAM_MANAGER
+        teams = await prisma.team.findMany({
+          where: {
+            workspaceId: workspace.id,
+            memberships: {
+              some: {
+                userId: userId,
+                role: {
+                  in: ["ADMIN", "TEAM_MANAGER"]
+                },
+                status: "ACTIVE"
+              }
+            }
+          },
+          include: {
+            _count: {
+              select: { memberships: true }
+            },
+            memberships: {
+              where: {
+                userId: userId,
+                role: {
+                  in: ["ADMIN", "TEAM_MANAGER"]
+                }
+              },
+              select: {
+                role: true,
+                status: true
+              }
+            }
+          },
+          orderBy: { createdAt: "asc" }
+        });
+      }
 
       return {
         ...workspace,
@@ -175,10 +202,10 @@ export const getAllWorkspaces = async (userId: number) => {
     })
   );
 
-  return workspacesWithAdminOrManagerTeams;
+  return workspacesWithTeams;
 };
 
-// Get workspace by ID (verify ownership or ADMIN/MANAGER role in at least one team)
+// Get workspace by ID (verify ownership, workspace manager role, or ADMIN/TEAM_MANAGER role in at least one team)
 export const getWorkspaceById = async (userId: number, workspaceId: number) => {
   const workspace = await prisma.workspace.findUnique({
     where: { id: workspaceId }
@@ -190,13 +217,20 @@ export const getWorkspaceById = async (userId: number, workspaceId: number) => {
 
   const isOwner = workspace.ownerId === userId;
 
-  // If user is not the owner, check if they are ADMIN or MANAGER in any team
-  if (!isOwner) {
+  // Check if user is workspace manager
+  const isWorkspaceManager = await prisma.workspaceMembership.findUnique({
+    where: {
+      userId_workspaceId: { userId, workspaceId }
+    }
+  });
+
+  // If user is not the owner or workspace manager, check if they are ADMIN or TEAM_MANAGER in any team
+  if (!isOwner && !isWorkspaceManager) {
     const hasAdminOrManagerRole = await prisma.teamMembership.findFirst({
       where: {
         userId: userId,
         role: {
-          in: ["ADMIN", "MANAGER"]
+          in: ["ADMIN", "TEAM_MANAGER"]
         },
         status: "ACTIVE",
         team: {
@@ -212,8 +246,8 @@ export const getWorkspaceById = async (userId: number, workspaceId: number) => {
 
   // Get teams based on user's role
   let teams;
-  if (isOwner) {
-    // Owner can see all teams
+  if (isOwner || isWorkspaceManager) {
+    // Owner or workspace manager can see all teams
     teams = await prisma.team.findMany({
       where: {
         workspaceId: workspaceId
@@ -226,7 +260,7 @@ export const getWorkspaceById = async (userId: number, workspaceId: number) => {
       orderBy: { createdAt: "asc" }
     });
   } else {
-    // Non-owner can only see teams where they are ADMIN or MANAGER
+    // Non-owner/non-workspace-manager can only see teams where they are ADMIN or TEAM_MANAGER
     teams = await prisma.team.findMany({
       where: {
         workspaceId: workspaceId,
@@ -234,7 +268,7 @@ export const getWorkspaceById = async (userId: number, workspaceId: number) => {
           some: {
             userId: userId,
             role: {
-              in: ["ADMIN", "MANAGER"]
+              in: ["ADMIN", "TEAM_MANAGER"]
             },
             status: "ACTIVE"
           }
@@ -248,7 +282,7 @@ export const getWorkspaceById = async (userId: number, workspaceId: number) => {
           where: {
             userId: userId,
             role: {
-              in: ["ADMIN", "MANAGER"]
+              in: ["ADMIN", "TEAM_MANAGER"]
             }
           },
           select: {
@@ -431,6 +465,118 @@ export const createWorkspaceAndTeam = async (userId: number) => {
     created: true,
     message: "Workspace and team created successfully"
   };
+};
+
+// Assign workspace manager
+export const assignWorkspaceManager = async (userId: number, workspaceId: number, userIdToAssign: number) => {
+  // Verify user has permission (workspace owner/admin only)
+  const workspace = await prisma.workspace.findUnique({
+    where: { id: workspaceId }
+  });
+
+  if (!workspace) {
+    throw new Error("Workspace not found");
+  }
+
+  if (workspace.ownerId !== userId) {
+    throw new Error("Only workspace owner/admin can assign workspace managers");
+  }
+
+  // Check if user to assign exists
+  const userToAssign = await prisma.user.findUnique({
+    where: { id: userIdToAssign }
+  });
+
+  if (!userToAssign) {
+    throw new Error("User not found");
+  }
+
+  // Check if already a workspace manager
+  const existing = await prisma.workspaceMembership.findUnique({
+    where: {
+      userId_workspaceId: { userId: userIdToAssign, workspaceId }
+    }
+  });
+
+  if (existing) {
+    throw new Error("User is already a workspace manager");
+  }
+
+  // Create workspace membership
+  await prisma.workspaceMembership.create({
+    data: {
+      userId: userIdToAssign,
+      workspaceId: workspaceId,
+      role: "WORKSPACE_MANAGER"
+    }
+  });
+
+  return { message: "Workspace manager assigned successfully" };
+};
+
+// Remove workspace manager
+export const removeWorkspaceManager = async (userId: number, workspaceId: number, userIdToRemove: number) => {
+  // Verify user has permission (workspace owner/admin only)
+  const workspace = await prisma.workspace.findUnique({
+    where: { id: workspaceId }
+  });
+
+  if (!workspace) {
+    throw new Error("Workspace not found");
+  }
+
+  if (workspace.ownerId !== userId) {
+    throw new Error("Only workspace owner/admin can remove workspace managers");
+  }
+
+  // Check if membership exists
+  const membership = await prisma.workspaceMembership.findUnique({
+    where: {
+      userId_workspaceId: { userId: userIdToRemove, workspaceId }
+    }
+  });
+
+  if (!membership) {
+    throw new Error("User is not a workspace manager");
+  }
+
+  // Remove workspace membership
+  await prisma.workspaceMembership.delete({
+    where: {
+      userId_workspaceId: { userId: userIdToRemove, workspaceId }
+    }
+  });
+
+  return { message: "Workspace manager removed successfully" };
+};
+
+// Get workspace managers
+export const getWorkspaceManagers = async (userId: number, workspaceId: number) => {
+  // Verify user has permission to view workspace
+  await getWorkspaceById(userId, workspaceId);
+
+  const memberships = await prisma.workspaceMembership.findMany({
+    where: { workspaceId },
+    include: {
+      user: {
+        select: {
+          id: true,
+          username: true,
+          name: true,
+          email: true
+        }
+      }
+    }
+  });
+
+  return memberships.map(m => ({
+    id: m.user.id,
+    username: m.user.username,
+    name: m.user.name,
+    email: m.user.email,
+    role: m.role,
+    assignedAt: m.createdAt
+  }));
 };
 
 
