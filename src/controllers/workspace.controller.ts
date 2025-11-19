@@ -1,5 +1,17 @@
 import type { Request, Response } from "express";
-import { ensureWorkspaceAndTeamForUser, getMyWorkspace, getMyTeam, renameWorkspace, renameTeam, createWorkspaceAndTeam } from "../services/workspace.service.js";
+import { 
+  ensureWorkspaceAndTeamForUser, 
+  getMyWorkspace, 
+  getAllWorkspaces,
+  getWorkspaceById,
+  getMyTeam, 
+  renameWorkspace, 
+  renameTeam, 
+  createWorkspaceAndTeam,
+  createWorkspace,
+  updateWorkspace,
+  deleteWorkspace
+} from "../services/workspace.service.js";
 import { createTeam, updateTeam, deleteTeam, getTeamsInWorkspace } from "../services/team.service.js";
 
 export const bootstrapMine = async (req: Request, res: Response) => {
@@ -25,6 +37,129 @@ export const getMine = async (req: Request, res: Response) => {
     }
     const ws = await getMyWorkspace(userId);
     res.status(200).json(ws);
+  } catch (error: any) {
+    res.status(400).json({ message: error.message });
+  }
+};
+
+// Get all workspaces owned by user
+export const getAllWorkspacesController = async (req: Request, res: Response) => {
+  try {
+    const userId = req.user?.id ?? req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    const workspaces = await getAllWorkspaces(userId);
+    res.status(200).json({
+      workspaces,
+      totalWorkspaces: workspaces.length
+    });
+  } catch (error: any) {
+    res.status(400).json({ message: error.message });
+  }
+};
+
+// Get workspace by ID
+export const getWorkspaceByIdController = async (req: Request, res: Response) => {
+  try {
+    const userId = req.user?.id ?? req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    
+    const workspaceIdParam = req.params.workspaceId;
+    if (!workspaceIdParam) {
+      return res.status(400).json({ message: "workspaceId is required" });
+    }
+    
+    const workspaceId = parseInt(workspaceIdParam);
+    if (isNaN(workspaceId)) {
+      return res.status(400).json({ message: "Invalid workspace ID" });
+    }
+
+    const workspace = await getWorkspaceById(userId, workspaceId);
+    res.status(200).json(workspace);
+  } catch (error: any) {
+    res.status(400).json({ message: error.message });
+  }
+};
+
+// Create new workspace
+export const createWorkspaceController = async (req: Request, res: Response) => {
+  try {
+    const userId = req.user?.id ?? req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    
+    const { name } = req.body as { name: string };
+    if (!name || !name.trim()) {
+      return res.status(400).json({ message: "Workspace name is required" });
+    }
+
+    const workspace = await createWorkspace(userId, name.trim());
+    res.status(201).json({
+      message: "Workspace created successfully",
+      workspace
+    });
+  } catch (error: any) {
+    res.status(400).json({ message: error.message });
+  }
+};
+
+// Update workspace
+export const updateWorkspaceController = async (req: Request, res: Response) => {
+  try {
+    const userId = req.user?.id ?? req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    
+    const workspaceIdParam = req.params.workspaceId;
+    if (!workspaceIdParam) {
+      return res.status(400).json({ message: "workspaceId is required" });
+    }
+    
+    const workspaceId = parseInt(workspaceIdParam);
+    if (isNaN(workspaceId)) {
+      return res.status(400).json({ message: "Invalid workspace ID" });
+    }
+
+    const { name } = req.body as { name: string };
+    if (!name || !name.trim()) {
+      return res.status(400).json({ message: "Workspace name is required" });
+    }
+
+    const workspace = await updateWorkspace(userId, workspaceId, name.trim());
+    res.status(200).json({
+      message: "Workspace updated successfully",
+      workspace
+    });
+  } catch (error: any) {
+    res.status(400).json({ message: error.message });
+  }
+};
+
+// Delete workspace
+export const deleteWorkspaceController = async (req: Request, res: Response) => {
+  try {
+    const userId = req.user?.id ?? req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    
+    const workspaceIdParam = req.params.workspaceId;
+    if (!workspaceIdParam) {
+      return res.status(400).json({ message: "workspaceId is required" });
+    }
+    
+    const workspaceId = parseInt(workspaceIdParam);
+    if (isNaN(workspaceId)) {
+      return res.status(400).json({ message: "Invalid workspace ID" });
+    }
+
+    const result = await deleteWorkspace(userId, workspaceId);
+    res.status(200).json(result);
   } catch (error: any) {
     res.status(400).json({ message: error.message });
   }
@@ -101,13 +236,18 @@ export const createTeamController = async (req: Request, res: Response) => {
     if (!userId) {
       return res.status(401).json({ message: "Unauthorized" });
     }
-    const { name } = req.body as { name: string };
+    const { name, workspaceId } = req.body as { name: string; workspaceId?: number };
     
     if (!name || !name.trim()) {
       return res.status(400).json({ message: "Team name is required" });
     }
 
-    const team = await createTeam(userId, name.trim());
+    const workspaceIdNum = workspaceId ? parseInt(String(workspaceId)) : undefined;
+    if (workspaceId && isNaN(workspaceIdNum!)) {
+      return res.status(400).json({ message: "Invalid workspace ID" });
+    }
+
+    const team = await createTeam(userId, name.trim(), workspaceIdNum);
     res.status(201).json({
       message: "Team created successfully",
       team
@@ -179,7 +319,16 @@ export const getTeamsInWorkspaceController = async (req: Request, res: Response)
     if (!userId) {
       return res.status(401).json({ message: "Unauthorized" });
     }
-    const teams = await getTeamsInWorkspace(userId);
+    
+    // Get workspaceId from query parameter if provided
+    const workspaceIdParam = req.query.workspaceId as string | undefined;
+    const workspaceId = workspaceIdParam ? parseInt(workspaceIdParam) : undefined;
+    
+    if (workspaceIdParam && isNaN(workspaceId!)) {
+      return res.status(400).json({ message: "Invalid workspace ID" });
+    }
+    
+    const teams = await getTeamsInWorkspace(userId, workspaceId);
     res.status(200).json({
       teams,
       totalTeams: teams.length

@@ -1,17 +1,32 @@
 import prisma from "../config/prisma.js";
 import { subscriptionService } from "./subscription.service.js";
 
-// Check if user is workspace owner
+// Check if user is workspace owner (checks if user owns at least one workspace)
 const isWorkspaceOwner = async (userId: number): Promise<boolean> => {
-  const workspace = await prisma.workspace.findUnique({ where: { ownerId: userId } });
+  const workspace = await prisma.workspace.findFirst({ where: { ownerId: userId } });
   return !!workspace;
 };
 
-// Get workspace for user (must be owner)
+// Get workspace for user (must be owner) - gets first workspace for backward compatibility
 const getWorkspaceForOwner = async (userId: number) => {
-  const workspace = await prisma.workspace.findUnique({ where: { ownerId: userId } });
+  const workspace = await prisma.workspace.findFirst({ 
+    where: { ownerId: userId },
+    orderBy: { createdAt: "asc" }
+  });
   if (!workspace) {
     throw new Error("Workspace not found. Only workspace owners can manage teams.");
+  }
+  return workspace;
+};
+
+// Get workspace by ID and verify ownership
+const getWorkspaceByIdForOwner = async (userId: number, workspaceId: number) => {
+  const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId } });
+  if (!workspace) {
+    throw new Error("Workspace not found");
+  }
+  if (workspace.ownerId !== userId) {
+    throw new Error("You don't have permission to manage teams in this workspace");
   }
   return workspace;
 };
@@ -210,9 +225,11 @@ export const updateMemberStatus = async (
 
 // Team CRUD operations for workspace owners
 
-export const createTeam = async (userId: number, name: string) => {
-  // Verify user is workspace owner
-  const workspace = await getWorkspaceForOwner(userId);
+export const createTeam = async (userId: number, name: string, workspaceId?: number) => {
+  // If workspaceId is provided, use it; otherwise use first workspace (backward compatibility)
+  const workspace = workspaceId 
+    ? await getWorkspaceByIdForOwner(userId, workspaceId)
+    : await getWorkspaceForOwner(userId);
 
   // Check if team name already exists in this workspace
   const existingTeam = await prisma.team.findFirst({
@@ -308,9 +325,11 @@ export const deleteTeam = async (userId: number, teamId: number) => {
   return { message: "Team deleted successfully" };
 };
 
-export const getTeamsInWorkspace = async (userId: number) => {
-  // Verify user is workspace owner
-  const workspace = await getWorkspaceForOwner(userId);
+export const getTeamsInWorkspace = async (userId: number, workspaceId?: number) => {
+  // If workspaceId is provided, use it; otherwise use first workspace (backward compatibility)
+  const workspace = workspaceId 
+    ? await getWorkspaceByIdForOwner(userId, workspaceId)
+    : await getWorkspaceForOwner(userId);
 
   // Get all teams in the workspace with member counts
   const teams = await prisma.team.findMany({
