@@ -13,7 +13,8 @@ import {
   deleteWorkspace,
   assignWorkspaceManager,
   removeWorkspaceManager,
-  getWorkspaceManagers
+  getWorkspaceManagers,
+  searchUsersForWorkspaceManager
 } from "../services/workspace.service.js";
 import { createTeam, updateTeam, deleteTeam, getTeamsInWorkspace } from "../services/team.service.js";
 
@@ -359,12 +360,27 @@ export const assignWorkspaceManagerController = async (req: Request, res: Respon
       return res.status(400).json({ message: "Invalid workspace ID" });
     }
 
-    const { userId: userIdToAssign } = req.body as { userId: number };
-    if (!userIdToAssign) {
-      return res.status(400).json({ message: "userId is required" });
+    const { username, email, userId: userIdParam } = req.body as { 
+      username?: string; 
+      email?: string; 
+      userId?: number;
+    };
+
+    // Accept username, email, or userId
+    let identifier: string | number;
+    if (userIdParam) {
+      identifier = userIdParam;
+    } else if (username) {
+      identifier = username;
+    } else if (email) {
+      identifier = email;
+    } else {
+      return res.status(400).json({ 
+        message: "Either username, email, or userId is required" 
+      });
     }
 
-    const result = await assignWorkspaceManager(userId, workspaceId, userIdToAssign);
+    const result = await assignWorkspaceManager(userId, workspaceId, identifier);
     res.status(200).json(result);
   } catch (error: any) {
     res.status(400).json({ message: error.message });
@@ -389,12 +405,27 @@ export const removeWorkspaceManagerController = async (req: Request, res: Respon
       return res.status(400).json({ message: "Invalid workspace ID" });
     }
 
-    const { userId: userIdToRemove } = req.body as { userId: number };
-    if (!userIdToRemove) {
-      return res.status(400).json({ message: "userId is required" });
+    const { username, email, userId: userIdParam } = req.body as { 
+      username?: string; 
+      email?: string; 
+      userId?: number;
+    };
+
+    // Accept username, email, or userId
+    let identifier: string | number;
+    if (userIdParam) {
+      identifier = userIdParam;
+    } else if (username) {
+      identifier = username;
+    } else if (email) {
+      identifier = email;
+    } else {
+      return res.status(400).json({ 
+        message: "Either username, email, or userId is required" 
+      });
     }
 
-    const result = await removeWorkspaceManager(userId, workspaceId, userIdToRemove);
+    const result = await removeWorkspaceManager(userId, workspaceId, identifier);
     res.status(200).json(result);
   } catch (error: any) {
     res.status(400).json({ message: error.message });
@@ -424,6 +455,36 @@ export const getWorkspaceManagersController = async (req: Request, res: Response
       managers,
       totalManagers: managers.length
     });
+  } catch (error: any) {
+    res.status(400).json({ message: error.message });
+  }
+};
+
+// Search users for workspace manager assignment
+export const searchWorkspaceManagersController = async (req: Request, res: Response) => {
+  try {
+    const userId = req.user?.id ?? req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    
+    const workspaceIdParam = req.params.workspaceId;
+    if (!workspaceIdParam) {
+      return res.status(400).json({ message: "workspaceId is required" });
+    }
+    
+    const workspaceId = parseInt(workspaceIdParam);
+    if (isNaN(workspaceId)) {
+      return res.status(400).json({ message: "Invalid workspace ID" });
+    }
+
+    const q = (req.query.q as string) ?? "";
+    if (!q || !q.trim()) {
+      return res.status(200).json([]);
+    }
+
+    const results = await searchUsersForWorkspaceManager(userId, workspaceId, q.trim(), 20);
+    res.status(200).json(results);
   } catch (error: any) {
     res.status(400).json({ message: error.message });
   }

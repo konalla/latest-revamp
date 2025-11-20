@@ -468,7 +468,11 @@ export const createWorkspaceAndTeam = async (userId: number) => {
 };
 
 // Assign workspace manager
-export const assignWorkspaceManager = async (userId: number, workspaceId: number, userIdToAssign: number) => {
+export const assignWorkspaceManager = async (
+  userId: number, 
+  workspaceId: number, 
+  identifier: string | number // username, email, or userId
+) => {
   // Verify user has permission (workspace owner/admin only)
   const workspace = await prisma.workspace.findUnique({
     where: { id: workspaceId }
@@ -482,19 +486,33 @@ export const assignWorkspaceManager = async (userId: number, workspaceId: number
     throw new Error("Only workspace owner/admin can assign workspace managers");
   }
 
-  // Check if user to assign exists
-  const userToAssign = await prisma.user.findUnique({
-    where: { id: userIdToAssign }
-  });
+  // Find user by username, email, or userId
+  let userToAssign;
+  if (typeof identifier === 'number') {
+    // If it's a number, treat as userId
+    userToAssign = await prisma.user.findUnique({
+      where: { id: identifier }
+    });
+  } else {
+    // If it's a string, try username first, then email
+    userToAssign = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { username: identifier },
+          { email: identifier }
+        ]
+      }
+    });
+  }
 
   if (!userToAssign) {
-    throw new Error("User not found");
+    throw new Error("User not found. Please provide a valid username, email, or user ID.");
   }
 
   // Check if already a workspace manager
   const existing = await prisma.workspaceMembership.findUnique({
     where: {
-      userId_workspaceId: { userId: userIdToAssign, workspaceId }
+      userId_workspaceId: { userId: userToAssign.id, workspaceId }
     }
   });
 
@@ -505,17 +523,29 @@ export const assignWorkspaceManager = async (userId: number, workspaceId: number
   // Create workspace membership
   await prisma.workspaceMembership.create({
     data: {
-      userId: userIdToAssign,
+      userId: userToAssign.id,
       workspaceId: workspaceId,
       role: "WORKSPACE_MANAGER"
     }
   });
 
-  return { message: "Workspace manager assigned successfully" };
+  return { 
+    message: "Workspace manager assigned successfully",
+    user: {
+      id: userToAssign.id,
+      username: userToAssign.username,
+      name: userToAssign.name,
+      email: userToAssign.email
+    }
+  };
 };
 
 // Remove workspace manager
-export const removeWorkspaceManager = async (userId: number, workspaceId: number, userIdToRemove: number) => {
+export const removeWorkspaceManager = async (
+  userId: number, 
+  workspaceId: number, 
+  identifier: string | number // username, email, or userId
+) => {
   // Verify user has permission (workspace owner/admin only)
   const workspace = await prisma.workspace.findUnique({
     where: { id: workspaceId }
@@ -529,10 +559,33 @@ export const removeWorkspaceManager = async (userId: number, workspaceId: number
     throw new Error("Only workspace owner/admin can remove workspace managers");
   }
 
+  // Find user by username, email, or userId
+  let userToRemove;
+  if (typeof identifier === 'number') {
+    // If it's a number, treat as userId
+    userToRemove = await prisma.user.findUnique({
+      where: { id: identifier }
+    });
+  } else {
+    // If it's a string, try username first, then email
+    userToRemove = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { username: identifier },
+          { email: identifier }
+        ]
+      }
+    });
+  }
+
+  if (!userToRemove) {
+    throw new Error("User not found. Please provide a valid username, email, or user ID.");
+  }
+
   // Check if membership exists
   const membership = await prisma.workspaceMembership.findUnique({
     where: {
-      userId_workspaceId: { userId: userIdToRemove, workspaceId }
+      userId_workspaceId: { userId: userToRemove.id, workspaceId }
     }
   });
 
@@ -543,11 +596,19 @@ export const removeWorkspaceManager = async (userId: number, workspaceId: number
   // Remove workspace membership
   await prisma.workspaceMembership.delete({
     where: {
-      userId_workspaceId: { userId: userIdToRemove, workspaceId }
+      userId_workspaceId: { userId: userToRemove.id, workspaceId }
     }
   });
 
-  return { message: "Workspace manager removed successfully" };
+  return { 
+    message: "Workspace manager removed successfully",
+    user: {
+      id: userToRemove.id,
+      username: userToRemove.username,
+      name: userToRemove.name,
+      email: userToRemove.email
+    }
+  };
 };
 
 // Get workspace managers
@@ -577,6 +638,61 @@ export const getWorkspaceManagers = async (userId: number, workspaceId: number) 
     role: m.role,
     assignedAt: m.createdAt
   }));
+};
+
+// Search users for workspace manager assignment
+export const searchUsersForWorkspaceManager = async (
+  userId: number,
+  workspaceId: number,
+  query: string,
+  limit = 20
+) => {
+  // Verify user has permission (workspace owner/admin or workspace manager)
+  const workspace = await prisma.workspace.findUnique({
+    where: { id: workspaceId }
+  });
+
+  if (!workspace) {
+    throw new Error("Workspace not found");
+  }
+
+  // Check if user is workspace owner
+  const isOwner = workspace.ownerId === userId;
+  
+  if (!isOwner) {
+    // Check if user is workspace manager
+    const isWorkspaceManager = await prisma.workspaceMembership.findUnique({
+      where: {
+        userId_workspaceId: { userId, workspaceId }
+      }
+    });
+
+    if (!isWorkspaceManager) {
+      throw new Error("Only workspace owner/admin or workspace manager can search for workspace managers");
+    }
+  }
+
+  // Get existing workspace managers
+  const existingManagers = await prisma.workspaceMembership.findMany({
+    where: { workspaceId },
+    select: { userId: true }
+  });
+  const existingManagerIds = new Set(existingManagers.map(m => m.userId));
+
+  // Search users by username or email
+  const users = await prisma.user.findMany({
+    where: {
+      OR: [
+        { username: { contains: query, mode: "insensitive" } },
+        { email: { contains: query, mode: "insensitive" } }
+      ]
+    },
+    take: limit,
+    select: { id: true, username: true, name: true, email: true }
+  });
+
+  // Return all users excluding existing workspace managers
+  return users.filter(u => !existingManagerIds.has(u.id));
 };
 
 

@@ -464,6 +464,302 @@ class AnalyticsController {
       });
     }
   }
+
+  /**
+   * GET /api/analytics/productivity/workspace/:workspaceId - Workspace productivity analytics
+   * For workspace managers - combines all teams in the workspace
+   */
+  async getWorkspaceProductivityAnalytics(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = (req.user as any)?.userId || (req.user as any)?.id;
+      if (!userId) {
+        res.status(401).json({ error: "Unauthorized" });
+        return;
+      }
+
+      const workspaceIdParam = req.params.workspaceId;
+      if (!workspaceIdParam) {
+        res.status(400).json({ error: "Bad Request", message: "workspaceId is required" });
+        return;
+      }
+
+      const workspaceId = parseInt(workspaceIdParam);
+      if (isNaN(workspaceId)) {
+        res.status(400).json({ error: "Bad Request", message: "Invalid workspace ID" });
+        return;
+      }
+
+      // Verify user has access to workspace (owner or workspace manager)
+      const workspace = await prisma.workspace.findUnique({
+        where: { id: workspaceId }
+      });
+
+      if (!workspace) {
+        res.status(404).json({ error: "Workspace not found" });
+        return;
+      }
+
+      const isOwner = workspace.ownerId === userId;
+      const isWorkspaceManager = await prisma.workspaceMembership.findUnique({
+        where: {
+          userId_workspaceId: { userId, workspaceId }
+        }
+      });
+
+      if (!isOwner && !isWorkspaceManager) {
+        res.status(403).json({
+          error: "Forbidden",
+          message: "Only workspace owner/admin or workspace manager can view workspace analytics"
+        });
+        return;
+      }
+
+      // Parse timeframe
+      let days = 30;
+      const timeframe = req.query.timeframe as string || req.query.days as string || '30';
+      if (timeframe) {
+        try {
+          if (/^\d+$/.test(timeframe)) {
+            days = parseInt(timeframe, 10);
+          } else if (timeframe.endsWith('days')) {
+            days = parseInt(timeframe.replace('days', ''), 10);
+          }
+        } catch (parseError) {
+          console.warn("Invalid timeframe format, using default 30 days:", parseError);
+        }
+      }
+
+      // Get aggregated data for all teams in workspace
+      const aggregatedData = await aggregationService.aggregateWorkspaceProductivity(workspaceId, days);
+
+      // Build response with role and permissions metadata
+      const response: any = {
+        ...aggregatedData,
+        userRole: isOwner ? "ADMIN" : "WORKSPACE_MANAGER",
+        permissions: {
+          canViewWorkspaceAnalytics: true,
+          canViewTeamAnalytics: true,
+          canViewTeamMembers: true,
+          canViewIndividualMemberData: false,
+          canManageWorkspace: true
+        },
+        accessLevel: isOwner 
+          ? "ADMIN - Full workspace access" 
+          : "WORKSPACE_MANAGER - Workspace analytics access"
+      };
+
+      res.json(response);
+    } catch (error) {
+      console.error("Error fetching workspace productivity analytics:", error);
+      res.status(500).json({
+        error: "Failed to fetch workspace productivity analytics",
+        details: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
+  /**
+   * GET /api/analytics/productivity/all-workspaces - Cross-workspace productivity analytics
+   * For admin/owner - combines all workspaces they own
+   */
+  async getAllWorkspacesProductivityAnalytics(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = (req.user as any)?.userId || (req.user as any)?.id;
+      if (!userId) {
+        res.status(401).json({ error: "Unauthorized" });
+        return;
+      }
+
+      // Parse timeframe
+      let days = 30;
+      const timeframe = req.query.timeframe as string || req.query.days as string || '30';
+      if (timeframe) {
+        try {
+          if (/^\d+$/.test(timeframe)) {
+            days = parseInt(timeframe, 10);
+          } else if (timeframe.endsWith('days')) {
+            days = parseInt(timeframe.replace('days', ''), 10);
+          }
+        } catch (parseError) {
+          console.warn("Invalid timeframe format, using default 30 days:", parseError);
+        }
+      }
+
+      // Get aggregated data across all workspaces
+      const aggregatedData = await aggregationService.aggregateAllWorkspacesProductivity(userId, days);
+
+      // Build response with role and permissions metadata
+      const response: any = {
+        ...aggregatedData,
+        userRole: "ADMIN",
+        permissions: {
+          canViewWorkspaceAnalytics: true,
+          canViewCrossWorkspaceAnalytics: true,
+          canViewTeamAnalytics: true,
+          canViewTeamMembers: true,
+          canViewIndividualMemberData: false,
+          canManageWorkspace: true
+        },
+        accessLevel: "ADMIN - Cross-workspace analytics dashboard"
+      };
+
+      res.json(response);
+    } catch (error) {
+      console.error("Error fetching all workspaces productivity analytics:", error);
+      res.status(500).json({
+        error: "Failed to fetch all workspaces productivity analytics",
+        details: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
+  /**
+   * GET /api/analytics/focus/workspace/:workspaceId - Workspace focus analytics
+   * For workspace managers - combines all teams in the workspace
+   */
+  async getWorkspaceFocusAnalytics(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = (req.user as any)?.userId || (req.user as any)?.id;
+      if (!userId) {
+        res.status(401).json({ error: "Unauthorized" });
+        return;
+      }
+
+      const workspaceIdParam = req.params.workspaceId;
+      if (!workspaceIdParam) {
+        res.status(400).json({ error: "Bad Request", message: "workspaceId is required" });
+        return;
+      }
+
+      const workspaceId = parseInt(workspaceIdParam);
+      if (isNaN(workspaceId)) {
+        res.status(400).json({ error: "Bad Request", message: "Invalid workspace ID" });
+        return;
+      }
+
+      // Verify user has access to workspace (owner or workspace manager)
+      const workspace = await prisma.workspace.findUnique({
+        where: { id: workspaceId }
+      });
+
+      if (!workspace) {
+        res.status(404).json({ error: "Workspace not found" });
+        return;
+      }
+
+      const isOwner = workspace.ownerId === userId;
+      const isWorkspaceManager = await prisma.workspaceMembership.findUnique({
+        where: {
+          userId_workspaceId: { userId, workspaceId }
+        }
+      });
+
+      if (!isOwner && !isWorkspaceManager) {
+        res.status(403).json({
+          error: "Forbidden",
+          message: "Only workspace owner/admin or workspace manager can view workspace analytics"
+        });
+        return;
+      }
+
+      // Parse timeframe
+      let days = 30;
+      const timeframe = req.query.timeframe as string || req.query.days as string || '30';
+      if (timeframe) {
+        try {
+          if (/^\d+$/.test(timeframe)) {
+            days = parseInt(timeframe, 10);
+          } else if (timeframe.endsWith('days')) {
+            days = parseInt(timeframe.replace('days', ''), 10);
+          }
+        } catch (parseError) {
+          console.warn("Invalid timeframe format, using default 30 days:", parseError);
+        }
+      }
+
+      // Get aggregated data for all teams in workspace
+      const aggregatedData = await aggregationService.aggregateWorkspaceFocus(workspaceId, days);
+
+      // Build response with role and permissions metadata
+      const response: any = {
+        ...aggregatedData,
+        userRole: isOwner ? "ADMIN" : "WORKSPACE_MANAGER",
+        permissions: {
+          canViewWorkspaceAnalytics: true,
+          canViewTeamAnalytics: true,
+          canViewTeamMembers: true,
+          canViewIndividualMemberData: false,
+          canManageWorkspace: true
+        },
+        accessLevel: isOwner 
+          ? "ADMIN - Full workspace access" 
+          : "WORKSPACE_MANAGER - Workspace analytics access"
+      };
+
+      res.json(response);
+    } catch (error) {
+      console.error("Error fetching workspace focus analytics:", error);
+      res.status(500).json({
+        error: "Failed to fetch workspace focus analytics",
+        details: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
+  /**
+   * GET /api/analytics/focus/all-workspaces - Cross-workspace focus analytics
+   * For admin/owner - combines all workspaces they own
+   */
+  async getAllWorkspacesFocusAnalytics(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = (req.user as any)?.userId || (req.user as any)?.id;
+      if (!userId) {
+        res.status(401).json({ error: "Unauthorized" });
+        return;
+      }
+
+      // Parse timeframe
+      let days = 30;
+      const timeframe = req.query.timeframe as string || req.query.days as string || '30';
+      if (timeframe) {
+        try {
+          if (/^\d+$/.test(timeframe)) {
+            days = parseInt(timeframe, 10);
+          } else if (timeframe.endsWith('days')) {
+            days = parseInt(timeframe.replace('days', ''), 10);
+          }
+        } catch (parseError) {
+          console.warn("Invalid timeframe format, using default 30 days:", parseError);
+        }
+      }
+
+      // Get aggregated data across all workspaces
+      const aggregatedData = await aggregationService.aggregateAllWorkspacesFocus(userId, days);
+
+      // Build response with role and permissions metadata
+      const response: any = {
+        ...aggregatedData,
+        userRole: "ADMIN",
+        permissions: {
+          canViewWorkspaceAnalytics: true,
+          canViewCrossWorkspaceAnalytics: true,
+          canViewTeamAnalytics: true,
+          canViewTeamMembers: true,
+          canViewIndividualMemberData: false,
+          canManageWorkspace: true
+        },
+        accessLevel: "ADMIN - Cross-workspace analytics dashboard"
+      };
+
+      res.json(response);
+    } catch (error) {
+      console.error("Error fetching all workspaces focus analytics:", error);
+      res.status(500).json({
+        error: "Failed to fetch all workspaces focus analytics",
+        details: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
 }
 
 export default new AnalyticsController();

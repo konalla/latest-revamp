@@ -548,4 +548,150 @@ export class CognitiveLoadController {
       });
     }
   }
+
+  /**
+   * Get workspace cognitive load summary (aggregated, anonymized)
+   * GET /api/cognitive-load/workspace/:workspaceId/summary
+   * For workspace managers - combines all teams in the workspace
+   */
+  async getWorkspaceCognitiveLoadSummary(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = (req.user as any)?.userId || (req.user as any)?.id;
+      
+      if (!userId) {
+        res.status(401).json({ 
+          error: 'Unauthorized',
+          message: 'User authentication required'
+        });
+        return;
+      }
+
+      const workspaceIdParam = req.params.workspaceId;
+      if (!workspaceIdParam) {
+        res.status(400).json({ 
+          error: 'Bad Request',
+          message: 'workspaceId is required'
+        });
+        return;
+      }
+
+      const workspaceId = parseInt(workspaceIdParam);
+      if (isNaN(workspaceId)) {
+        res.status(400).json({ 
+          error: 'Bad Request',
+          message: 'Invalid workspace ID'
+        });
+        return;
+      }
+
+      // Verify user has access to workspace (owner or workspace manager)
+      const workspace = await prisma.workspace.findUnique({
+        where: { id: workspaceId }
+      });
+
+      if (!workspace) {
+        res.status(404).json({ error: "Workspace not found" });
+        return;
+      }
+
+      const isOwner = workspace.ownerId === userId;
+      const isWorkspaceManager = await prisma.workspaceMembership.findUnique({
+        where: {
+          userId_workspaceId: { userId, workspaceId }
+        }
+      });
+
+      if (!isOwner && !isWorkspaceManager) {
+        res.status(403).json({
+          error: "Forbidden",
+          message: "Only workspace owner/admin or workspace manager can view workspace cognitive load data",
+          requiredRole: "WORKSPACE_MANAGER or ADMIN"
+        });
+        return;
+      }
+
+      // Get aggregated, anonymized data for all teams in workspace
+      const summary = await aggregationService.aggregateWorkspaceCognitiveLoad(workspaceId);
+      
+      // Build response with role and permissions metadata
+      const response: any = {
+        ...summary,
+        workspace: {
+          id: workspace.id,
+          name: workspace.name,
+          ownerId: workspace.ownerId
+        },
+        userRole: isOwner ? "ADMIN" : "WORKSPACE_MANAGER",
+        permissions: {
+          canViewWorkspaceAnalytics: true,
+          canViewTeamAnalytics: true,
+          canViewTeamMembers: true,
+          canViewIndividualMemberData: false,
+          canManageWorkspace: true
+        },
+        accessLevel: isOwner 
+          ? "ADMIN - Full workspace access" 
+          : "WORKSPACE_MANAGER - Workspace analytics access"
+      };
+
+      res.json(response);
+    } catch (error) {
+      console.error('Error getting workspace cognitive load summary:', error);
+      
+      const errorResponse: CognitiveLoadError = {
+        error: 'Failed to retrieve workspace cognitive load summary',
+        details: error instanceof Error ? error.message : 'Unknown error occurred'
+      };
+      
+      res.status(500).json(errorResponse);
+    }
+  }
+
+  /**
+   * Get all workspaces cognitive load summary (aggregated, anonymized)
+   * GET /api/cognitive-load/all-workspaces/summary
+   * For admin/owner - combines all workspaces they own
+   */
+  async getAllWorkspacesCognitiveLoadSummary(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = (req.user as any)?.userId || (req.user as any)?.id;
+      
+      if (!userId) {
+        res.status(401).json({ 
+          error: 'Unauthorized',
+          message: 'User authentication required'
+        });
+        return;
+      }
+
+      // Get aggregated, anonymized data across all workspaces
+      const summary = await aggregationService.aggregateAllWorkspacesCognitiveLoad(userId);
+      
+      // Build response with role and permissions metadata
+      const response: any = {
+        ...summary,
+        userRole: "ADMIN",
+        permissions: {
+          canViewWorkspaceAnalytics: true,
+          canViewCrossWorkspaceAnalytics: true,
+          canViewTeamAnalytics: true,
+          canViewTeamMembers: true,
+          canViewIndividualMemberData: false,
+          canManageWorkspace: true
+        },
+        accessLevel: "ADMIN - Cross-workspace analytics dashboard"
+      };
+
+      res.json(response);
+    } catch (error) {
+      console.error('Error getting all workspaces cognitive load summary:', error);
+      
+      const errorResponse: CognitiveLoadError = {
+        error: 'Failed to retrieve all workspaces cognitive load summary',
+        details: error instanceof Error ? error.message : 'Unknown error occurred'
+      };
+      
+      res.status(500).json(errorResponse);
+    }
+  }
 }
