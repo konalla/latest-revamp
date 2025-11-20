@@ -7,7 +7,8 @@
 import prisma from "../config/prisma.js";
 import dataClassificationService from "./data-classification.service.js";
 
-export type TeamRole = "MEMBER" | "MANAGER" | "ADMIN";
+export type TeamRole = "MEMBER" | "TEAM_MANAGER" | "ADMIN";
+export type WorkspaceRole = "WORKSPACE_MANAGER";
 
 export class PermissionService {
   /**
@@ -106,14 +107,64 @@ export class PermissionService {
     requesterId: number,
     teamId: number,
     dataType: string
-  ): Promise<{ allowed: boolean; reason?: string; role?: TeamRole }> {
+  ): Promise<{ allowed: boolean; reason?: string; role?: TeamRole | "WORKSPACE_MANAGER" }> {
     // Check if user is a team member
     const role = await this.getTeamRole(requesterId, teamId);
     
+    // If not a team member, check if user is workspace manager or owner
     if (!role) {
+      const team = await prisma.team.findUnique({
+        where: { id: teamId },
+        include: { workspace: true }
+      });
+
+      if (!team) {
+        return {
+          allowed: false,
+          reason: "Team not found"
+        };
+      }
+
+      // Check if workspace owner
+      if (team.workspace.ownerId === requesterId) {
+        // Workspace owner can view analytics (treat as ADMIN for data classification)
+        const canShare = dataClassificationService.canShareDataType(dataType, "ADMIN");
+        if (!canShare) {
+          const classification = dataClassificationService.classifyDataType(dataType);
+          return {
+            allowed: false,
+            reason: `${classification} data cannot be shared in team views`,
+            role: "ADMIN"
+          };
+        }
+        return {
+          allowed: true,
+          role: "ADMIN"
+        };
+      }
+
+      // Check if workspace manager
+      const isWManager = await this.isWorkspaceManager(requesterId, team.workspaceId);
+      if (isWManager) {
+        // Workspace manager can view analytics (treat as TEAM_MANAGER for data classification)
+        const canShare = dataClassificationService.canShareDataType(dataType, "TEAM_MANAGER");
+        if (!canShare) {
+          const classification = dataClassificationService.classifyDataType(dataType);
+          return {
+            allowed: false,
+            reason: `${classification} data cannot be shared in team views`,
+            role: "WORKSPACE_MANAGER"
+          };
+        }
+        return {
+          allowed: true,
+          role: "WORKSPACE_MANAGER"
+        };
+      }
+
       return {
         allowed: false,
-        reason: "You must be a member of this team to view team analytics"
+        reason: "You must be a member of this team, workspace manager, or workspace owner to view team analytics"
       };
     }
 
@@ -121,7 +172,7 @@ export class PermissionService {
     if (role === "MEMBER") {
       return {
         allowed: false,
-        reason: "You need MANAGER or ADMIN role to view team analytics",
+        reason: "You need TEAM_MANAGER or ADMIN role to view team analytics",
         role
       };
     }
@@ -145,7 +196,39 @@ export class PermissionService {
   }
 
   /**
-   * Check if user can manage team (add/remove members, update roles)
+   * Check if user is workspace manager
+   */
+  async isWorkspaceManager(userId: number, workspaceId: number): Promise<boolean> {
+    try {
+      const membership = await prisma.workspaceMembership.findUnique({
+        where: {
+          userId_workspaceId: { userId, workspaceId }
+        }
+      });
+      return !!membership;
+    } catch (error) {
+      console.error("Error checking workspace manager:", error);
+      return false;
+    }
+  }
+
+  /**
+   * Check if user is workspace owner or admin
+   */
+  async isWorkspaceOwnerOrAdmin(userId: number, workspaceId: number): Promise<boolean> {
+    try {
+      const workspace = await prisma.workspace.findUnique({
+        where: { id: workspaceId }
+      });
+      return workspace?.ownerId === userId;
+    } catch (error) {
+      console.error("Error checking workspace owner:", error);
+      return false;
+    }
+  }
+
+  /**
+   * Check if user can manage team (add/remove members, update roles, delete team)
    */
   async canManageTeam(userId: number, teamId: number): Promise<boolean> {
     // Check if user is workspace owner
@@ -158,14 +241,34 @@ export class PermissionService {
       return false;
     }
 
-    // Workspace owner can manage any team
+    // Workspace owner/admin can manage any team
     if (team.workspace.ownerId === userId) {
       return true;
     }
 
-    // Team ADMIN can manage the team
+    // Workspace manager can manage any team in the workspace
+    const isWManager = await this.isWorkspaceManager(userId, team.workspaceId);
+    if (isWManager) {
+      return true;
+    }
+
+    // Team ADMIN or TEAM_MANAGER can manage the team
     const role = await this.getTeamRole(userId, teamId);
-    return role === "ADMIN";
+    return role === "ADMIN" || role === "TEAM_MANAGER";
+  }
+
+  /**
+   * Check if user can manage workspace (assign workspace managers, create/delete teams)
+   */
+  async canManageWorkspace(userId: number, workspaceId: number): Promise<boolean> {
+    // Workspace owner/admin can manage workspace
+    const isOwner = await this.isWorkspaceOwnerOrAdmin(userId, workspaceId);
+    if (isOwner) {
+      return true;
+    }
+
+    // Workspace manager can manage workspace
+    return await this.isWorkspaceManager(userId, workspaceId);
   }
 
   /**
@@ -185,7 +288,7 @@ export class PermissionService {
       };
     }
 
-    // Only workspace owner can assign ADMIN role
+    // Only workspace owner/admin can assign ADMIN role
     if (roleToAssign === "ADMIN") {
       const team = await prisma.team.findUnique({
         where: { id: teamId },
@@ -195,7 +298,7 @@ export class PermissionService {
       if (team && team.workspace.ownerId !== userId) {
         return {
           allowed: false,
-          reason: "Only workspace owner can assign ADMIN role"
+          reason: "Only workspace owner/admin can assign ADMIN role"
         };
       }
     }
@@ -204,7 +307,22 @@ export class PermissionService {
   }
 
   /**
-   * Get all teams user is a member of (ADMIN or MANAGER role)
+   * Check if user can assign workspace manager role
+   */
+  async canAssignWorkspaceManager(userId: number, workspaceId: number): Promise<{ allowed: boolean; reason?: string }> {
+    // Only workspace owner/admin can assign workspace managers
+    const isOwner = await this.isWorkspaceOwnerOrAdmin(userId, workspaceId);
+    if (!isOwner) {
+      return {
+        allowed: false,
+        reason: "Only workspace owner/admin can assign workspace managers"
+      };
+    }
+    return { allowed: true };
+  }
+
+  /**
+   * Get all teams user is a member of (ADMIN or TEAM_MANAGER role)
    * Only returns teams with ACTIVE membership status
    */
   async getUserTeams(userId: number): Promise<Array<{ teamId: number; role: TeamRole }>> {
@@ -213,7 +331,7 @@ export class PermissionService {
         userId,
         status: "ACTIVE",
         role: {
-          in: ["ADMIN", "MANAGER"]
+          in: ["ADMIN", "TEAM_MANAGER"]
         }
       },
       select: {
@@ -226,6 +344,55 @@ export class PermissionService {
       teamId: m.teamId,
       role: m.role as TeamRole
     }));
+  }
+
+  /**
+   * Get all workspaces user is a manager of
+   */
+  async getUserWorkspaces(userId: number): Promise<Array<{ workspaceId: number; role: WorkspaceRole }>> {
+    const memberships = await prisma.workspaceMembership.findMany({
+      where: {
+        userId
+      },
+      select: {
+        workspaceId: true,
+        role: true
+      }
+    });
+
+    return memberships.map(m => ({
+      workspaceId: m.workspaceId,
+      role: m.role as WorkspaceRole
+    }));
+  }
+
+  /**
+   * Check if user has access to a team (either as team member, team manager, workspace manager, or workspace owner)
+   */
+  async hasTeamAccess(userId: number, teamId: number): Promise<boolean> {
+    // Check if user is team member
+    const teamRole = await this.getTeamRole(userId, teamId);
+    if (teamRole) {
+      return true;
+    }
+
+    // Check if user is workspace manager or owner
+    const team = await prisma.team.findUnique({
+      where: { id: teamId },
+      include: { workspace: true }
+    });
+
+    if (!team) {
+      return false;
+    }
+
+    // Check if workspace owner
+    if (team.workspace.ownerId === userId) {
+      return true;
+    }
+
+    // Check if workspace manager
+    return await this.isWorkspaceManager(userId, team.workspaceId);
   }
 }
 

@@ -329,16 +329,16 @@ export class AggregationService {
   }
 
   /**
-   * Aggregate productivity analytics across all teams user manages (MANAGER/ADMIN)
+   * Aggregate productivity analytics across all teams user manages (TEAM_MANAGER/ADMIN)
    * Deduplicates users across teams to avoid counting the same user's tasks multiple times
    */
   async aggregateMyTeamsProductivity(userId: number, days: number = 30): Promise<any> {
-    // Get all teams where user is MANAGER or ADMIN
+    // Get all teams where user is TEAM_MANAGER or ADMIN
     const memberships = await prisma.teamMembership.findMany({
       where: {
         userId,
         status: "ACTIVE",
-        role: { in: ["MANAGER", "ADMIN"] }
+        role: { in: ["TEAM_MANAGER", "ADMIN"] }
       },
       include: {
         team: {
@@ -360,7 +360,7 @@ export class AggregationService {
           totalTasksCount: 0,
           averageTaskDuration: 0
         },
-        note: "You are not a MANAGER or ADMIN of any teams"
+        note: "You are not a TEAM_MANAGER or ADMIN of any teams"
       };
     }
 
@@ -470,15 +470,15 @@ export class AggregationService {
   }
 
   /**
-   * Aggregate cognitive load across all teams user manages (MANAGER/ADMIN)
+   * Aggregate cognitive load across all teams user manages (TEAM_MANAGER/ADMIN)
    */
   async aggregateMyTeamsCognitiveLoad(userId: number): Promise<any> {
-    // Get all teams where user is MANAGER or ADMIN
+    // Get all teams where user is TEAM_MANAGER or ADMIN
     const memberships = await prisma.teamMembership.findMany({
       where: {
         userId,
         status: "ACTIVE",
-        role: { in: ["MANAGER", "ADMIN"] }
+        role: { in: ["TEAM_MANAGER", "ADMIN"] }
       },
       include: {
         team: {
@@ -501,7 +501,7 @@ export class AggregationService {
           membersOptimal: 0,
           membersHeavy: 0
         },
-        note: "You are not a MANAGER or ADMIN of any teams"
+        note: "You are not a TEAM_MANAGER or ADMIN of any teams"
       };
     }
 
@@ -559,6 +559,770 @@ export class AggregationService {
       },
       dataClassification: "SENSITIVE",
       note: "Individual cognitive data not shown for privacy. Only aggregated, anonymized metrics across all teams you manage.",
+      isAggregated: true
+    };
+  }
+
+  /**
+   * Aggregate productivity analytics for all teams in a workspace
+   * For workspace managers - combines all teams in their workspace
+   */
+  async aggregateWorkspaceProductivity(workspaceId: number, days: number = 30): Promise<any> {
+    // Get all teams in the workspace
+    const teams = await prisma.team.findMany({
+      where: { workspaceId },
+      select: {
+        id: true,
+        name: true
+      }
+    });
+
+    if (teams.length === 0) {
+      return {
+        workspaceId,
+        teamCount: 0,
+        aggregatedMetrics: {
+          averageTaskCompletionRate: 0,
+          totalTasksCompleted: 0,
+          totalTasksCount: 0,
+          averageTaskDuration: 0,
+          tasksByCategory: {},
+          mostProductiveCategory: "Uncategorized",
+          totalMemberCount: 0
+        },
+        dataClassification: "PERSONAL",
+        note: "No teams in this workspace",
+        isAggregated: true
+      };
+    }
+
+    const teamIds = teams.map(t => t.id);
+    
+    // Get all unique members across all teams in the workspace (deduplicate by userId)
+    const allMemberships = await prisma.teamMembership.findMany({
+      where: {
+        teamId: { in: teamIds },
+        status: "ACTIVE"
+      },
+      select: {
+        userId: true
+      }
+    });
+
+    // Get unique user IDs to avoid counting the same user's tasks multiple times
+    const uniqueUserIds = [...new Set(allMemberships.map(m => m.userId))];
+    
+    if (uniqueUserIds.length === 0) {
+      return {
+        workspaceId,
+        teamCount: teams.length,
+        teams: teams.map(t => ({ id: t.id, name: t.name })),
+        aggregatedMetrics: {
+          averageTaskCompletionRate: 0,
+          totalTasksCompleted: 0,
+          totalTasksCount: 0,
+          averageTaskDuration: 0,
+          tasksByCategory: {},
+          mostProductiveCategory: "Uncategorized",
+          totalMemberCount: 0
+        },
+        dataClassification: "PERSONAL",
+        note: "No active team members across all teams in workspace",
+        isAggregated: true
+      };
+    }
+
+    // Get productivity data for each unique user only once
+    const productivityData = await Promise.all(
+      uniqueUserIds.map(userId => analyticsService.getProductivityAnalytics(userId, days))
+    );
+
+    // Aggregate metrics from unique users only
+    let totalTasksCompleted = 0;
+    let totalTasksCount = 0;
+    let totalDuration = 0;
+    let completedCount = 0;
+    const tasksByCategory: Record<string, number> = {};
+
+    productivityData.forEach(data => {
+      totalTasksCompleted += data.tasksCompletedCount || 0;
+      totalTasksCount += data.totalTasksCount || 0;
+      totalDuration += (data.averageTaskDuration || 0) * (data.tasksCompletedCount || 0);
+      completedCount += data.tasksCompletedCount || 0;
+
+      // Aggregate category distribution
+      if (data.tasksByCategory) {
+        Object.entries(data.tasksByCategory).forEach(([category, count]) => {
+          tasksByCategory[category] = (tasksByCategory[category] || 0) + (count as number);
+        });
+      }
+    });
+
+    const averageTaskCompletionRate = totalTasksCount > 0 
+      ? totalTasksCompleted / totalTasksCount 
+      : 0;
+    
+    const averageTaskDuration = completedCount > 0 
+      ? totalDuration / completedCount 
+      : 0;
+
+    // Find most productive category
+    let mostProductiveCategory = "Uncategorized";
+    let maxCategoryCount = 0;
+    Object.entries(tasksByCategory).forEach(([category, count]) => {
+      if (count > maxCategoryCount) {
+        maxCategoryCount = count;
+        mostProductiveCategory = category;
+      }
+    });
+
+    return {
+      workspaceId,
+      teamCount: teams.length,
+      teams: teams.map(t => ({ id: t.id, name: t.name })),
+      aggregatedMetrics: {
+        averageTaskCompletionRate: Math.round(averageTaskCompletionRate * 100) / 100,
+        totalTasksCompleted,
+        totalTasksCount,
+        averageTaskDuration: Math.round(averageTaskDuration * 100) / 100,
+        tasksByCategory,
+        mostProductiveCategory,
+        totalMemberCount: uniqueUserIds.length
+      },
+      dataClassification: "PERSONAL",
+      note: "Aggregated data across all teams in workspace - individual member data not shown. Each user's tasks are counted only once, even if they're in multiple teams.",
+      isAggregated: true
+    };
+  }
+
+  /**
+   * Aggregate productivity analytics across all workspaces
+   * For admin/owner - combines all workspaces they own
+   */
+  async aggregateAllWorkspacesProductivity(userId: number, days: number = 30): Promise<any> {
+    // Get all workspaces owned by user
+    const workspaces = await prisma.workspace.findMany({
+      where: { ownerId: userId },
+      select: {
+        id: true,
+        name: true
+      }
+    });
+
+    if (workspaces.length === 0) {
+      return {
+        workspaces: [],
+        totalWorkspaces: 0,
+        aggregatedMetrics: {
+          averageTaskCompletionRate: 0,
+          totalTasksCompleted: 0,
+          totalTasksCount: 0,
+          averageTaskDuration: 0,
+          tasksByCategory: {},
+          mostProductiveCategory: "Uncategorized",
+          totalMemberCount: 0
+        },
+        dataClassification: "PERSONAL",
+        note: "You don't own any workspaces",
+        isAggregated: true
+      };
+    }
+
+    const workspaceIds = workspaces.map(w => w.id);
+    
+    // Get all teams in all workspaces
+    const teams = await prisma.team.findMany({
+      where: {
+        workspaceId: { in: workspaceIds }
+      },
+      select: {
+        id: true,
+        name: true,
+        workspaceId: true
+      }
+    });
+
+    if (teams.length === 0) {
+      return {
+        workspaces: workspaces.map(w => ({ id: w.id, name: w.name })),
+        totalWorkspaces: workspaces.length,
+        aggregatedMetrics: {
+          averageTaskCompletionRate: 0,
+          totalTasksCompleted: 0,
+          totalTasksCount: 0,
+          averageTaskDuration: 0,
+          tasksByCategory: {},
+          mostProductiveCategory: "Uncategorized",
+          totalMemberCount: 0
+        },
+        dataClassification: "PERSONAL",
+        note: "No teams in any workspace",
+        isAggregated: true
+      };
+    }
+
+    const teamIds = teams.map(t => t.id);
+    
+    // Get all unique members across all teams in all workspaces (deduplicate by userId)
+    const allMemberships = await prisma.teamMembership.findMany({
+      where: {
+        teamId: { in: teamIds },
+        status: "ACTIVE"
+      },
+      select: {
+        userId: true
+      }
+    });
+
+    // Get unique user IDs to avoid counting the same user's tasks multiple times
+    const uniqueUserIds = [...new Set(allMemberships.map(m => m.userId))];
+    
+    if (uniqueUserIds.length === 0) {
+      return {
+        workspaces: workspaces.map(w => ({ id: w.id, name: w.name })),
+        totalWorkspaces: workspaces.length,
+        aggregatedMetrics: {
+          averageTaskCompletionRate: 0,
+          totalTasksCompleted: 0,
+          totalTasksCount: 0,
+          averageTaskDuration: 0,
+          tasksByCategory: {},
+          mostProductiveCategory: "Uncategorized",
+          totalMemberCount: 0
+        },
+        dataClassification: "PERSONAL",
+        note: "No active team members across all workspaces",
+        isAggregated: true
+      };
+    }
+
+    // Get productivity data for each unique user only once
+    const productivityData = await Promise.all(
+      uniqueUserIds.map(userId => analyticsService.getProductivityAnalytics(userId, days))
+    );
+
+    // Aggregate metrics from unique users only
+    let totalTasksCompleted = 0;
+    let totalTasksCount = 0;
+    let totalDuration = 0;
+    let completedCount = 0;
+    const tasksByCategory: Record<string, number> = {};
+
+    productivityData.forEach(data => {
+      totalTasksCompleted += data.tasksCompletedCount || 0;
+      totalTasksCount += data.totalTasksCount || 0;
+      totalDuration += (data.averageTaskDuration || 0) * (data.tasksCompletedCount || 0);
+      completedCount += data.tasksCompletedCount || 0;
+
+      // Aggregate category distribution
+      if (data.tasksByCategory) {
+        Object.entries(data.tasksByCategory).forEach(([category, count]) => {
+          tasksByCategory[category] = (tasksByCategory[category] || 0) + (count as number);
+        });
+      }
+    });
+
+    const averageTaskCompletionRate = totalTasksCount > 0 
+      ? totalTasksCompleted / totalTasksCount 
+      : 0;
+    
+    const averageTaskDuration = completedCount > 0 
+      ? totalDuration / completedCount 
+      : 0;
+
+    // Find most productive category
+    let mostProductiveCategory = "Uncategorized";
+    let maxCategoryCount = 0;
+    Object.entries(tasksByCategory).forEach(([category, count]) => {
+      if (count > maxCategoryCount) {
+        maxCategoryCount = count;
+        mostProductiveCategory = category;
+      }
+    });
+
+    // Group teams by workspace for response
+    const teamsByWorkspace = workspaces.map(workspace => ({
+      id: workspace.id,
+      name: workspace.name,
+      teams: teams
+        .filter(t => t.workspaceId === workspace.id)
+        .map(t => ({ id: t.id, name: t.name }))
+    }));
+
+    return {
+      workspaces: teamsByWorkspace,
+      totalWorkspaces: workspaces.length,
+      aggregatedMetrics: {
+        averageTaskCompletionRate: Math.round(averageTaskCompletionRate * 100) / 100,
+        totalTasksCompleted,
+        totalTasksCount,
+        averageTaskDuration: Math.round(averageTaskDuration * 100) / 100,
+        tasksByCategory,
+        mostProductiveCategory,
+        totalMemberCount: uniqueUserIds.length
+      },
+      dataClassification: "PERSONAL",
+      note: "Aggregated data across all workspaces - individual member data not shown. Each user's tasks are counted only once, even if they're in multiple teams across different workspaces.",
+      isAggregated: true
+    };
+  }
+
+  /**
+   * Aggregate focus analytics for all teams in a workspace
+   * For workspace managers - combines all teams in their workspace
+   */
+  async aggregateWorkspaceFocus(workspaceId: number, days: number = 30): Promise<any> {
+    // Get all teams in the workspace
+    const teams = await prisma.team.findMany({
+      where: { workspaceId },
+      select: {
+        id: true,
+        name: true
+      }
+    });
+
+    if (teams.length === 0) {
+      return {
+        workspaceId,
+        teamCount: 0,
+        aggregatedMetrics: {
+          averageFocusSessionDuration: 0,
+          totalFocusSessionTime: 0,
+          focusSessionCount: 0,
+          totalTasksCompletedDuringFocus: 0,
+          averageTaskCompletionRate: 0
+        },
+        dataClassification: "PERSONAL",
+        note: "No teams in this workspace",
+        isAggregated: true
+      };
+    }
+
+    const teamIds = teams.map(t => t.id);
+    
+    // Get all unique members across all teams in the workspace (deduplicate by userId)
+    const allMemberships = await prisma.teamMembership.findMany({
+      where: {
+        teamId: { in: teamIds },
+        status: "ACTIVE"
+      },
+      select: {
+        userId: true
+      }
+    });
+
+    // Get unique user IDs to avoid counting the same user's focus sessions multiple times
+    const uniqueUserIds = [...new Set(allMemberships.map(m => m.userId))];
+    
+    if (uniqueUserIds.length === 0) {
+      return {
+        workspaceId,
+        teamCount: teams.length,
+        teams: teams.map(t => ({ id: t.id, name: t.name })),
+        aggregatedMetrics: {
+          averageFocusSessionDuration: 0,
+          totalFocusSessionTime: 0,
+          focusSessionCount: 0,
+          totalTasksCompletedDuringFocus: 0,
+          averageTaskCompletionRate: 0
+        },
+        dataClassification: "PERSONAL",
+        note: "No active team members across all teams in workspace",
+        isAggregated: true
+      };
+    }
+
+    // Get focus data for each unique user only once
+    const focusData = await Promise.all(
+      uniqueUserIds.map(userId => analyticsService.getFocusAnalytics(userId, days))
+    );
+
+    // Aggregate metrics (only PERSONAL data, no SENSITIVE)
+    let totalFocusSessionTime = 0;
+    let totalSessions = 0;
+    let totalTasksCompleted = 0;
+
+    focusData.forEach(data => {
+      totalFocusSessionTime += data.totalFocusSessionTime || 0;
+      totalSessions += data.focusSessionCount || 0;
+      totalTasksCompleted += data.tasksCompletedDuringFocus || 0;
+    });
+
+    const averageFocusSessionDuration = totalSessions > 0
+      ? totalFocusSessionTime / totalSessions
+      : 0;
+
+    const averageTaskCompletionRate = totalSessions > 0
+      ? totalTasksCompleted / totalSessions
+      : 0;
+
+    return {
+      workspaceId,
+      teamCount: teams.length,
+      teams: teams.map(t => ({ id: t.id, name: t.name })),
+      aggregatedMetrics: {
+        averageFocusSessionDuration: Math.round(averageFocusSessionDuration * 100) / 100,
+        totalFocusSessionTime,
+        focusSessionCount: totalSessions,
+        totalTasksCompletedDuringFocus: totalTasksCompleted,
+        averageTaskCompletionRate: Math.round(averageTaskCompletionRate * 100) / 100
+      },
+      dataClassification: "PERSONAL",
+      note: "Aggregated data across all teams in workspace - individual member data and sensitive metrics (mood, energy, cognitive flow) not shown. Each user's focus sessions are counted only once, even if they're in multiple teams.",
+      isAggregated: true
+    };
+  }
+
+  /**
+   * Aggregate focus analytics across all workspaces
+   * For admin/owner - combines all workspaces they own
+   */
+  async aggregateAllWorkspacesFocus(userId: number, days: number = 30): Promise<any> {
+    // Get all workspaces owned by user
+    const workspaces = await prisma.workspace.findMany({
+      where: { ownerId: userId },
+      select: {
+        id: true,
+        name: true
+      }
+    });
+
+    if (workspaces.length === 0) {
+      return {
+        workspaces: [],
+        totalWorkspaces: 0,
+        aggregatedMetrics: {
+          averageFocusSessionDuration: 0,
+          totalFocusSessionTime: 0,
+          focusSessionCount: 0,
+          totalTasksCompletedDuringFocus: 0,
+          averageTaskCompletionRate: 0
+        },
+        dataClassification: "PERSONAL",
+        note: "You don't own any workspaces",
+        isAggregated: true
+      };
+    }
+
+    const workspaceIds = workspaces.map(w => w.id);
+    
+    // Get all teams in all workspaces
+    const teams = await prisma.team.findMany({
+      where: {
+        workspaceId: { in: workspaceIds }
+      },
+      select: {
+        id: true,
+        name: true,
+        workspaceId: true
+      }
+    });
+
+    if (teams.length === 0) {
+      return {
+        workspaces: workspaces.map(w => ({ id: w.id, name: w.name })),
+        totalWorkspaces: workspaces.length,
+        aggregatedMetrics: {
+          averageFocusSessionDuration: 0,
+          totalFocusSessionTime: 0,
+          focusSessionCount: 0,
+          totalTasksCompletedDuringFocus: 0,
+          averageTaskCompletionRate: 0
+        },
+        dataClassification: "PERSONAL",
+        note: "No teams in any workspace",
+        isAggregated: true
+      };
+    }
+
+    const teamIds = teams.map(t => t.id);
+    
+    // Get all unique members across all teams in all workspaces (deduplicate by userId)
+    const allMemberships = await prisma.teamMembership.findMany({
+      where: {
+        teamId: { in: teamIds },
+        status: "ACTIVE"
+      },
+      select: {
+        userId: true
+      }
+    });
+
+    // Get unique user IDs to avoid counting the same user's focus sessions multiple times
+    const uniqueUserIds = [...new Set(allMemberships.map(m => m.userId))];
+    
+    if (uniqueUserIds.length === 0) {
+      return {
+        workspaces: workspaces.map(w => ({ id: w.id, name: w.name })),
+        totalWorkspaces: workspaces.length,
+        aggregatedMetrics: {
+          averageFocusSessionDuration: 0,
+          totalFocusSessionTime: 0,
+          focusSessionCount: 0,
+          totalTasksCompletedDuringFocus: 0,
+          averageTaskCompletionRate: 0
+        },
+        dataClassification: "PERSONAL",
+        note: "No active team members across all workspaces",
+        isAggregated: true
+      };
+    }
+
+    // Get focus data for each unique user only once
+    const focusData = await Promise.all(
+      uniqueUserIds.map(userId => analyticsService.getFocusAnalytics(userId, days))
+    );
+
+    // Aggregate metrics (only PERSONAL data, no SENSITIVE)
+    let totalFocusSessionTime = 0;
+    let totalSessions = 0;
+    let totalTasksCompleted = 0;
+
+    focusData.forEach(data => {
+      totalFocusSessionTime += data.totalFocusSessionTime || 0;
+      totalSessions += data.focusSessionCount || 0;
+      totalTasksCompleted += data.tasksCompletedDuringFocus || 0;
+    });
+
+    const averageFocusSessionDuration = totalSessions > 0
+      ? totalFocusSessionTime / totalSessions
+      : 0;
+
+    const averageTaskCompletionRate = totalSessions > 0
+      ? totalTasksCompleted / totalSessions
+      : 0;
+
+    // Group teams by workspace for response
+    const teamsByWorkspace = workspaces.map(workspace => ({
+      id: workspace.id,
+      name: workspace.name,
+      teams: teams
+        .filter(t => t.workspaceId === workspace.id)
+        .map(t => ({ id: t.id, name: t.name }))
+    }));
+
+    return {
+      workspaces: teamsByWorkspace,
+      totalWorkspaces: workspaces.length,
+      aggregatedMetrics: {
+        averageFocusSessionDuration: Math.round(averageFocusSessionDuration * 100) / 100,
+        totalFocusSessionTime,
+        focusSessionCount: totalSessions,
+        totalTasksCompletedDuringFocus: totalTasksCompleted,
+        averageTaskCompletionRate: Math.round(averageTaskCompletionRate * 100) / 100
+      },
+      dataClassification: "PERSONAL",
+      note: "Aggregated data across all workspaces - individual member data and sensitive metrics (mood, energy, cognitive flow) not shown. Each user's focus sessions are counted only once, even if they're in multiple teams across different workspaces.",
+      isAggregated: true
+    };
+  }
+
+  /**
+   * Aggregate cognitive load for all teams in a workspace
+   * For workspace managers - combines all teams in their workspace
+   */
+  async aggregateWorkspaceCognitiveLoad(workspaceId: number): Promise<any> {
+    // Get all teams in the workspace
+    const teams = await prisma.team.findMany({
+      where: { workspaceId },
+      select: {
+        id: true,
+        name: true
+      }
+    });
+
+    if (teams.length === 0) {
+      return {
+        workspaceId,
+        teamCount: 0,
+        aggregatedMetrics: {
+          averageWorkloadScore: 0,
+          averageBurnoutRisk: 0,
+          membersAtRisk: 0,
+          membersOptimal: 0,
+          membersHeavy: 0,
+          totalMemberCount: 0
+        },
+        dataClassification: "SENSITIVE",
+        note: "No teams in this workspace",
+        isAggregated: true
+      };
+    }
+
+    const teamIds = teams.map(t => t.id);
+    
+    // Get aggregated data for each team
+    const teamData = await Promise.all(
+      teamIds.map(teamId => this.aggregateTeamCognitiveLoad(teamId))
+    );
+
+    // Aggregate across all teams
+    let totalWorkloadScore = 0;
+    let totalBurnoutRisk = 0;
+    let totalMembersAtRisk = 0;
+    let totalMembersOptimal = 0;
+    let totalMembersHeavy = 0;
+    let totalMemberCount = 0;
+
+    teamData.forEach(team => {
+      const metrics = team.aggregatedMetrics;
+      const memberCount = team.memberCount || 0;
+      
+      totalWorkloadScore += (metrics.averageWorkloadScore || 0) * memberCount;
+      totalBurnoutRisk += (metrics.averageBurnoutRisk || 0) * memberCount;
+      totalMembersAtRisk += metrics.membersAtRisk || 0;
+      totalMembersOptimal += metrics.membersOptimal || 0;
+      totalMembersHeavy += metrics.membersHeavy || 0;
+      totalMemberCount += memberCount;
+    });
+
+    const averageWorkloadScore = totalMemberCount > 0
+      ? Math.round((totalWorkloadScore / totalMemberCount) * 100) / 100
+      : 0;
+    
+    const averageBurnoutRisk = totalMemberCount > 0
+      ? Math.round((totalBurnoutRisk / totalMemberCount) * 100) / 100
+      : 0;
+
+    return {
+      workspaceId,
+      teamCount: teams.length,
+      teams: teams.map(t => ({ id: t.id, name: t.name })),
+      aggregatedMetrics: {
+        averageWorkloadScore,
+        averageBurnoutRisk,
+        membersAtRisk: totalMembersAtRisk,
+        membersOptimal: totalMembersOptimal,
+        membersHeavy: totalMembersHeavy,
+        totalMemberCount
+      },
+      dataClassification: "SENSITIVE",
+      note: "Individual cognitive data not shown for privacy. Only aggregated, anonymized metrics across all teams in workspace.",
+      isAggregated: true
+    };
+  }
+
+  /**
+   * Aggregate cognitive load across all workspaces
+   * For admin/owner - combines all workspaces they own
+   */
+  async aggregateAllWorkspacesCognitiveLoad(userId: number): Promise<any> {
+    // Get all workspaces owned by user
+    const workspaces = await prisma.workspace.findMany({
+      where: { ownerId: userId },
+      select: {
+        id: true,
+        name: true
+      }
+    });
+
+    if (workspaces.length === 0) {
+      return {
+        workspaces: [],
+        totalWorkspaces: 0,
+        aggregatedMetrics: {
+          averageWorkloadScore: 0,
+          averageBurnoutRisk: 0,
+          membersAtRisk: 0,
+          membersOptimal: 0,
+          membersHeavy: 0,
+          totalMemberCount: 0
+        },
+        dataClassification: "SENSITIVE",
+        note: "You don't own any workspaces",
+        isAggregated: true
+      };
+    }
+
+    const workspaceIds = workspaces.map(w => w.id);
+    
+    // Get all teams in all workspaces
+    const teams = await prisma.team.findMany({
+      where: {
+        workspaceId: { in: workspaceIds }
+      },
+      select: {
+        id: true,
+        name: true,
+        workspaceId: true
+      }
+    });
+
+    if (teams.length === 0) {
+      return {
+        workspaces: workspaces.map(w => ({ id: w.id, name: w.name })),
+        totalWorkspaces: workspaces.length,
+        aggregatedMetrics: {
+          averageWorkloadScore: 0,
+          averageBurnoutRisk: 0,
+          membersAtRisk: 0,
+          membersOptimal: 0,
+          membersHeavy: 0,
+          totalMemberCount: 0
+        },
+        dataClassification: "SENSITIVE",
+        note: "No teams in any workspace",
+        isAggregated: true
+      };
+    }
+
+    const teamIds = teams.map(t => t.id);
+    
+    // Get aggregated data for each team
+    const teamData = await Promise.all(
+      teamIds.map(teamId => this.aggregateTeamCognitiveLoad(teamId))
+    );
+
+    // Aggregate across all teams in all workspaces
+    let totalWorkloadScore = 0;
+    let totalBurnoutRisk = 0;
+    let totalMembersAtRisk = 0;
+    let totalMembersOptimal = 0;
+    let totalMembersHeavy = 0;
+    let totalMemberCount = 0;
+
+    teamData.forEach(team => {
+      const metrics = team.aggregatedMetrics;
+      const memberCount = team.memberCount || 0;
+      
+      totalWorkloadScore += (metrics.averageWorkloadScore || 0) * memberCount;
+      totalBurnoutRisk += (metrics.averageBurnoutRisk || 0) * memberCount;
+      totalMembersAtRisk += metrics.membersAtRisk || 0;
+      totalMembersOptimal += metrics.membersOptimal || 0;
+      totalMembersHeavy += metrics.membersHeavy || 0;
+      totalMemberCount += memberCount;
+    });
+
+    const averageWorkloadScore = totalMemberCount > 0
+      ? Math.round((totalWorkloadScore / totalMemberCount) * 100) / 100
+      : 0;
+    
+    const averageBurnoutRisk = totalMemberCount > 0
+      ? Math.round((totalBurnoutRisk / totalMemberCount) * 100) / 100
+      : 0;
+
+    // Group teams by workspace for response
+    const teamsByWorkspace = workspaces.map(workspace => ({
+      id: workspace.id,
+      name: workspace.name,
+      teams: teams
+        .filter(t => t.workspaceId === workspace.id)
+        .map(t => ({ id: t.id, name: t.name }))
+    }));
+
+    return {
+      workspaces: teamsByWorkspace,
+      totalWorkspaces: workspaces.length,
+      aggregatedMetrics: {
+        averageWorkloadScore,
+        averageBurnoutRisk,
+        membersAtRisk: totalMembersAtRisk,
+        membersOptimal: totalMembersOptimal,
+        membersHeavy: totalMembersHeavy,
+        totalMemberCount
+      },
+      dataClassification: "SENSITIVE",
+      note: "Individual cognitive data not shown for privacy. Only aggregated, anonymized metrics across all workspaces.",
       isAggregated: true
     };
   }

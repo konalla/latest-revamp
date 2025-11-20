@@ -47,4 +47,16 @@ router.get("/focus/team/:teamId", optionalAuth, conditionalAuth, analyticsContro
 // GET /api/analytics/productivity/my-teams - Aggregate productivity across all teams user manages
 router.get("/productivity/my-teams", optionalAuth, conditionalAuth, analyticsController.getMyTeamsProductivityAnalytics.bind(analyticsController));
 
+// GET /api/analytics/productivity/workspace/:workspaceId - Workspace productivity analytics (all teams combined)
+router.get("/productivity/workspace/:workspaceId", optionalAuth, conditionalAuth, analyticsController.getWorkspaceProductivityAnalytics.bind(analyticsController));
+
+// GET /api/analytics/productivity/all-workspaces - Cross-workspace productivity analytics (admin/owner only)
+router.get("/productivity/all-workspaces", optionalAuth, conditionalAuth, analyticsController.getAllWorkspacesProductivityAnalytics.bind(analyticsController));
+
+// GET /api/analytics/focus/workspace/:workspaceId - Workspace focus analytics (all teams combined)
+router.get("/focus/workspace/:workspaceId", optionalAuth, conditionalAuth, analyticsController.getWorkspaceFocusAnalytics.bind(analyticsController));
+
+// GET /api/analytics/focus/all-workspaces - Cross-workspace focus analytics (admin/owner only)
+router.get("/focus/all-workspaces", optionalAuth, conditionalAuth, analyticsController.getAllWorkspacesFocusAnalytics.bind(analyticsController));
+
 export default router;

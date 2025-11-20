@@ -54,4 +54,10 @@ router.get('/team/:teamId/summary', conditionalAuth, cognitiveLoadController.get
 // My Teams Cognitive Load Summary endpoint (aggregated across all teams user manages)
 router.get('/my-teams/summary', conditionalAuth, cognitiveLoadController.getMyTeamsCognitiveLoadSummary.bind(cognitiveLoadController));
 
+// Workspace Cognitive Load Summary endpoint (aggregated across all teams in workspace)
+router.get('/workspace/:workspaceId/summary', conditionalAuth, cognitiveLoadController.getWorkspaceCognitiveLoadSummary.bind(cognitiveLoadController));
+
+// All Workspaces Cognitive Load Summary endpoint (aggregated across all workspaces - admin/owner only)
+router.get('/all-workspaces/summary', conditionalAuth, cognitiveLoadController.getAllWorkspacesCognitiveLoadSummary.bind(cognitiveLoadController));
+
 export default router;

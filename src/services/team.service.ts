@@ -7,31 +7,60 @@ const isWorkspaceOwner = async (userId: number): Promise<boolean> => {
   return !!workspace;
 };
 
-// Get workspace for user (must be owner) - gets first workspace for backward compatibility
+// Get workspace for user (must be owner or workspace manager) - gets first workspace for backward compatibility
 const getWorkspaceForOwner = async (userId: number) => {
-  const workspace = await prisma.workspace.findFirst({ 
+  // First try to find owned workspace
+  let workspace = await prisma.workspace.findFirst({ 
     where: { ownerId: userId },
     orderBy: { createdAt: "asc" }
   });
+  
+  // If not owner, check if workspace manager
   if (!workspace) {
-    throw new Error("Workspace not found. Only workspace owners can manage teams.");
+    const workspaceMembership = await prisma.workspaceMembership.findFirst({
+      where: { userId },
+      include: { workspace: true },
+      orderBy: { createdAt: "asc" }
+    });
+    
+    if (workspaceMembership) {
+      workspace = workspaceMembership.workspace;
+    }
+  }
+  
+  if (!workspace) {
+    throw new Error("Workspace not found. Only workspace owners or workspace managers can manage teams.");
   }
   return workspace;
 };
 
-// Get workspace by ID and verify ownership
+// Get workspace by ID and verify ownership or workspace manager role
 const getWorkspaceByIdForOwner = async (userId: number, workspaceId: number) => {
   const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId } });
   if (!workspace) {
     throw new Error("Workspace not found");
   }
-  if (workspace.ownerId !== userId) {
+  
+  // Check if user is workspace owner
+  if (workspace.ownerId === userId) {
+    return workspace;
+  }
+  
+  // Check if user is workspace manager
+  const isWorkspaceManager = await prisma.workspaceMembership.findUnique({
+    where: {
+      userId_workspaceId: { userId, workspaceId }
+    }
+  });
+  
+  if (!isWorkspaceManager) {
     throw new Error("You don't have permission to manage teams in this workspace");
   }
+  
   return workspace;
 };
 
-// Check if user can manage a team (workspace owner or team ADMIN)
+// Check if user can manage a team (workspace owner, workspace manager, team ADMIN, or team TEAM_MANAGER)
 const canManageTeam = async (userId: number, teamId: number): Promise<boolean> => {
   // First check if user is workspace owner by checking if the team belongs to their workspace
   const team = await prisma.team.findUnique({
@@ -39,18 +68,33 @@ const canManageTeam = async (userId: number, teamId: number): Promise<boolean> =
     include: { workspace: true }
   });
   
-  if (team && team.workspace.ownerId === userId) {
+  if (!team) {
+    return false;
+  }
+  
+  if (team.workspace.ownerId === userId) {
     return true; // Workspace owner can manage any team in their workspace
   }
   
-  // Check if user is ADMIN of the team
+  // Check if user is workspace manager
+  const isWorkspaceManager = await prisma.workspaceMembership.findUnique({
+    where: {
+      userId_workspaceId: { userId, workspaceId: team.workspaceId }
+    }
+  });
+  
+  if (isWorkspaceManager) {
+    return true; // Workspace manager can manage any team in the workspace
+  }
+  
+  // Check if user is ADMIN or TEAM_MANAGER of the team
   const membership = await prisma.teamMembership.findUnique({
     where: {
       userId_teamId: { userId, teamId }
     }
   });
   
-  return membership?.role === "ADMIN";
+  return membership?.role === "ADMIN" || membership?.role === "TEAM_MANAGER";
 };
 
 // Verify team exists and user has permission to manage it
@@ -129,7 +173,7 @@ export const addMember = async (
   userId: number, 
   teamId: number, 
   userIdToAdd: number, 
-  role: "MEMBER" | "MANAGER" | "ADMIN" = "MEMBER"
+  role: "MEMBER" | "TEAM_MANAGER" | "ADMIN" = "MEMBER"
 ) => {
   await verifyTeamAccess(userId, teamId);
   
@@ -142,7 +186,7 @@ export const addMember = async (
     return { message: "User already in team" };
   }
 
-  // Only workspace owner can assign ADMIN role
+  // Only workspace owner/admin can assign ADMIN role
   if (role === "ADMIN") {
     const team = await prisma.team.findUnique({
       where: { id: teamId },
@@ -150,7 +194,7 @@ export const addMember = async (
     });
 
     if (!team || team.workspace.ownerId !== userId) {
-      throw new Error("Only workspace owner can assign ADMIN role");
+      throw new Error("Only workspace owner/admin can assign ADMIN role");
     }
   }
   
@@ -302,20 +346,8 @@ export const updateTeam = async (userId: number, teamId: number, name: string) =
 };
 
 export const deleteTeam = async (userId: number, teamId: number) => {
-  // Verify user is workspace owner
-  const workspace = await getWorkspaceForOwner(userId);
-
-  // Verify team belongs to this workspace
-  const team = await prisma.team.findFirst({
-    where: {
-      id: teamId,
-      workspaceId: workspace.id
-    }
-  });
-
-  if (!team) {
-    throw new Error("Team not found or you don't have permission to delete it");
-  }
+  // Verify user can manage the team (workspace owner, workspace manager, or team manager)
+  await verifyTeamAccess(userId, teamId);
 
   // Delete team (cascade will handle memberships and related data)
   await prisma.team.delete({
@@ -439,7 +471,7 @@ export const updateMemberRole = async (
   userId: number,
   teamId: number,
   userIdToUpdate: number,
-  role: "ADMIN" | "MEMBER" | "MANAGER"
+  role: "ADMIN" | "MEMBER" | "TEAM_MANAGER"
 ) => {
   await verifyTeamAccess(userId, teamId);
 
@@ -453,7 +485,7 @@ export const updateMemberRole = async (
     throw new Error("Member not found in team");
   }
 
-  // Only workspace owner can assign ADMIN role
+  // Only workspace owner/admin can assign ADMIN role
   if (role === "ADMIN") {
     const team = await prisma.team.findUnique({
       where: { id: teamId },
@@ -461,7 +493,7 @@ export const updateMemberRole = async (
     });
 
     if (!team || team.workspace.ownerId !== userId) {
-      throw new Error("Only workspace owner can assign ADMIN role");
+      throw new Error("Only workspace owner/admin can assign ADMIN role");
     }
   }
 

@@ -77,6 +77,7 @@ model User {
   // Workspace/Team relations
   ownedWorkspaces            Workspace[]
   teamMemberships            TeamMembership[]
+  workspaceMemberships       WorkspaceMembership[]
   
   // Subscription relation
   subscription               Subscription?
@@ -346,7 +347,7 @@ model UserFocusPreferences {
 enum TeamRole {
   ADMIN
   MEMBER
-  MANAGER
+  TEAM_MANAGER
 }
 
 enum TeamMemberStatus {
@@ -354,6 +355,10 @@ enum TeamMemberStatus {
   INACTIVE
   SUSPENDED
   UNDER_REVIEW
+}
+
+enum WorkspaceRole {
+  WORKSPACE_MANAGER
 }
 
 model Workspace {
@@ -370,6 +375,7 @@ model Workspace {
   objectives Objective[]
   okrs       Okr[]
   tasks      Task[]
+  memberships WorkspaceMembership[]
 }
 
 model Team {
@@ -402,6 +408,21 @@ model TeamMembership {
   team      Team             @relation(fields: [teamId], references: [id], onDelete: Cascade)
 
   @@unique([userId, teamId])
+}
+
+model WorkspaceMembership {
+  id        Int              @id @default(autoincrement())
+  role      WorkspaceRole
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  // Relations
+  userId    Int
+  workspaceId Int
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, workspaceId])
 }
 
 // ============================================
