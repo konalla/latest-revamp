@@ -1,25 +1,26 @@
--- Step 1: Add TEAM_MANAGER to the existing TeamRole enum
-ALTER TYPE "public"."TeamRole" ADD VALUE IF NOT EXISTS 'TEAM_MANAGER';
-
--- Step 2: Update all existing MANAGER records to TEAM_MANAGER
-UPDATE "public"."TeamMembership" 
-SET "role" = 'TEAM_MANAGER'::"public"."TeamRole"
-WHERE "role" = 'MANAGER'::"public"."TeamRole";
-
--- Step 3: Create WorkspaceRole enum
+-- Step 1: Create WorkspaceRole enum
 CREATE TYPE "public"."WorkspaceRole" AS ENUM ('WORKSPACE_MANAGER');
 
--- Step 4: Replace TeamRole enum (now that all MANAGER values are updated)
--- Note: We can't remove enum values in PostgreSQL, but we'll create a new enum without MANAGER
-BEGIN;
+-- Step 2: Replace TeamRole enum by creating a new one with TEAM_MANAGER instead of MANAGER
+-- This approach avoids the "unsafe use of new enum value" error by creating a fresh enum type
+-- and converting MANAGER values to TEAM_MANAGER during the type conversion
 CREATE TYPE "public"."TeamRole_new" AS ENUM ('ADMIN', 'MEMBER', 'TEAM_MANAGER');
+
+-- Step 3: Update the column to use the new enum type, converting MANAGER to TEAM_MANAGER
 ALTER TABLE "public"."TeamMembership" ALTER COLUMN "role" DROP DEFAULT;
-ALTER TABLE "public"."TeamMembership" ALTER COLUMN "role" TYPE "public"."TeamRole_new" USING ("role"::text::"public"."TeamRole_new");
+ALTER TABLE "public"."TeamMembership" ALTER COLUMN "role" TYPE "public"."TeamRole_new" 
+  USING (
+    CASE 
+      WHEN "role"::text = 'MANAGER' THEN 'TEAM_MANAGER'::"public"."TeamRole_new"
+      ELSE "role"::text::"public"."TeamRole_new"
+    END
+  );
+
+-- Step 4: Replace the old enum with the new one
 ALTER TYPE "public"."TeamRole" RENAME TO "TeamRole_old";
 ALTER TYPE "public"."TeamRole_new" RENAME TO "TeamRole";
 DROP TYPE "public"."TeamRole_old";
 ALTER TABLE "public"."TeamMembership" ALTER COLUMN "role" SET DEFAULT 'MEMBER';
-COMMIT;
 
 -- CreateTable
 CREATE TABLE "public"."WorkspaceMembership" (
