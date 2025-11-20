@@ -383,8 +383,16 @@ export class CognitiveLoadController {
         return;
       }
 
-      const teamId = parseInt(req.params.teamId);
-      if (!teamId || isNaN(teamId)) {
+      const teamIdParam = req.params.teamId;
+      if (!teamIdParam) {
+        res.status(400).json({ 
+          error: 'Bad Request',
+          message: 'teamId is required'
+        });
+        return;
+      }
+      const teamId = parseInt(teamIdParam);
+      if (isNaN(teamId)) {
         res.status(400).json({ 
           error: 'Bad Request',
           message: 'Invalid team ID'
