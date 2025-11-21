@@ -107,11 +107,73 @@ async function main() {
 
   console.log("Created Pro Plan - Yearly");
 
+  const essentialTwentyPlan = await prisma.subscriptionPlan.upsert({
+    where: { name: "essential_twenty" },
+    update: {
+      displayName: "Essential Twenty",
+      description: "Monthly subscription with 1500 tasks per month",
+      price: 24.00,
+      currency: "USD",
+      billingInterval: "monthly",
+      trialDays: null,
+      maxTasks: 1500,
+      features: {},
+      isActive: true,
+      // Note: stripePriceId and stripeProductId should be set manually after creating products in Stripe Dashboard
+    },
+    create: {
+      name: "essential_twenty",
+      displayName: "Essential Twenty",
+      description: "Monthly subscription with 1500 tasks per month",
+      price: 24.00,
+      currency: "USD",
+      billingInterval: "monthly",
+      trialDays: null,
+      maxTasks: 1500,
+      features: {},
+      isActive: true,
+    },
+  });
+
+  console.log("Created Essential Twenty Plan");
+
+  const businessProPlan = await prisma.subscriptionPlan.upsert({
+    where: { name: "business_pro" },
+    update: {
+      displayName: "Business Pro",
+      description: "Monthly subscription with 2000 tasks per month",
+      price: 49.00,
+      currency: "USD",
+      billingInterval: "monthly",
+      trialDays: null,
+      maxTasks: 2000,
+      features: {},
+      isActive: true,
+      // Note: stripePriceId and stripeProductId should be set manually after creating products in Stripe Dashboard
+    },
+    create: {
+      name: "business_pro",
+      displayName: "Business Pro",
+      description: "Monthly subscription with 2000 tasks per month",
+      price: 49.00,
+      currency: "USD",
+      billingInterval: "monthly",
+      trialDays: null,
+      maxTasks: 2000,
+      features: {},
+      isActive: true,
+    },
+  });
+
+  console.log("Created Business Pro Plan");
+
   console.log("Seeding completed!");
   console.log("\nIMPORTANT: After creating products in Stripe Dashboard, update the stripePriceId and stripeProductId fields:");
   console.log("- Clarity Plan ID:", trialPlan.id);
   console.log("- Pro Plan - Monthly ID:", monthlyPlan.id);
   console.log("- Pro Plan - Yearly ID:", yearlyPlan.id);
+  console.log("- Essential Twenty Plan ID:", essentialTwentyPlan.id);
+  console.log("- Business Pro Plan ID:", businessProPlan.id);
 }
 
 main()
