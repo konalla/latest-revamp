@@ -8,20 +8,8 @@ if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-// Configure multer storage
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, uploadsDir);
-  },
-  filename: (req, file, cb) => {
-    // Generate unique filename: profile_{userId}_{timestamp}.{ext}
-    const userId = (req as any).user?.userId || "unknown";
-    const timestamp = Date.now();
-    const ext = path.extname(file.originalname);
-    const filename = `profile_${userId}_${timestamp}${ext}`;
-    cb(null, filename);
-  }
-});
+// Use memory storage to process image before saving
+const storage = multer.memoryStorage();
 
 // File filter for image validation
 const fileFilter = (req: any, file: Express.Multer.File, cb: multer.FileFilterCallback) => {

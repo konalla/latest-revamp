@@ -1,6 +1,9 @@
 import type { Request, Response } from "express";
 import * as userService from "../services/user.service.js";
 import type { CreateUserRequest } from "../types/user.types.js";
+import sharp from "sharp";
+import path from "path";
+import fs from "fs";
 
 const createUser = async (req: Request<{}, {}, CreateUserRequest>, res: Response) => {
   try {
@@ -99,8 +102,32 @@ const uploadProfilePhoto = async (req: Request, res: Response) => {
       });
     }
 
+    // Ensure uploads directory exists
+    const uploadsDir = path.join(process.cwd(), "uploads", "profile");
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+    }
+
+    // Generate unique filename
+    const userId = req.user.userId;
+    const timestamp = Date.now();
+    const filename = `profile_${userId}_${timestamp}.jpg`;
+    const filePath = path.join(uploadsDir, filename);
+
+    // Process image: resize, compress, and convert to JPEG
+    await sharp(req.file.buffer)
+      .resize(800, 800, {
+        fit: 'inside',
+        withoutEnlargement: true
+      })
+      .jpeg({ 
+        quality: 80,
+        mozjpeg: true 
+      })
+      .toFile(filePath);
+
     // Generate the photo URL path
-    const photoUrl = `/uploads/profile/${req.file.filename}`;
+    const photoUrl = `/uploads/profile/${filename}`;
     
     // Update user profile photo URL in database
     const updatedUser = await userService.updateProfilePhoto(req.user.userId, photoUrl);

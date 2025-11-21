@@ -136,6 +136,37 @@ export class SubscriptionService {
       let stripeCustomerId: string;
       if (existingSubscription?.stripeCustomerId) {
         stripeCustomerId = existingSubscription.stripeCustomerId;
+        // Verify the customer exists in Stripe
+        // If it doesn't exist, create a new one
+        try {
+          await stripe.customers.retrieve(stripeCustomerId);
+        } catch (error: any) {
+          // Customer doesn't exist in Stripe, create a new one
+          if (error.code === "resource_missing" || error.statusCode === 404) {
+            console.warn(
+              `Stripe customer ${stripeCustomerId} not found in Stripe, creating new customer`
+            );
+            const customer = await stripe.customers.create({
+              email: user.email,
+              name: user.name,
+              metadata: {
+                userId: userId.toString(),
+              },
+            });
+            stripeCustomerId = customer.id;
+
+            // Update subscription with new Stripe customer ID
+            if (existingSubscription) {
+              await prisma.subscription.update({
+                where: { id: existingSubscription.id },
+                data: { stripeCustomerId },
+              });
+            }
+          } else {
+            // Re-throw other errors
+            throw error;
+          }
+        }
       } else {
         const customer = await stripe.customers.create({
           email: user.email,
@@ -246,6 +277,37 @@ export class SubscriptionService {
           where: { id: subscription.id },
           data: { stripeCustomerId },
         });
+      } else {
+        // Verify the customer exists in Stripe
+        // If it doesn't exist, create a new one
+        try {
+          await stripe.customers.retrieve(stripeCustomerId);
+        } catch (error: any) {
+          // Customer doesn't exist in Stripe, create a new one
+          if (error.code === "resource_missing" || error.statusCode === 404) {
+            console.warn(
+              `Stripe customer ${stripeCustomerId} not found in Stripe, creating new customer`
+            );
+            const customer = await stripe.customers.create({
+              email: user.email,
+              name: user.name,
+              metadata: {
+                userId: userId.toString(),
+              },
+            });
+
+            stripeCustomerId = customer.id;
+
+            // Update subscription with new Stripe customer ID
+            await prisma.subscription.update({
+              where: { id: subscription.id },
+              data: { stripeCustomerId },
+            });
+          } else {
+            // Re-throw other errors
+            throw error;
+          }
+        }
       }
 
       // Create checkout session
@@ -1304,9 +1366,41 @@ export class SubscriptionService {
         throw new Error("Subscription or Stripe customer not found");
       }
 
+      // Verify the customer exists in Stripe
+      // If it doesn't exist, create a new one
+      let stripeCustomerId = subscription.stripeCustomerId;
+      try {
+        await stripe.customers.retrieve(stripeCustomerId);
+      } catch (error: any) {
+        // Customer doesn't exist in Stripe, create a new one
+        if (error.code === "resource_missing" || error.statusCode === 404) {
+          console.warn(
+            `Stripe customer ${stripeCustomerId} not found in Stripe, creating new customer`
+          );
+          const customer = await stripe.customers.create({
+            email: user.email,
+            name: user.name,
+            metadata: {
+              userId: userId.toString(),
+            },
+          });
+
+          stripeCustomerId = customer.id;
+
+          // Update subscription with new Stripe customer ID
+          await prisma.subscription.update({
+            where: { id: subscription.id },
+            data: { stripeCustomerId },
+          });
+        } else {
+          // Re-throw other errors
+          throw error;
+        }
+      }
+
       // Create checkout session in setup mode to update payment method
       const session = await stripe.checkout.sessions.create({
-        customer: subscription.stripeCustomerId,
+        customer: stripeCustomerId,
         payment_method_types: ["card"],
         mode: "setup",
         success_url: `${process.env.FRONTEND_URL}/subscription/payment-update-success?session_id={CHECKOUT_SESSION_ID}`,
