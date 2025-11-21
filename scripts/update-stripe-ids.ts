@@ -21,6 +21,14 @@ async function updateStripeIds() {
   // Pro Plan - Yearly
   const yearlyPriceId = process.env.STRIPE_YEARLY_PRICE_ID || process.env.STRIPE_PRO_YEARLY_PRICE_ID;
   const yearlyProductId = process.env.STRIPE_YEARLY_PRODUCT_ID || process.env.STRIPE_PRO_YEARLY_PRODUCT_ID;
+  
+  // Essential Twenty Plan
+  const essentialTwentyPriceId = process.env.STRIPE_ESSENTIAL_TWENTY_PRICE_ID;
+  const essentialTwentyProductId = process.env.STRIPE_ESSENTIAL_TWENTY_PRODUCT_ID;
+  
+  // Business Pro Plan
+  const businessProPriceId = process.env.STRIPE_BUSINESS_PRO_PRICE_ID;
+  const businessProProductId = process.env.STRIPE_BUSINESS_PRO_PRODUCT_ID;
 
   // Validate required environment variables
   if (!monthlyPriceId || !monthlyProductId) {
@@ -80,10 +88,52 @@ async function updateStripeIds() {
     console.log(`   Price ID: ${yearlyPlan.stripePriceId}`);
     console.log(`   Product ID: ${yearlyPlan.stripeProductId}\n`);
 
+    // Update Essential Twenty Plan
+    if (essentialTwentyPriceId && essentialTwentyProductId) {
+      const essentialTwentyPlan = await prisma.subscriptionPlan.update({
+        where: { name: "essential_twenty" },
+        data: {
+          stripePriceId: essentialTwentyPriceId,
+          stripeProductId: essentialTwentyProductId,
+        },
+      });
+
+      console.log("✅ Updated Essential Twenty Plan:");
+      console.log(`   Price ID: ${essentialTwentyPlan.stripePriceId}`);
+      console.log(`   Product ID: ${essentialTwentyPlan.stripeProductId}\n`);
+    } else {
+      console.log("⚠️  Essential Twenty Plan not updated (STRIPE_ESSENTIAL_TWENTY_PRICE_ID and STRIPE_ESSENTIAL_TWENTY_PRODUCT_ID not set)\n");
+    }
+
+    // Update Business Pro Plan
+    if (businessProPriceId && businessProProductId) {
+      const businessProPlan = await prisma.subscriptionPlan.update({
+        where: { name: "business_pro" },
+        data: {
+          stripePriceId: businessProPriceId,
+          stripeProductId: businessProProductId,
+        },
+      });
+
+      console.log("✅ Updated Business Pro Plan:");
+      console.log(`   Price ID: ${businessProPlan.stripePriceId}`);
+      console.log(`   Product ID: ${businessProPlan.stripeProductId}\n`);
+    } else {
+      console.log("⚠️  Business Pro Plan not updated (STRIPE_BUSINESS_PRO_PRICE_ID and STRIPE_BUSINESS_PRO_PRODUCT_ID not set)\n");
+    }
+
     console.log("✅ Successfully updated all subscription plans with Stripe IDs!");
     
     if (!clarityPriceId || !clarityProductId) {
       console.log("\n💡 Tip: Set STRIPE_CLARITY_PRICE_ID and STRIPE_CLARITY_PRODUCT_ID to enable Clarity Plan in Stripe.");
+    }
+    
+    if (!essentialTwentyPriceId || !essentialTwentyProductId) {
+      console.log("💡 Tip: Set STRIPE_ESSENTIAL_TWENTY_PRICE_ID and STRIPE_ESSENTIAL_TWENTY_PRODUCT_ID to enable Essential Twenty Plan in Stripe.");
+    }
+    
+    if (!businessProPriceId || !businessProProductId) {
+      console.log("💡 Tip: Set STRIPE_BUSINESS_PRO_PRICE_ID and STRIPE_BUSINESS_PRO_PRODUCT_ID to enable Business Pro Plan in Stripe.");
     }
   } catch (error: any) {
     console.error("Error updating subscription plans:", error);

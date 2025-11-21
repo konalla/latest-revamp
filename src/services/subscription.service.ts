@@ -212,7 +212,7 @@ export class SubscriptionService {
    */
   async createCheckoutSession(
     userId: number,
-    planName: "monthly" | "yearly"
+    planName: "monthly" | "yearly" | "essential_twenty" | "business_pro"
   ): Promise<{ url: string; sessionId: string }> {
     try {
       // Get user
