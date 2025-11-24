@@ -1,4 +1,92 @@
 import prisma from "../config/prisma.js";
+import { subscriptionService } from "./subscription.service.js";
+
+// Helper function to get workspace and team limits based on subscription
+export const getWorkspaceLimits = async (userId: number): Promise<{
+  maxWorkspaces: number;
+  maxTeamsPerWorkspace: number;
+  canCreateWorkspace: boolean;
+  canCreateTeam: boolean;
+  planName: string | null;
+  status: string;
+}> => {
+  try {
+    const subscription = await subscriptionService.getUserSubscription(userId);
+    const updatedSubscription = await subscriptionService.updateSubscriptionStatus(subscription.id);
+    
+    const planName = updatedSubscription.subscriptionPlan?.name || null;
+    const status = updatedSubscription.status || "TRIAL";
+    
+    // Check if user has essential_twenty or business_pro
+    const hasEssentialTwenty = planName === "essential_twenty";
+    const hasBusinessPro = planName === "business_pro";
+    
+    // Default limits (no subscription or other plans)
+    let maxWorkspaces = 1; // Only default workspace
+    let maxTeamsPerWorkspace = 5;
+    let canCreateWorkspace = false;
+    let canCreateTeam = false;
+    
+    if (hasEssentialTwenty || hasBusinessPro) {
+      if (status === "ACTIVE") {
+        // Full access
+        if (hasEssentialTwenty) {
+          maxWorkspaces = 3; // 1 default + 2 more
+          maxTeamsPerWorkspace = 5;
+        } else if (hasBusinessPro) {
+          maxWorkspaces = 5; // 1 default + 4 more
+          maxTeamsPerWorkspace = 7;
+        }
+        canCreateWorkspace = true;
+        canCreateTeam = true;
+      } else if (status === "GRACE_PERIOD") {
+        // Grace period: allow team creation but not workspace creation
+        if (hasEssentialTwenty) {
+          maxWorkspaces = 3;
+          maxTeamsPerWorkspace = 5;
+        } else if (hasBusinessPro) {
+          maxWorkspaces = 5;
+          maxTeamsPerWorkspace = 7;
+        }
+        canCreateWorkspace = false;
+        canCreateTeam = true;
+      } else {
+        // EXPIRED, CANCELED, etc. - only default workspace with 5 teams, but can create teams up to limit
+        maxWorkspaces = 1;
+        maxTeamsPerWorkspace = 5;
+        canCreateWorkspace = false;
+        canCreateTeam = true; // Can still create teams in default workspace up to 5
+      }
+    } else {
+      // No essential_twenty or business_pro subscription
+      // Only default workspace with 5 teams, but can create teams up to limit
+      maxWorkspaces = 1;
+      maxTeamsPerWorkspace = 5;
+      canCreateWorkspace = false;
+      canCreateTeam = true; // Can create teams in default workspace up to 5
+    }
+    
+    return {
+      maxWorkspaces,
+      maxTeamsPerWorkspace,
+      canCreateWorkspace,
+      canCreateTeam,
+      planName,
+      status
+    };
+  } catch (error: any) {
+    console.error("Error getting workspace limits:", error);
+    // Default to most restrictive limits on error
+    return {
+      maxWorkspaces: 1,
+      maxTeamsPerWorkspace: 5,
+      canCreateWorkspace: false,
+      canCreateTeam: false,
+      planName: null,
+      status: "UNKNOWN"
+    };
+  }
+};
 
 const generateBaseNames = (name: string, username: string) => {
   const base = (name && name.trim().length > 0) ? name.trim() : username.trim();
@@ -145,6 +233,16 @@ export const getAllWorkspaces = async (userId: number) => {
       const isOwner = workspace.ownerId === userId;
       const isWorkspaceManager = workspaceIdsFromManagers.includes(workspace.id);
 
+      // Determine workspace-level role
+      let workspaceUserRole: "OWNER" | "WORKSPACE_MANAGER" | "TEAM_MANAGER";
+      if (isOwner) {
+        workspaceUserRole = "OWNER";
+      } else if (isWorkspaceManager) {
+        workspaceUserRole = "WORKSPACE_MANAGER";
+      } else {
+        workspaceUserRole = "TEAM_MANAGER";
+      }
+
       let teams;
       if (isOwner || isWorkspaceManager) {
         // Owner or workspace manager can see all teams
@@ -155,6 +253,16 @@ export const getAllWorkspaces = async (userId: number) => {
           include: {
             _count: {
               select: { memberships: true }
+            },
+            memberships: {
+              where: {
+                userId: userId,
+                status: "ACTIVE"
+              },
+              select: {
+                role: true,
+                status: true
+              }
             }
           },
           orderBy: { createdAt: "asc" }
@@ -195,9 +303,43 @@ export const getAllWorkspaces = async (userId: number) => {
         });
       }
 
+      // Add user role to each team
+      const teamsWithRoles = teams.map(team => {
+        const userMembership = team.memberships?.[0];
+        let teamUserRole: "OWNER" | "WORKSPACE_MANAGER" | "TEAM_MANAGER" | "ADMIN" | "MEMBER" | null = null;
+        
+        if (userMembership) {
+          // User has direct team membership
+          if (userMembership.role === "TEAM_MANAGER") {
+            teamUserRole = "TEAM_MANAGER";
+          } else if (userMembership.role === "ADMIN") {
+            teamUserRole = "ADMIN";
+          } else {
+            teamUserRole = "MEMBER";
+          }
+        } else if (isOwner || isWorkspaceManager) {
+          // User doesn't have direct team membership but has workspace-level permissions
+          // Inherit workspace role at team level
+          if (isOwner) {
+            teamUserRole = "OWNER";
+          } else {
+            teamUserRole = "WORKSPACE_MANAGER";
+          }
+        }
+
+        // Remove memberships from response (we only needed it to determine role)
+        const { memberships, ...teamWithoutMemberships } = team;
+        
+        return {
+          ...teamWithoutMemberships,
+          userRole: teamUserRole
+        };
+      });
+
       return {
         ...workspace,
-        teams: teams
+        userRole: workspaceUserRole,
+        teams: teamsWithRoles
       };
     })
   );
@@ -244,6 +386,16 @@ export const getWorkspaceById = async (userId: number, workspaceId: number) => {
     }
   }
 
+  // Determine workspace-level role
+  let workspaceUserRole: "OWNER" | "WORKSPACE_MANAGER" | "TEAM_MANAGER";
+  if (isOwner) {
+    workspaceUserRole = "OWNER";
+  } else if (isWorkspaceManager) {
+    workspaceUserRole = "WORKSPACE_MANAGER";
+  } else {
+    workspaceUserRole = "TEAM_MANAGER";
+  }
+
   // Get teams based on user's role
   let teams;
   if (isOwner || isWorkspaceManager) {
@@ -255,6 +407,16 @@ export const getWorkspaceById = async (userId: number, workspaceId: number) => {
       include: {
         _count: {
           select: { memberships: true }
+        },
+        memberships: {
+          where: {
+            userId: userId,
+            status: "ACTIVE"
+          },
+          select: {
+            role: true,
+            status: true
+          }
         }
       },
       orderBy: { createdAt: "asc" }
@@ -295,9 +457,43 @@ export const getWorkspaceById = async (userId: number, workspaceId: number) => {
     });
   }
 
+  // Add user role to each team
+  const teamsWithRoles = teams.map(team => {
+    const userMembership = team.memberships?.[0];
+    let teamUserRole: "OWNER" | "WORKSPACE_MANAGER" | "TEAM_MANAGER" | "ADMIN" | "MEMBER" | null = null;
+    
+    if (userMembership) {
+      // User has direct team membership
+      if (userMembership.role === "TEAM_MANAGER") {
+        teamUserRole = "TEAM_MANAGER";
+      } else if (userMembership.role === "ADMIN") {
+        teamUserRole = "ADMIN";
+      } else {
+        teamUserRole = "MEMBER";
+      }
+    } else if (isOwner || isWorkspaceManager) {
+      // User doesn't have direct team membership but has workspace-level permissions
+      // Inherit workspace role at team level
+      if (isOwner) {
+        teamUserRole = "OWNER";
+      } else {
+        teamUserRole = "WORKSPACE_MANAGER";
+      }
+    }
+
+    // Remove memberships from response (we only needed it to determine role)
+    const { memberships, ...teamWithoutMemberships } = team;
+    
+    return {
+      ...teamWithoutMemberships,
+      userRole: teamUserRole
+    };
+  });
+
   return {
     ...workspace,
-    teams: teams
+    userRole: workspaceUserRole,
+    teams: teamsWithRoles
   };
 };
 
@@ -305,6 +501,39 @@ export const getWorkspaceById = async (userId: number, workspaceId: number) => {
 export const createWorkspace = async (userId: number, name: string) => {
   if (!name || !name.trim()) {
     throw new Error("Workspace name is required");
+  }
+
+  // Check subscription limits
+  const limits = await getWorkspaceLimits(userId);
+  
+  if (!limits.canCreateWorkspace) {
+    const planName = limits.planName;
+    if (planName === "essential_twenty" || planName === "business_pro") {
+      if (limits.status === "GRACE_PERIOD") {
+        throw new Error("Cannot create new workspaces during grace period. Please renew your subscription to create more workspaces.");
+      } else {
+        throw new Error("Your subscription has expired. Please renew your subscription to create more workspaces.");
+      }
+    } else {
+      throw new Error("Workspace creation is only available with Essential Twenty or Business Pro subscriptions. Please upgrade to create additional workspaces.");
+    }
+  }
+
+  // Count existing workspaces owned by user
+  const existingWorkspacesCount = await prisma.workspace.count({
+    where: { ownerId: userId }
+  });
+
+  // Check if user has reached workspace limit
+  if (existingWorkspacesCount >= limits.maxWorkspaces) {
+    const planName = limits.planName;
+    if (planName === "essential_twenty") {
+      throw new Error(`You've reached your workspace limit (${limits.maxWorkspaces} workspaces). Upgrade to Business Pro to create up to 5 workspaces.`);
+    } else if (planName === "business_pro") {
+      throw new Error(`You've reached your workspace limit (${limits.maxWorkspaces} workspaces).`);
+    } else {
+      throw new Error("You can only have 1 workspace (the default workspace). Upgrade to Essential Twenty or Business Pro to create additional workspaces.");
+    }
   }
 
   // Check if workspace name already exists for this user

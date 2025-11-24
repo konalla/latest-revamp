@@ -1,5 +1,6 @@
 import prisma from "../config/prisma.js";
 import { subscriptionService } from "./subscription.service.js";
+import { getWorkspaceLimits } from "./workspace.service.js";
 
 // Check if user is workspace owner (checks if user owns at least one workspace)
 const isWorkspaceOwner = async (userId: number): Promise<boolean> => {
@@ -274,6 +275,39 @@ export const createTeam = async (userId: number, name: string, workspaceId?: num
   const workspace = workspaceId 
     ? await getWorkspaceByIdForOwner(userId, workspaceId)
     : await getWorkspaceForOwner(userId);
+
+  // Check subscription limits
+  const limits = await getWorkspaceLimits(userId);
+  
+  if (!limits.canCreateTeam) {
+    const planName = limits.planName;
+    if (planName === "essential_twenty" || planName === "business_pro") {
+      if (limits.status === "GRACE_PERIOD") {
+        throw new Error("Cannot create new teams during grace period. Please renew your subscription to create more teams.");
+      } else {
+        throw new Error("Your subscription has expired. Please renew your subscription to create more teams.");
+      }
+    } else {
+      throw new Error("Cannot create teams. Please check your subscription status.");
+    }
+  }
+
+  // Count existing teams in this workspace
+  const existingTeamsCount = await prisma.team.count({
+    where: { workspaceId: workspace.id }
+  });
+
+  // Check if workspace has reached team limit
+  if (existingTeamsCount >= limits.maxTeamsPerWorkspace) {
+    const planName = limits.planName;
+    if (planName === "essential_twenty") {
+      throw new Error(`You've reached the team limit for this workspace (${limits.maxTeamsPerWorkspace} teams). Upgrade to Business Pro to create up to 7 teams per workspace.`);
+    } else if (planName === "business_pro") {
+      throw new Error(`You've reached the team limit for this workspace (${limits.maxTeamsPerWorkspace} teams).`);
+    } else {
+      throw new Error(`You've reached the team limit for this workspace (${limits.maxTeamsPerWorkspace} teams). Upgrade to Essential Twenty or Business Pro to create more teams.`);
+    }
+  }
 
   // Check if team name already exists in this workspace
   const existingTeam = await prisma.team.findFirst({
