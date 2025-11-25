@@ -873,6 +873,30 @@ export class SubscriptionService {
   }
 
   /**
+   * Get workspace and team limits for a subscription plan
+   */
+  private getPlanLimits(planName: string): { maxWorkspaces: number; maxTeamsPerWorkspace: number } {
+    switch (planName) {
+      case "essential_twenty":
+        return {
+          maxWorkspaces: 3, // 1 default + 2 additional
+          maxTeamsPerWorkspace: 5
+        };
+      case "business_pro":
+        return {
+          maxWorkspaces: 5, // 1 default + 4 additional
+          maxTeamsPerWorkspace: 7
+        };
+      default:
+        // For monthly, yearly, trial, or any other plan
+        return {
+          maxWorkspaces: 1, // Only default workspace
+          maxTeamsPerWorkspace: 5
+        };
+    }
+  }
+
+  /**
    * Get available subscription plans
    */
   async getAvailablePlans(): Promise<any[]> {
@@ -889,7 +913,15 @@ export class SubscriptionService {
         },
       });
 
-      return plans;
+      // Add workspace and team limits to each plan
+      return plans.map(plan => {
+        const limits = this.getPlanLimits(plan.name);
+        return {
+          ...plan,
+          maxWorkspaces: limits.maxWorkspaces,
+          maxTeamsPerWorkspace: limits.maxTeamsPerWorkspace
+        };
+      });
     } catch (error: any) {
       console.error("Error getting available plans:", error);
       throw new Error(`Failed to get plans: ${error.message}`);
