@@ -242,17 +242,125 @@ export class TaskService {
       },
     });
 
-    // Generate AI recommendation asynchronously (non-blocking)
-    this.generateAIRecommendationAsync(task.id, userId).catch((error: any) => {
+    // Generate AI recommendation synchronously and update task category
+    try {
+      const userPreferences = await aiRecommendationService.getUserWorkPreferences(userId);
+      const taskAnalysis = {
+        title: task.title,
+        description: task.description || "",
+        duration: task.duration,
+        importance: task.importance,
+        urgency: task.urgency,
+        dueDate: (task as any).dueDate,
+        projectName: (task as any).project?.name || "",
+        objectiveName: (task as any).objective?.name || "",
+        objectiveDescription: (task as any).objective?.description || "",
+        okrTitle: (task as any).okr?.title || "",
+        okrDescription: (task as any).okr?.description || ""
+      };
+
+      const recommendation = await aiRecommendationService.generateTaskRecommendation(
+        taskAnalysis,
+        userPreferences,
+        userId
+      );
+
+      const mappedCategory = this.mapAICategoryToTaskCategory(recommendation.category);
+
+      // Update the task's category to match the AI recommendation
+      await prisma.task.update({
+        where: { id: task.id },
+        data: { category: mappedCategory }
+      });
+
+      // Create AI recommendation record
+      await (prisma as any).aIRecommendation.upsert({
+        where: {
+          taskId: task.id
+        },
+        update: {
+          category: recommendation.category,
+          recommendedTime: recommendation.recommendedTime,
+          confidence: recommendation.confidence,
+          reasoning: recommendation.reasoning
+        },
+        create: {
+          taskId: task.id,
+          category: recommendation.category,
+          recommendedTime: recommendation.recommendedTime,
+          confidence: recommendation.confidence,
+          reasoning: recommendation.reasoning
+        }
+      });
+
+      // Fetch updated task with all relations
+      const updatedTask = await prisma.task.findUnique({
+        where: { id: task.id },
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
+          project: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+          objective: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+          okr: {
+            select: {
+              id: true,
+              title: true,
+            },
+          },
+          plan: {
+            select: {
+              id: true,
+              name: true,
+              status: true,
+              project: {
+                select: {
+                  id: true,
+                  name: true,
+                },
+              },
+              objective: {
+                select: {
+                  id: true,
+                  name: true,
+                },
+              },
+            },
+          },
+        },
+      });
+
+      console.log(`AI recommendation generated for task ${task.id}: ${recommendation.category} -> ${mappedCategory} at ${recommendation.recommendedTime}`);
+
+      // Increment task count for subscription tracking (non-blocking)
+      subscriptionService.incrementTaskCount(userId).catch((error: any) => {
+        console.error("Error incrementing task count:", error);
+      });
+
+      return updatedTask as TaskResponse;
+    } catch (error) {
       console.error("Error generating AI recommendation for new task:", error);
-    });
-
-    // Increment task count for subscription tracking
-    subscriptionService.incrementTaskCount(userId).catch((error: any) => {
-      console.error("Error incrementing task count:", error);
-    });
-
-    return task as TaskResponse;
+      // If AI recommendation fails, return the task with original category
+      // Increment task count for subscription tracking (non-blocking)
+      subscriptionService.incrementTaskCount(userId).catch((error: any) => {
+        console.error("Error incrementing task count:", error);
+      });
+      return task as TaskResponse;
+    }
   }
 
   /**
