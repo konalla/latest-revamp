@@ -224,19 +224,28 @@ export class FocusSessionService {
 
   async endFocusSession(sessionId: number, userId: number, data: EndSessionRequest): Promise<FocusSessionResponse | null> {
     try {
-      // Get existing intention data first
-      const existingSession = await prisma.$queryRaw`
-        SELECT intention FROM focus_sessions WHERE id = ${sessionId} AND user_id = ${userId}
-      ` as any[];
+      // Get existing session data first to calculate duration using Prisma for proper column mapping
+      const existingSession = await prisma.focusSession.findFirst({
+        where: { 
+          id: sessionId,
+          userId: userId
+        },
+        select: {
+          intention: true,
+          startedAt: true
+        }
+      });
 
-      if (existingSession.length === 0) {
+      if (!existingSession) {
         return null;
       }
+      
+      console.log('Existing session data:', JSON.stringify(existingSession, null, 2));
 
       let intentionData: any = {};
-      if (existingSession[0].intention) {
+      if (existingSession.intention) {
         try {
-          intentionData = existingSession[0].intention as any;
+          intentionData = existingSession.intention as any;
         } catch (e) {
           console.error("Error parsing existing intention data:", e);
         }
@@ -250,11 +259,64 @@ export class FocusSessionService {
         intentionData.productivityRating = data.productivityRating;
       }
 
+      // Calculate actual duration in minutes
+      // Priority: 1) Use elapsedTime from frontend (most reliable), 2) Calculate from timestamps as fallback
+      let calculatedDuration = 0;
+      
+      console.log('ElapsedTime from request:', data.elapsedTime);
+      
+      // First, use elapsedTime from the request (frontend tracks this accurately)
+      if (data.elapsedTime !== undefined && data.elapsedTime > 0) {
+        // elapsedTime from frontend is in seconds
+        // Convert to minutes and round
+        calculatedDuration = Math.max(1, Math.round(data.elapsedTime / 60));
+        console.log(`Using elapsedTime: ${data.elapsedTime}s = ${calculatedDuration} minutes`);
+      } else {
+        // Fall back to calculating from timestamps if elapsedTime is not provided
+        const startedAt = existingSession.startedAt;
+        console.log('ElapsedTime not provided, falling back to timestamp calculation. StartedAt:', startedAt);
+        
+        if (startedAt) {
+          try {
+            const startTime = new Date(startedAt);
+            const endTime = new Date();
+            
+            // Validate the date
+            if (isNaN(startTime.getTime())) {
+              console.error('Invalid startTime:', startedAt);
+              throw new Error('Invalid startTime');
+            }
+            
+            const diffMs = endTime.getTime() - startTime.getTime();
+            const diffSeconds = Math.round(diffMs / 1000);
+            const diffMinutes = diffMs / (1000 * 60);
+            
+            // Only use timestamp calculation if it's positive and reasonable
+            if (diffMs > 0) {
+              calculatedDuration = Math.max(1, Math.round(diffMinutes)); // At least 1 minute, round to nearest
+              console.log(`Calculated duration from timestamps (fallback): ${calculatedDuration} minutes (${diffMs}ms difference, ${diffSeconds}s, ${diffMinutes.toFixed(2)} minutes)`);
+            } else {
+              console.warn('Timestamp difference is negative or zero');
+              calculatedDuration = 1; // Default to 1 minute
+            }
+          } catch (error) {
+            console.error('Error calculating duration from timestamps:', error);
+            calculatedDuration = 1; // Default to 1 minute
+          }
+        } else {
+          console.log('No startedAt found, defaulting to 1 minute');
+          calculatedDuration = 1; // Default to 1 minute
+        }
+      }
+      
+      console.log(`Final calculated duration: ${calculatedDuration} minutes`);
+
       const result = await prisma.$queryRaw`
         UPDATE focus_sessions 
         SET status = 'completed', 
             ended_at = NOW(), 
             completed = true, 
+            duration = ${calculatedDuration},
             notes = ${data.notes || null}, 
             tasks_completed = ${data.completedTasks?.length || 0},
             intention = ${JSON.stringify(intentionData)}::jsonb
