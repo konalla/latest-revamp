@@ -1,6 +1,11 @@
 import type { Request, Response } from "express";
 import * as authService from "../services/auth.service.js";
-import type { LoginRequest, RegisterRequest } from "../types/auth.types.js";
+import type { 
+  LoginRequest, 
+  RegisterRequest,
+  ForgotPasswordRequest,
+  ResetPasswordRequest
+} from "../types/auth.types.js";
 
 const register = async (req: Request<{}, {}, RegisterRequest>, res: Response) => {
   try {
@@ -29,8 +34,28 @@ const logout = async (req: Request, res: Response) => {
   }
 };
 
+const forgotPassword = async (req: Request<{}, {}, ForgotPasswordRequest>, res: Response) => {
+  try {
+    const result = await authService.forgotPassword(req.body);
+    res.status(200).json(result);
+  } catch (error: any) {
+    res.status(400).json({ error: error.message });
+  }
+};
+
+const resetPassword = async (req: Request<{}, {}, ResetPasswordRequest>, res: Response) => {
+  try {
+    const result = await authService.resetPassword(req.body);
+    res.status(200).json(result);
+  } catch (error: any) {
+    res.status(400).json({ error: error.message });
+  }
+};
+
 export {
   register,
   login,
   logout,
+  forgotPassword,
+  resetPassword,
 };

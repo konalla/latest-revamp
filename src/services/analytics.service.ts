@@ -251,15 +251,27 @@ export class AnalyticsService {
       // Calculate focus session metrics
       const focusSessionCount = focusSessions.length;
       
-      // Calculate total and average duration
+      // Calculate total and average duration based on start and end times
       let totalFocusSessionTime = 0;
+      let sessionsWithDuration = 0; // Count only sessions with both start and end times
       focusSessions.forEach(session => {
-        const durationMinutes = session.duration || 0;
-        totalFocusSessionTime += durationMinutes;
+        if (session.startedAt && session.endedAt) {
+          try {
+            const startTime = new Date(session.startedAt);
+            const endTime = new Date(session.endedAt);
+            const durationMs = endTime.getTime() - startTime.getTime();
+            const durationMinutes = durationMs / (1000 * 60); // Convert to minutes
+            totalFocusSessionTime += durationMinutes;
+            sessionsWithDuration++;
+          } catch (e) {
+            console.error('Error calculating session duration from start/end times:', e);
+            // Skip this session if date parsing fails
+          }
+        }
       });
       
-      const averageFocusSessionDuration = focusSessionCount > 0 
-        ? totalFocusSessionTime / focusSessionCount 
+      const averageFocusSessionDuration = sessionsWithDuration > 0 
+        ? totalFocusSessionTime / sessionsWithDuration 
         : 0;
       
       // Calculate task completion during focus sessions

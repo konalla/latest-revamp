@@ -18,6 +18,10 @@ model User {
   password                   String
   role                       String   @default("user")
 
+  // Password Reset
+  resetToken                 String?  @unique
+  resetTokenExpiry           DateTime?
+
   // Profile Information
   phone_number               String?
   company_name               String?

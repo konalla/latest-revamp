@@ -92,11 +92,19 @@ class AnalyticsController {
         return;
       }
       
-      // Parse the timeframe - it can be a string like '30days' or a number of days
+      // Parse the timeframe - it can be a string like '30days', a number of days, or 'days' query param
       let days = 30; // Default to 30 days
-      const timeframe = req.query.timeframe as string || '30days';
+      const timeframe = req.query.timeframe as string;
+      const daysParam = req.query.days as string;
       
-      if (timeframe) {
+      // Check for 'days' query parameter first
+      if (daysParam) {
+        try {
+          days = parseInt(daysParam, 10);
+        } catch (parseError) {
+          console.warn("Invalid days format, using default 30 days:", parseError);
+        }
+      } else if (timeframe) {
         try {
           // Convert to days if it's a number
           if (/^\d+$/.test(timeframe)) {

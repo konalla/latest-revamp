@@ -1,9 +1,19 @@
 import bcrypt from "bcrypt";
+import crypto from "crypto";
 import prisma from "../config/prisma.js";
-import type { LoginRequest, RegisterRequest, AuthResponse } from "../types/auth.types.js";
+import type { 
+  LoginRequest, 
+  RegisterRequest, 
+  AuthResponse,
+  ForgotPasswordRequest,
+  ForgotPasswordResponse,
+  ResetPasswordRequest,
+  ResetPasswordResponse
+} from "../types/auth.types.js";
 import { generateToken } from "../utils/jwt.utils.js";
 import { ensureWorkspaceAndTeamForUser } from "./workspace.service.js";
 import { subscriptionService } from "./subscription.service.js";
+import { sendPasswordResetEmail } from "./email.service.js";
 
 const SALT_ROUNDS = 10;
 
@@ -140,8 +150,127 @@ const logout = async (): Promise<{ message: string }> => {
   };
 };
 
+const forgotPassword = async (data: ForgotPasswordRequest): Promise<ForgotPasswordResponse> => {
+  // Validate email format
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(data.email)) {
+    throw new Error("Invalid email format");
+  }
+
+  // Find user by email
+  const user = await prisma.user.findUnique({
+    where: { email: data.email.toLowerCase().trim() },
+    select: {
+      id: true,
+      email: true,
+      name: true,
+    }
+  });
+
+  // Always return success message (don't reveal if email exists)
+  // This prevents email enumeration attacks
+  if (!user) {
+    return {
+      message: "If an account with that email exists, a password reset link has been sent."
+    };
+  }
+
+  // Generate secure reset token (64 characters)
+  const resetToken = crypto.randomBytes(32).toString("hex");
+
+  // Set token expiry (1 hour from now)
+  const resetTokenExpiry = new Date();
+  resetTokenExpiry.setHours(resetTokenExpiry.getHours() + 1);
+
+  // Store reset token and expiry in database
+  await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      resetToken,
+      resetTokenExpiry,
+    }
+  });
+
+  // Send password reset email
+  try {
+    await sendPasswordResetEmail(user.email, user.name, resetToken);
+  } catch (error) {
+    // If email sending fails, clear the token
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        resetToken: null,
+        resetTokenExpiry: null,
+      }
+    });
+    throw new Error("Failed to send password reset email. Please try again later.");
+  }
+
+  return {
+    message: "If an account with that email exists, a password reset link has been sent."
+  };
+};
+
+const resetPassword = async (data: ResetPasswordRequest): Promise<ResetPasswordResponse> => {
+  // Validate token
+  if (!data.token || data.token.length !== 64) {
+    throw new Error("Invalid or expired reset token");
+  }
+
+  // Validate password
+  if (!data.newPassword || data.newPassword.length < 8) {
+    throw new Error("Password must be at least 8 characters long");
+  }
+
+  // Find user by reset token
+  const user = await prisma.user.findUnique({
+    where: { resetToken: data.token },
+    select: {
+      id: true,
+      resetToken: true,
+      resetTokenExpiry: true,
+    }
+  });
+
+  if (!user) {
+    throw new Error("Invalid or expired reset token");
+  }
+
+  // Check if token has expired
+  if (!user.resetTokenExpiry || user.resetTokenExpiry < new Date()) {
+    // Clear expired token
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        resetToken: null,
+        resetTokenExpiry: null,
+      }
+    });
+    throw new Error("Invalid or expired reset token");
+  }
+
+  // Hash the new password
+  const hashedPassword = await bcrypt.hash(data.newPassword, SALT_ROUNDS);
+
+  // Update password and clear reset token
+  await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      password: hashedPassword,
+      resetToken: null,
+      resetTokenExpiry: null,
+    }
+  });
+
+  return {
+    message: "Password reset successfully. You can now login with your new password."
+  };
+};
+
 export {
   register,
   login,
   logout,
+  forgotPassword,
+  resetPassword,
 };
