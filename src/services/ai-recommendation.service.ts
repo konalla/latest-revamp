@@ -22,6 +22,19 @@ const TaskRecommendationSchema = z.object({
 
 export type TaskRecommendation = z.infer<typeof TaskRecommendationSchema>;
 
+// Define the recommendation schema with priority evaluation (for bulk tasks with importance=false and urgency=false)
+const TaskRecommendationWithPrioritySchema = z.object({
+  category: z.nativeEnum(WorkCategory),
+  recommendedTime: z.string().describe("Recommended time slot in HH:MM format"),
+  confidence: z.number().min(0).max(1).describe("Confidence score between 0 and 1"),
+  reasoning: z.string().describe("Brief explanation for the recommendation"),
+  importance: z.boolean().describe("Whether the task is important (true) or not important (false)"),
+  urgency: z.boolean().describe("Whether the task is urgent (true) or not urgent (false)"),
+  priority: z.enum(["low", "medium", "high"]).describe("Task priority level: low, medium, or high")
+});
+
+export type TaskRecommendationWithPriority = z.infer<typeof TaskRecommendationWithPrioritySchema>;
+
 // Define the user work preferences interface
 export interface UserWorkPreferences {
   deepWorkStartTime: string;
@@ -200,6 +213,139 @@ ${formatInstructions}`;
       // Return fallback recommendation
       return this.getFallbackRecommendation(task, userPreferences);
     }
+  }
+
+  /**
+   * Create system prompt for priority evaluation (when importance=false and urgency=false)
+   */
+  private createPriorityEvaluationSystemPrompt(): string {
+    const priorityParser = StructuredOutputParser.fromZodSchema(TaskRecommendationWithPrioritySchema as any);
+    const formatInstructions = priorityParser.getFormatInstructions();
+    
+    return `You are an AI productivity expert specializing in task categorization and priority evaluation. 
+
+The task has been marked as NOT IMPORTANT and NOT URGENT. Your job is to evaluate whether this classification is correct based on the task's actual nature, context, and requirements.
+
+EISENHOWER MATRIX EVALUATION:
+- Quadrant I (Urgent + Important): Critical tasks requiring immediate attention
+- Quadrant II (Important + Not Urgent): Important tasks for long-term goals, should be prioritized
+- Quadrant III (Urgent + Not Important): Tasks that seem urgent but don't contribute to goals, should be minimized
+- Quadrant IV (Not Urgent + Not Important): Tasks that should be eliminated or delegated
+
+EVALUATION CRITERIA FOR IMPORTANCE:
+- Does this task contribute to long-term goals or objectives?
+- Is it related to strategic planning, skill development, or high-value work?
+- Does it impact key projects, OKRs, or objectives?
+- Is it part of critical work that affects business/personal outcomes?
+
+EVALUATION CRITERIA FOR URGENCY:
+- Is there a deadline or time constraint?
+- Does it require immediate action to prevent negative consequences?
+- Is it blocking other important work?
+- Are there external dependencies requiring quick response?
+
+PRIORITY DETERMINATION:
+- HIGH: Important tasks (Quadrant I or II) that are critical or high-value
+- MEDIUM: Important but not urgent tasks (Quadrant II) or moderately urgent tasks
+- LOW: Not important tasks (Quadrant III or IV) that can be deferred or eliminated
+
+WORK CATEGORY CLASSIFICATION (use the same rulebook as standard recommendations):
+1. DEEP WORK: Complex, cognitively demanding tasks requiring sustained focus
+2. CREATIVE WORK: Tasks involving ideation, imagination, and original content creation
+3. REFLECTIVE WORK: Strategic thinking, learning, and analytical tasks
+4. EXECUTIVE WORK: Reactive, fast-paced tasks, routine operations
+
+IMPORTANT: If the task is actually important or urgent based on its content, context, and relationship to goals/objectives, you MUST update the importance and/or urgency flags accordingly. Do not simply accept the initial "not important, not urgent" classification if the task warrants different treatment.
+
+RESPONSE FORMAT:
+${formatInstructions}`;
+  }
+
+  /**
+   * Generate AI recommendation with priority evaluation for tasks marked as not important and not urgent
+   */
+  async generateTaskRecommendationWithPriority(
+    task: TaskAnalysis,
+    userPreferences: UserWorkPreferences,
+    userId: number
+  ): Promise<TaskRecommendationWithPriority> {
+    try {
+      // Get user's historical task patterns for better recommendations
+      const userTaskHistory = await this.getUserTaskHistory(userId);
+      
+      // Create priority evaluation parser
+      const priorityParser = StructuredOutputParser.fromZodSchema(TaskRecommendationWithPrioritySchema as any);
+      const prioritySystemPrompt = this.createPriorityEvaluationSystemPrompt();
+      
+      // Create compressed user prompt
+      const userPrompt = this.createCompressedUserPrompt(task, userPreferences, userTaskHistory);
+      
+      // Add special instruction for priority evaluation
+      const priorityEvaluationPrompt = `${userPrompt}\n\nEVALUATION REQUEST: This task was marked as NOT IMPORTANT and NOT URGENT. Please evaluate whether this classification is correct based on the task's actual nature, context, and relationship to goals/objectives. Update importance, urgency, and priority accordingly.`;
+      
+      // Create messages array with priority evaluation system prompt and user prompt
+      const messages = [
+        { role: "system" as const, content: prioritySystemPrompt },
+        { role: "user" as const, content: priorityEvaluationPrompt }
+      ];
+      
+      // Get AI recommendation
+      const response = await this.llm.invoke(messages);
+      
+      // Parse the structured response
+      const recommendation = await priorityParser.parse(response.content as string);
+      
+      // Validate and adjust recommendation based on user preferences
+      const validatedRecommendation = this.validateRecommendationWithPriority(recommendation, userPreferences);
+      
+      return validatedRecommendation;
+    } catch (error) {
+      console.error("Error generating AI recommendation with priority:", error);
+      // Return fallback recommendation
+      return this.getFallbackRecommendationWithPriority(task, userPreferences);
+    }
+  }
+
+  /**
+   * Validate and adjust recommendation with priority based on user preferences
+   */
+  private validateRecommendationWithPriority(
+    recommendation: TaskRecommendationWithPriority,
+    userPreferences: UserWorkPreferences
+  ): TaskRecommendationWithPriority {
+    // Ensure recommended time is within the category's time window
+    const categoryTimeSlots = this.getCategoryTimeSlots(userPreferences);
+    const categorySlot = categoryTimeSlots[recommendation.category as keyof typeof categoryTimeSlots];
+    
+    if (categorySlot) {
+      // If recommended time is outside the category window, adjust it
+      if (recommendation.recommendedTime < categorySlot.start || 
+          recommendation.recommendedTime > categorySlot.end) {
+        recommendation.recommendedTime = categorySlot.start;
+        recommendation.reasoning += " (Adjusted to fit category time window)";
+      }
+    }
+
+    return recommendation;
+  }
+
+  /**
+   * Get fallback recommendation with priority when AI fails
+   */
+  private getFallbackRecommendationWithPriority(
+    task: TaskAnalysis,
+    userPreferences: UserWorkPreferences
+  ): TaskRecommendationWithPriority {
+    // Use the standard fallback recommendation
+    const standardFallback = this.getFallbackRecommendation(task, userPreferences);
+    
+    // Default to not important and not urgent if we can't determine
+    return {
+      ...standardFallback,
+      importance: false,
+      urgency: false,
+      priority: "low" as const
+    };
   }
 
   /**

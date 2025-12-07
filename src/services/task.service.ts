@@ -30,80 +30,26 @@ export class TaskService {
    */
   async createBulkTasks(bulkData: BulkTaskRequest, userId: number): Promise<BulkTaskResponse> {
     try {
-      // Get user work preferences for AI recommendations
-      const userPreferences = await aiRecommendationService.getUserWorkPreferences(userId);
-      
-      // Process each task with AI classification
-      const processedTasks = await Promise.all(
-        bulkData.tasks.map(async (taskItem, index) => {
-          // Generate AI recommendation for each task
-          const taskAnalysis = {
-            title: taskItem.title,
-            description: "",
-            duration: taskItem.duration,
-            importance: false, // Will be determined by AI
-            urgency: false,    // Will be determined by AI
-            dueDate: new Date(taskItem.dueDate),
-            projectName: "",
-            objectiveName: "",
-            objectiveDescription: "",
-            okrTitle: "",
-            okrDescription: ""
-          };
+      // Process each task item to prepare task data (without AI recommendations yet)
+      const processedTasks = bulkData.tasks.map((taskItem, index) => {
+        const taskData: CreateTaskRequest = {
+          title: taskItem.title,
+          category: taskItem.category, // Use provided category initially, will be updated by AI
+          duration: Math.max(taskItem.duration, 15), // Minimum 15 minutes
+          priority: taskItem.priority,
+          position: index,
+          importance: false,
+          urgency: false,
+          dueDate: new Date(taskItem.dueDate),
+          ...(bulkData.projectId && { projectId: bulkData.projectId }),
+          ...(bulkData.objectiveId && { objectiveId: bulkData.objectiveId }),
+          ...(bulkData.okrId && { okrId: bulkData.okrId })
+        };
 
-          const aiRecommendation = await aiRecommendationService.generateTaskRecommendation(
-            taskAnalysis,
-            userPreferences,
-            userId
-          );
+        return taskData;
+      });
 
-          // Determine priority based on AI analysis and original priority
-          let finalPriority = taskItem.priority;
-          let importance = false;
-          let urgency = false;
-
-          // AI-based priority determination
-          if (aiRecommendation.confidence > 0.7) {
-            // High confidence AI recommendation
-            if (aiRecommendation.category === WorkCategory.DEEP_WORK) {
-              finalPriority = "high";
-              importance = true;
-              urgency = false;
-            } else if (aiRecommendation.category === WorkCategory.EXECUTIVE_WORK) {
-              finalPriority = taskItem.priority === "high" ? "high" : "medium";
-              urgency = true;
-              importance = taskItem.priority === "high";
-            } else if (aiRecommendation.category === WorkCategory.CREATIVE_WORK) {
-              finalPriority = "medium";
-              importance = true;
-              urgency = false;
-            } else if (aiRecommendation.category === WorkCategory.REFLECTIVE_WORK) {
-              finalPriority = "medium";
-              importance = true;
-              urgency = false;
-            }
-          }
-
-          // Create task data
-          const taskData: CreateTaskRequest = {
-            title: taskItem.title,
-            category: taskItem.category || this.mapAICategoryToTaskCategory(aiRecommendation.category),
-            duration: Math.max(taskItem.duration, 15), // Minimum 15 minutes
-            priority: finalPriority,
-            position: index,
-            importance,
-            urgency,
-            dueDate: new Date(taskItem.dueDate),
-            ...(bulkData.projectId && { projectId: bulkData.projectId }),
-            ...(bulkData.objectiveId && { objectiveId: bulkData.objectiveId }),
-            ...(bulkData.okrId && { okrId: bulkData.okrId })
-          };
-
-          return taskData;
-        })
-      );
-
-      // Create all tasks in a transaction
+      // Create all tasks in a transaction (same as single task creation)
       const createdTasks = await prisma.$transaction(
         processedTasks.map(taskData => 
           prisma.task.create({
@@ -161,12 +107,162 @@ export class TaskService {
         )
       );
 
-      // Generate AI recommendations asynchronously for all created tasks
-      createdTasks.forEach((task, index) => {
-        this.generateAIRecommendationAsync(task.id, userId).catch((error: any) => {
-          console.error(`Error generating AI recommendation for bulk task ${task.id}:`, error);
-        });
-      });
+      // Get user work preferences for AI recommendations (same as single task)
+      const userPreferences = await aiRecommendationService.getUserWorkPreferences(userId);
+
+      // For each created task, generate AI recommendation and update category (same flow as single task)
+      await Promise.all(
+        createdTasks.map(async (task) => {
+          try {
+            // Generate AI recommendation using full task data (same as single task creation)
+            const taskAnalysis = {
+              title: task.title,
+              description: task.description || "",
+              duration: task.duration,
+              importance: task.importance,
+              urgency: task.urgency,
+              dueDate: (task as any).dueDate,
+              projectName: (task as any).project?.name || "",
+              objectiveName: (task as any).objective?.name || "",
+              objectiveDescription: (task as any).objective?.description || "",
+              okrTitle: (task as any).okr?.title || "",
+              okrDescription: (task as any).okr?.description || ""
+            };
+
+            // Check if task is marked as not important and not urgent - use priority evaluation
+            // Only evaluate when both are explicitly false (not undefined)
+            const needsPriorityEvaluation = task.importance === false && task.urgency === false;
+
+            let recommendation: any;
+            let mappedCategory: string;
+            let updateData: any = {};
+
+            if (needsPriorityEvaluation) {
+              // Use priority evaluation method for tasks marked as not important and not urgent
+              const recommendationWithPriority = await aiRecommendationService.generateTaskRecommendationWithPriority(
+                taskAnalysis,
+                userPreferences,
+                userId
+              );
+
+              recommendation = recommendationWithPriority;
+              mappedCategory = this.mapAICategoryToTaskCategory(recommendation.category);
+
+              // Update importance, urgency, priority, and category based on AI recommendation
+              updateData = {
+                category: mappedCategory,
+                importance: recommendationWithPriority.importance,
+                urgency: recommendationWithPriority.urgency,
+                priority: recommendationWithPriority.priority
+              };
+            } else {
+              // Use standard recommendation method
+              recommendation = await aiRecommendationService.generateTaskRecommendation(
+                taskAnalysis,
+                userPreferences,
+                userId
+              );
+
+              mappedCategory = this.mapAICategoryToTaskCategory(recommendation.category);
+
+              // Update only category for standard recommendation
+              updateData = {
+                category: mappedCategory
+              };
+            }
+
+            // Update the task with AI recommendations
+            await prisma.task.update({
+              where: { id: task.id },
+              data: updateData
+            });
+
+            // Create AI recommendation record (same as single task)
+            await (prisma as any).aIRecommendation.upsert({
+              where: {
+                taskId: task.id
+              },
+              update: {
+                category: recommendation.category,
+                recommendedTime: recommendation.recommendedTime,
+                confidence: recommendation.confidence,
+                reasoning: recommendation.reasoning
+              },
+              create: {
+                taskId: task.id,
+                category: recommendation.category,
+                recommendedTime: recommendation.recommendedTime,
+                confidence: recommendation.confidence,
+                reasoning: recommendation.reasoning
+              }
+            });
+
+            if (needsPriorityEvaluation) {
+              console.log(`AI recommendation with priority evaluation for bulk task ${task.id}: ${recommendation.category} -> ${mappedCategory}, importance=${recommendation.importance}, urgency=${recommendation.urgency}, priority=${recommendation.priority} at ${recommendation.recommendedTime}`);
+            } else {
+              console.log(`AI recommendation generated for bulk task ${task.id}: ${recommendation.category} -> ${mappedCategory} at ${recommendation.recommendedTime}`);
+            }
+          } catch (error) {
+            console.error(`Error generating AI recommendation for bulk task ${task.id}:`, error);
+            // Continue with other tasks even if one fails
+          }
+        })
+      );
+
+      // Fetch updated tasks with correct categories (same as single task)
+      const updatedTasks = await Promise.all(
+        createdTasks.map(task =>
+          prisma.task.findUnique({
+            where: { id: task.id },
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  name: true,
+                  email: true,
+                },
+              },
+              project: {
+                select: {
+                  id: true,
+                  name: true,
+                },
+              },
+              objective: {
+                select: {
+                  id: true,
+                  name: true,
+                },
+              },
+              okr: {
+                select: {
+                  id: true,
+                  title: true,
+                },
+              },
+              plan: {
+                select: {
+                  id: true,
+                  name: true,
+                  status: true,
+                  project: {
+                    select: {
+                      id: true,
+                      name: true,
+                    },
+                  },
+                  objective: {
+                    select: {
+                      id: true,
+                      name: true,
+                    },
+                  },
+                },
+              },
+            },
+          })
+        )
+      );
 
       // Increment task count for each created task
       for (let i = 0; i < createdTasks.length; i++) {
@@ -176,8 +272,8 @@ export class TaskService {
       }
 
       return {
-        tasks: createdTasks as TaskResponse[],
-        message: `Successfully created and categorized ${createdTasks.length} tasks using intelligent priority analysis.`
+        tasks: updatedTasks as TaskResponse[],
+        message: `Successfully created and categorized ${updatedTasks.length} tasks using intelligent priority analysis.`
       };
     } catch (error: any) {
       console.error("Error creating bulk tasks:", error);
