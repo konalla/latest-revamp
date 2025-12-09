@@ -203,7 +203,7 @@ export interface BulkTaskItem {
   category: string;
   duration: number;
   priority: string;
-  dueDate: string;
+  dueDate?: string; // Optional, will be ignored - dueDate is derived from OKR/Objective endDate
 }
 
 export interface BulkTaskRequest {
@@ -216,4 +216,33 @@ export interface BulkTaskRequest {
 export interface BulkTaskResponse {
   tasks: TaskResponse[];
   message: string;
+}
+
+// Batch update types
+export interface BatchUpdateTaskItem {
+  id: number;
+  title?: string;
+  description?: string;
+  category?: string;
+  duration?: number;
+  priority?: string;
+  position?: number;
+  completed?: boolean;
+  importance?: boolean;
+  urgency?: boolean;
+  dueDate?: Date;
+  projectId?: number;
+  objectiveId?: number;
+  okrId?: number;
+  planId?: number;
+}
+
+export interface BatchUpdateTaskRequest {
+  tasks: BatchUpdateTaskItem[];
+}
+
+export interface BatchUpdateTaskResponse {
+  success: boolean;
+  updated: number;
+  tasks: TaskResponse[];
 }

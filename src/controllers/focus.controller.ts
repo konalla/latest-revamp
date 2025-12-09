@@ -45,6 +45,27 @@ export const getFocusPlan = async (req: Request, res: Response) => {
   }
 };
 
+export const getFocusSessionsWithInsights = async (req: Request, res: Response) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const sessions = await focusSessionService.getAllSessionsWithInsights(userId);
+    
+    return res.json({
+      sessions
+    });
+  } catch (error) {
+    console.error("Error getting focus sessions with insights:", error);
+    return res.status(500).json({ 
+      message: "Failed to get focus sessions",
+      error: error instanceof Error ? error.message : "Unknown error"
+    });
+  }
+};
+
 export const getFocusPatterns = async (req: Request, res: Response) => {
   try {
     console.log("GET /api/focus/patterns - Fetching focus patterns");

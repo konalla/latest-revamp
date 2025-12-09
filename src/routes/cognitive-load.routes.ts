@@ -32,6 +32,9 @@ router.get('/health', cognitiveLoadController.healthCheck.bind(cognitiveLoadCont
 router.get('/meter', conditionalAuth, cognitiveLoadController.getCognitiveLoadMeter.bind(cognitiveLoadController));
 router.put('/meter', conditionalAuth, cognitiveLoadController.updateCognitiveLoadMeter.bind(cognitiveLoadController));
 
+// Pre-session coaching endpoint
+router.get('/pre-session-coaching', conditionalAuth, cognitiveLoadController.getPreSessionCoaching.bind(cognitiveLoadController));
+
 // Workload Forecast endpoint
 router.get('/forecast', conditionalAuth, cognitiveLoadController.generateWorkloadForecast.bind(cognitiveLoadController));
 

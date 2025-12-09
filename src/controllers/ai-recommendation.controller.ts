@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import { aiRecommendationService } from "../services/ai-recommendation.service.js";
 import { taskService } from "../services/task.service.js";
+import { taskPriorityService } from "../services/task-priority.service.js";
 import prisma from "../config/prisma.js";
 import type { 
   AIRecommendationRequest, 
@@ -525,34 +526,24 @@ const getNowRecommendedTask = async (req: Request, res: Response) => {
 };
 
 /**
- * Calculate task priority score for ranking
- * Higher score = higher priority
+ * Calculate task priority score for ranking using new priority service
+ * @deprecated This function is kept for backward compatibility but now uses TaskPriorityService
  */
-const calculateTaskPriorityScore = (task: any): number => {
-  // Priority value: high=3, medium=2, low=1
-  const priorityValue = task.priority === 'high' ? 3 : task.priority === 'medium' ? 2 : 1;
-  
-  // Urgency: true=2, false=0
-  const urgencyValue = task.urgency ? 2 : 0;
-  
-  // Importance: true=1, false=0
-  const importanceValue = task.importance ? 1 : 0;
-  
-  // AI recommendation confidence (0-1, normalized to 0-0.5)
-  const confidenceValue = task.aiRecommendation?.confidence ? task.aiRecommendation.confidence * 0.5 : 0;
-  
-  // Due date urgency: earlier due dates get higher score
-  // For past tasks, more overdue = higher priority
-  let dueDateValue = 0;
-  if (task.dueDate) {
-    const now = new Date();
-    const dueDate = new Date(task.dueDate);
-    const daysOverdue = Math.floor((now.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24));
-    // Cap at 30 days for scoring (older tasks don't get infinitely higher scores)
-    dueDateValue = Math.min(daysOverdue / 30, 1) * 0.5;
+const calculateTaskPriorityScore = async (task: any, userId: number): Promise<number> => {
+  try {
+    const priorityScore = await taskPriorityService.calculatePriorityScore(
+      task,
+      userId
+    );
+    return priorityScore.totalScore;
+  } catch (error) {
+    console.error("Error calculating priority score:", error);
+    // Fallback to simple calculation if service fails
+    const priorityValue = task.priority === 'high' ? 3 : task.priority === 'medium' ? 2 : 1;
+    const urgencyValue = task.urgency ? 2 : 0;
+    const importanceValue = task.importance ? 1 : 0;
+    return priorityValue + urgencyValue + importanceValue;
   }
-  
-  return priorityValue + urgencyValue + importanceValue + confidenceValue + dueDateValue;
 };
 
 /**
@@ -572,7 +563,7 @@ const getPastTasksWithAIRecommendations = async (req: Request, res: Response) =>
     const currentTime = new Date();
     const todayStart = new Date(currentTime.toLocaleDateString('en-CA', { timeZone: timezone }));
 
-    // Get all past tasks (due date before today) with AI recommendations
+    // Get all past tasks (due date before today) with AI recommendations and OKR data
     const tasks = await prisma.task.findMany({
       where: {
         userId: req.user.userId,
@@ -586,34 +577,55 @@ const getPastTasksWithAIRecommendations = async (req: Request, res: Response) =>
       },
       include: {
         aiRecommendation: true,
+        okr: {
+          select: {
+            id: true,
+            currentValue: true,
+            targetValue: true,
+            endDate: true,
+            confidenceScore: true
+          }
+        },
         project: {
           select: { id: true, name: true }
         }
       } as any
     });
 
-    // Calculate priority score for each task and sort
-    const tasksWithScores = tasks.map(task => ({
-      task,
-      score: calculateTaskPriorityScore(task)
+    // Get user work preferences for work mode alignment
+    const userPreferences = await aiRecommendationService.getUserWorkPreferences(req.user.userId);
+
+    // Prepare tasks for ranking
+    const tasksForRanking = tasks.map(task => ({
+      id: task.id,
+      priority: task.priority,
+      importance: task.importance,
+      urgency: task.urgency,
+      dueDate: (task as any).dueDate || null,
+      okrId: (task as any).okrId || null,
+      okr: (task as any).okr || null,
+      aiRecommendation: (task as any).aiRecommendation ? {
+        category: (task as any).aiRecommendation.category,
+        confidence: (task as any).aiRecommendation.confidence,
+        recommendedTime: (task as any).aiRecommendation.recommendedTime
+      } : null,
+      duration: task.duration,
+      category: task.category
     }));
 
-    // Sort by score (descending) and then by due date (ascending for tie-breaking)
-    tasksWithScores.sort((a, b) => {
-      if (b.score !== a.score) {
-        return b.score - a.score; // Higher score first
-      }
-      // If scores are equal, prioritize earlier due dates
-      if (a.task.dueDate && b.task.dueDate) {
-        return new Date(a.task.dueDate).getTime() - new Date(b.task.dueDate).getTime();
-      }
-      if (a.task.dueDate && !b.task.dueDate) return -1;
-      if (!a.task.dueDate && b.task.dueDate) return 1;
-      return 0;
-    });
+    // Rank tasks using new priority service
+    const rankedTasks = await taskPriorityService.rankTasksByPriority(
+      tasksForRanking,
+      req.user.userId,
+      currentTime,
+      userPreferences
+    );
 
     // Get only top 3 tasks
-    const top3Tasks = tasksWithScores.slice(0, 3).map(item => item.task);
+    const top3Tasks = rankedTasks.slice(0, 3).map(item => {
+      const originalTask = tasks.find(t => t.id === item.id)!;
+      return originalTask;
+    });
 
     res.json({
       message: "Past tasks with AI recommendations retrieved successfully",

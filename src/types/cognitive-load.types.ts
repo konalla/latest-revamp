@@ -33,11 +33,17 @@ export interface CognitiveLoadMeterResponse {
   currentStatus: WorkloadCapacityStatus;
   createdAt: string;
   updatedAt: string;
+  // Extended fields for session-based workload system
+  workloadZone?: "BASELINE" | "BUILDING" | "SUSTAINABLE" | "OPTIMAL" | "OVERLOAD";
+  coachingMessage?: string;
+  sessionsToday?: number;
+  deepEquivalentHours?: number;
 }
 
 export interface WorkloadHistoryEntry {
   date: string;
   workload: number;
+  hour?: number; // For hourly tracking
 }
 
 export interface CapacityUtilizationEntry {

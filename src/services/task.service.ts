@@ -1,9 +1,10 @@
 import prisma from "../config/prisma.js";
-import type { CreateTaskRequest, UpdateTaskRequest, TaskQueryParams, TaskResponse, TaskListResponse, TodayTasksResponse, TodayTaskResponse, BulkTaskRequest, BulkTaskResponse, BulkTaskItem } from "../types/task.types.js";
+import type { CreateTaskRequest, UpdateTaskRequest, TaskQueryParams, TaskResponse, TaskListResponse, TodayTasksResponse, TodayTaskResponse, BulkTaskRequest, BulkTaskResponse, BulkTaskItem, BatchUpdateTaskRequest, BatchUpdateTaskResponse } from "../types/task.types.js";
 import { aiRecommendationService } from "./ai-recommendation.service.js";
 import { WorkCategory } from "./ai-recommendation.service.js";
 import { CognitiveLoadService } from "./cognitive-load.service.js";
 import { subscriptionService } from "./subscription.service.js";
+import { taskPriorityService } from "./task-priority.service.js";
 
 export class TaskService {
   private cognitiveLoadService: CognitiveLoadService;
@@ -30,7 +31,33 @@ export class TaskService {
    */
   async createBulkTasks(bulkData: BulkTaskRequest, userId: number): Promise<BulkTaskResponse> {
     try {
+      // Determine dueDate from OKR/Objective endDate (fetch once at the start)
+      let dueDate: Date | undefined = undefined;
+
+      // Priority: OKR endDate > Objective endDate > null
+      if (bulkData.okrId) {
+        const okr = await prisma.okr.findUnique({
+          where: { id: bulkData.okrId },
+          select: { endDate: true }
+        });
+        if (okr?.endDate) {
+          dueDate = okr.endDate;
+        }
+      }
+
+      // If OKR has no endDate, check Objective
+      if (!dueDate && bulkData.objectiveId) {
+        const objective = await prisma.objective.findUnique({
+          where: { id: bulkData.objectiveId },
+          select: { end_date: true }
+        });
+        if (objective?.end_date) {
+          dueDate = objective.end_date;
+        }
+      }
+
       // Process each task item to prepare task data (without AI recommendations yet)
+      // Ignore any dueDate from taskItem - use the determined dueDate from OKR/Objective
       const processedTasks = bulkData.tasks.map((taskItem, index) => {
         const taskData: CreateTaskRequest = {
           title: taskItem.title,
@@ -40,7 +67,7 @@ export class TaskService {
           position: index,
           importance: false,
           urgency: false,
-          dueDate: new Date(taskItem.dueDate),
+          ...(dueDate && { dueDate }), // Only include dueDate if we have one from OKR/Objective
           ...(bulkData.projectId && { projectId: bulkData.projectId }),
           ...(bulkData.objectiveId && { objectiveId: bulkData.objectiveId }),
           ...(bulkData.okrId && { okrId: bulkData.okrId })
@@ -546,6 +573,94 @@ export class TaskService {
   }
 
   /**
+   * Get all tasks without pagination
+   */
+  async getAllTasksWithoutPagination(
+    userId: number, 
+    filters: any = {}, 
+    sortBy: string = 'createdAt', 
+    sortOrder: 'asc' | 'desc' = 'desc'
+  ): Promise<TaskResponse[]> {
+    const where: any = {
+      userId,
+      ...filters,
+    };
+
+    const tasks = await prisma.task.findMany({
+      where,
+      orderBy: { [sortBy]: sortOrder },
+      include: {
+        aiRecommendation: true,
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+        project: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        objective: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        okr: {
+          select: {
+            id: true,
+            title: true,
+          },
+        },
+        plan: {
+          select: {
+            id: true,
+            name: true,
+            status: true,
+            project: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+            objective: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    return tasks.map(task => ({
+      id: task.id,
+      title: task.title,
+      description: task.description,
+      category: task.category,
+      duration: task.duration,
+      priority: task.priority,
+      position: task.position,
+      completed: task.completed,
+      dueDate: task.dueDate,
+      importance: task.importance,
+      urgency: task.urgency,
+      createdAt: task.createdAt,
+      user: task.user,
+      project: task.project,
+      objective: task.objective,
+      okr: task.okr,
+      plan: task.plan,
+      aiRecommendation: task.aiRecommendation,
+    }));
+  }
+
+  /**
    * Get tasks by user with AI recommendations
    */
   async getTasksByUser(userId: number, queryParams: TaskQueryParams): Promise<TaskListResponse> {
@@ -816,6 +931,144 @@ export class TaskService {
   }
 
   /**
+   * Batch update multiple tasks
+   */
+  async batchUpdateTasks(batchData: BatchUpdateTaskRequest, userId: number): Promise<BatchUpdateTaskResponse> {
+    try {
+      if (!batchData.tasks || !Array.isArray(batchData.tasks) || batchData.tasks.length === 0) {
+        throw new Error("Tasks array is required and must not be empty");
+      }
+
+      // Validate all task IDs are provided
+      for (let i = 0; i < batchData.tasks.length; i++) {
+        const task = batchData.tasks[i];
+        if (!task.id || typeof task.id !== 'number') {
+          throw new Error(`Task ${i + 1} is missing required field: id`);
+        }
+      }
+
+      // Get all task IDs to verify they exist and belong to the user
+      const taskIds = batchData.tasks.map(t => t.id);
+      const existingTasks = await prisma.task.findMany({
+        where: {
+          id: { in: taskIds },
+          userId,
+        },
+        select: { id: true },
+      });
+
+      const existingTaskIds = new Set(existingTasks.map(t => t.id));
+      const missingTaskIds = taskIds.filter(id => !existingTaskIds.has(id));
+
+      if (missingTaskIds.length > 0) {
+        throw new Error(`Tasks not found or access denied: ${missingTaskIds.join(', ')}`);
+      }
+
+      // Update all tasks in parallel
+      const updatePromises = batchData.tasks.map(async (taskUpdate) => {
+        const { id, ...updateData } = taskUpdate;
+        
+        // Sanitize update data (similar to updateTask)
+        const sanitizedData: UpdateTaskRequest = { ...updateData };
+        
+        // Convert dueDate from date-only string to proper DateTime format if needed
+        if (sanitizedData.dueDate && typeof sanitizedData.dueDate === 'string') {
+          const dateOnlyRegex = /^\d{4}-\d{2}-\d{2}$/;
+          if (dateOnlyRegex.test(sanitizedData.dueDate)) {
+            sanitizedData.dueDate = new Date(sanitizedData.dueDate + 'T23:59:59.999Z');
+          } else {
+            const parsedDate = new Date(sanitizedData.dueDate);
+            if (isNaN(parsedDate.getTime())) {
+              delete sanitizedData.dueDate;
+            } else {
+              sanitizedData.dueDate = parsedDate;
+            }
+          }
+        }
+
+        return prisma.task.update({
+          where: { id },
+          data: sanitizedData,
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+              },
+            },
+            project: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+            objective: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+            okr: {
+              select: {
+                id: true,
+                title: true,
+              },
+            },
+            plan: {
+              select: {
+                id: true,
+                name: true,
+                status: true,
+                project: {
+                  select: {
+                    id: true,
+                    name: true,
+                  },
+                },
+                objective: {
+                  select: {
+                    id: true,
+                    name: true,
+                  },
+                },
+              },
+            },
+          },
+        });
+      });
+
+      const updatedTasks = await Promise.all(updatePromises);
+
+      // Regenerate AI recommendations asynchronously for tasks that had relevant changes
+      updatedTasks.forEach((task, index) => {
+        const taskUpdate = batchData.tasks[index];
+        if (taskUpdate && (
+          taskUpdate.title || 
+          taskUpdate.description || 
+          taskUpdate.duration || 
+          taskUpdate.importance !== undefined || 
+          taskUpdate.urgency !== undefined ||
+          taskUpdate.dueDate !== undefined
+        )) {
+          this.generateAIRecommendationAsync(task.id, userId).catch((error: any) => {
+            console.error(`Error regenerating AI recommendation for batch updated task ${task.id}:`, error);
+          });
+        }
+      });
+
+      return {
+        success: true,
+        updated: updatedTasks.length,
+        tasks: updatedTasks as TaskResponse[],
+      };
+    } catch (error: any) {
+      console.error("Error in batchUpdateTasks:", error);
+      throw new Error(error.message || "Failed to batch update tasks");
+    }
+  }
+
+  /**
    * Delete a task
    */
   async deleteTask(taskId: number, userId: number): Promise<boolean> {
@@ -1021,7 +1274,7 @@ export class TaskService {
       const todayEnd = new Date(todayStart);
       todayEnd.setDate(todayEnd.getDate() + 1);
 
-      // Get tasks due today
+      // Get tasks due today with all necessary relations for priority calculation
       const tasks = await prisma.task.findMany({
         where: {
           userId,
@@ -1032,13 +1285,17 @@ export class TaskService {
           completed: false
         },
         include: {
-          aiRecommendation: true
-        },
-        orderBy: [
-          { urgency: 'desc' },
-          { importance: 'desc' },
-          { dueDate: 'asc' }
-        ]
+          aiRecommendation: true,
+          okr: {
+            select: {
+              id: true,
+              currentValue: true,
+              targetValue: true,
+              endDate: true,
+              confidenceScore: true
+            }
+          }
+        }
       } as any);
 
       let generatedRecommendations = 0;
@@ -1093,11 +1350,45 @@ export class TaskService {
         })
       );
 
-      // Rank tasks by priority: urgency + importance, then AI recommended time, then due time
-      const rankedTasks = this.rankTasksByPriority(processedTasks as TodayTaskResponse[]);
+      // Get user work preferences for work mode alignment
+      const userPreferences = await aiRecommendationService.getUserWorkPreferences(userId);
+      
+      // Rank tasks using new priority service
+      const tasksForRanking = tasks.map(task => {
+        const processedTask = processedTasks.find(pt => pt.id === task.id);
+        return {
+          id: task.id,
+          priority: task.priority,
+          importance: task.importance,
+          urgency: task.urgency,
+          dueDate: (task as any).dueDate || null,
+          okrId: (task as any).okrId || null,
+          okr: (task as any).okr || null,
+          aiRecommendation: (task as any).aiRecommendation ? {
+            category: (task as any).aiRecommendation.category,
+            confidence: (task as any).aiRecommendation.confidence,
+            recommendedTime: (task as any).aiRecommendation.recommendedTime
+          } : null,
+          duration: task.duration,
+          category: task.category
+        };
+      });
 
-      // Return only top 3 tasks
-      const top3Tasks = rankedTasks.slice(0, 3);
+      const rankedTasksWithScores = await taskPriorityService.rankTasksByPriority(
+        tasksForRanking,
+        userId,
+        new Date(),
+        userPreferences
+      );
+
+      // Map back to TodayTaskResponse format and return top 3
+      const top3Tasks = rankedTasksWithScores.slice(0, 3).map(item => {
+        const originalTask = processedTasks.find(t => t.id === item.id)!;
+        return {
+          ...originalTask,
+          rank: item.rank
+        };
+      });
 
       return {
         tasks: top3Tasks,
@@ -1112,71 +1403,18 @@ export class TaskService {
   }
 
   /**
-   * Rank tasks by priority: priority field, urgency, importance, due date, AI confidence
+   * Rank tasks by priority using the new priority service
+   * This method is kept for backward compatibility but now uses TaskPriorityService
+   * @deprecated Use taskPriorityService.rankTasksByPriority directly
    */
-  private rankTasksByPriority(tasks: TodayTaskResponse[]): TodayTaskResponse[] {
-    // Helper to get priority numeric value
-    const getPriorityValue = (priority: string): number => {
-      switch (priority?.toLowerCase()) {
-        case 'high': return 3;
-        case 'medium': return 2;
-        case 'low': return 1;
-        default: return 1;
-      }
-    };
-
-    return tasks.sort((a, b) => {
-      // First: Priority field (high > medium > low)
-      const aPriorityValue = getPriorityValue(a.priority);
-      const bPriorityValue = getPriorityValue(b.priority);
-      if (aPriorityValue !== bPriorityValue) {
-        return bPriorityValue - aPriorityValue; // Higher priority first
-      }
-
-      // Second: Urgency
-      if (a.urgency !== b.urgency) {
-        return b.urgency ? 1 : -1; // Urgent tasks first
-      }
-
-      // Third: Importance
-      if (a.importance !== b.importance) {
-        return b.importance ? 1 : -1; // Important tasks first
-      }
-
-      // Fourth: AI recommendation confidence (if available)
-      if (a.aiRecommendation && b.aiRecommendation) {
-        const aConfidence = a.aiRecommendation.confidence || 0;
-        const bConfidence = b.aiRecommendation.confidence || 0;
-        if (aConfidence !== bConfidence) {
-          return bConfidence - aConfidence; // Higher confidence first
-        }
-      } else if (a.aiRecommendation && !b.aiRecommendation) {
-        return -1; // Tasks with AI recommendations come first
-      } else if (!a.aiRecommendation && b.aiRecommendation) {
-        return 1;
-      }
-
-      // Fifth: AI recommended time (if available and confidence is same)
-      if (a.aiRecommendation && b.aiRecommendation) {
-        const aTime = this.parseTimeToMinutes(a.aiRecommendation.recommendedTime);
-        const bTime = this.parseTimeToMinutes(b.aiRecommendation.recommendedTime);
-        if (aTime !== bTime) {
-          return aTime - bTime; // Earlier time first
-        }
-      }
-
-      // Sixth: Due time (earlier due dates first)
-      if (a.dueDate && b.dueDate) {
-        return a.dueDate.getTime() - b.dueDate.getTime();
-      }
-      if (a.dueDate && !b.dueDate) return -1;
-      if (!a.dueDate && b.dueDate) return 1;
-
-      return 0;
-    }).map((task, index) => ({
-      ...task,
-      rank: index + 1
-    }));
+  private async rankTasksByPriorityNew(
+    tasks: TodayTaskResponse[],
+    userId: number,
+    userPreferences?: any
+  ): Promise<TodayTaskResponse[]> {
+    // This method is no longer used - priority ranking is done in getTodayTasksWithAIRecommendations
+    // Keeping for reference but should be removed in future cleanup
+    return tasks;
   }
 
   /**
@@ -1275,13 +1513,17 @@ export class TaskService {
           }
         },
         include: {
-          aiRecommendation: true
-        },
-        orderBy: [
-          { urgency: 'desc' },
-          { importance: 'desc' },
-          { dueDate: 'asc' }
-        ]
+          aiRecommendation: true,
+          okr: {
+            select: {
+              id: true,
+              currentValue: true,
+              targetValue: true,
+              endDate: true,
+              confidenceScore: true
+            }
+          }
+        }
       } as any);
       
       // Convert overdue tasks to TodayTaskResponse format
@@ -1337,13 +1579,16 @@ export class TaskService {
         return timeDiff <= TOLERANCE_MINUTES;
       });
 
+      // Get user work preferences for priority comparison
+      const userPreferences = await aiRecommendationService.getUserWorkPreferences(userId);
+
       // Compare overdue vs today's matching tasks
       if (overdueTasks.length > 0 && matchingTasks.length > 0) {
-        const bestOverdueTask = this.selectBestTaskForNow(overdueTasks, currentMinutes);
-        const bestTodayTask = this.selectBestTaskForNow(matchingTasks, currentMinutes);
+        const bestOverdueTask = await this.selectBestTaskForNow(overdueTasks, currentMinutes, userId, userPreferences);
+        const bestTodayTask = await this.selectBestTaskForNow(matchingTasks, currentMinutes, userId, userPreferences);
         
-        // Compare priority, importance, and urgency
-        const todayTaskWins = this.compareTaskPriority(bestTodayTask, bestOverdueTask);
+        // Compare priority, importance, and urgency using new priority service
+        const todayTaskWins = await this.compareTaskPriority(bestTodayTask, bestOverdueTask, userId, userPreferences);
         
         if (todayTaskWins) {
           return {
@@ -1365,7 +1610,7 @@ export class TaskService {
 
       // If only overdue tasks exist
       if (overdueTasks.length > 0) {
-        const prioritizedOverdueTask = this.selectBestTaskForNow(overdueTasks, currentMinutes);
+        const prioritizedOverdueTask = await this.selectBestTaskForNow(overdueTasks, currentMinutes, userId, userPreferences);
         
         return {
           task: prioritizedOverdueTask,
@@ -1377,7 +1622,7 @@ export class TaskService {
 
       // If only today's matching tasks exist
       if (matchingTasks.length > 0) {
-        const prioritizedTask = this.selectBestTaskForNow(matchingTasks, currentMinutes);
+        const prioritizedTask = await this.selectBestTaskForNow(matchingTasks, currentMinutes, userId, userPreferences);
         
         return {
           task: prioritizedTask,
@@ -1425,77 +1670,175 @@ export class TaskService {
   }
 
   /**
-   * Compare two tasks based on priority, importance, and urgency
+   * Compare two tasks based on priority using new priority service
    * Returns true if todayTask wins over overdueTask
    */
-  private compareTaskPriority(todayTask: TodayTaskResponse, overdueTask: TodayTaskResponse): boolean {
-    // Convert priority strings to numbers for comparison (high=3, medium=2, low=1)
-    const getPriorityValue = (priority: string): number => {
-      switch (priority.toLowerCase()) {
-        case 'high': return 3;
-        case 'medium': return 2;
-        case 'low': return 1;
-        default: return 1;
+  private async compareTaskPriority(
+    todayTask: TodayTaskResponse,
+    overdueTask: TodayTaskResponse,
+    userId: number,
+    userPreferences?: any
+  ): Promise<boolean> {
+    try {
+      // Prepare tasks for priority comparison
+      const todayTaskForRanking = {
+        id: todayTask.id,
+        priority: todayTask.priority,
+        importance: todayTask.importance,
+        urgency: todayTask.urgency,
+        dueDate: todayTask.dueDate || null,
+        okrId: null,
+        okr: null,
+        aiRecommendation: todayTask.aiRecommendation ? {
+          category: todayTask.aiRecommendation.category,
+          confidence: todayTask.aiRecommendation.confidence,
+          recommendedTime: todayTask.aiRecommendation.recommendedTime
+        } : null,
+        duration: todayTask.duration,
+        category: 'execution' // Default category
+      };
+
+      const overdueTaskForRanking = {
+        id: overdueTask.id,
+        priority: overdueTask.priority,
+        importance: overdueTask.importance,
+        urgency: overdueTask.urgency,
+        dueDate: overdueTask.dueDate || null,
+        okrId: null,
+        okr: null,
+        aiRecommendation: overdueTask.aiRecommendation ? {
+          category: overdueTask.aiRecommendation.category,
+          confidence: overdueTask.aiRecommendation.confidence,
+          recommendedTime: overdueTask.aiRecommendation.recommendedTime
+        } : null,
+        duration: overdueTask.duration,
+        category: 'execution' // Default category
+      };
+
+      // Calculate priority scores
+      const todayScore = await taskPriorityService.calculatePriorityScore(
+        todayTaskForRanking,
+        userId,
+        new Date(),
+        userPreferences
+      );
+
+      const overdueScore = await taskPriorityService.calculatePriorityScore(
+        overdueTaskForRanking,
+        userId,
+        new Date(),
+        userPreferences
+      );
+
+      // Today task wins if it has higher or equal priority score
+      return todayScore.totalScore >= overdueScore.totalScore;
+    } catch (error) {
+      console.error("Error comparing task priority:", error);
+      // Fallback to simple comparison
+      const getPriorityValue = (priority: string): number => {
+        switch (priority.toLowerCase()) {
+          case 'high': return 3;
+          case 'medium': return 2;
+          case 'low': return 1;
+          default: return 1;
+        }
+      };
+
+      const todayPriority = getPriorityValue(todayTask.priority);
+      const overduePriority = getPriorityValue(overdueTask.priority);
+
+      // 1. Compare priority (high > medium > low)
+      if (todayPriority > overduePriority) {
+        return true; // Today's task wins
       }
-    };
+      if (todayPriority < overduePriority) {
+        return false; // Overdue task wins
+      }
 
-    const todayPriority = getPriorityValue(todayTask.priority);
-    const overduePriority = getPriorityValue(overdueTask.priority);
+      // 2. If same priority, compare importance
+      if (todayTask.importance && !overdueTask.importance) {
+        return true; // Today's task wins
+      }
+      if (!todayTask.importance && overdueTask.importance) {
+        return false; // Overdue task wins
+      }
 
-    // 1. Compare priority (high > medium > low)
-    if (todayPriority > overduePriority) {
-      return true; // Today's task wins
-    }
-    if (todayPriority < overduePriority) {
-      return false; // Overdue task wins
-    }
+      // 3. If same priority and importance, compare urgency
+      if (todayTask.urgency && !overdueTask.urgency) {
+        return true; // Today's task wins
+      }
+      if (!todayTask.urgency && overdueTask.urgency) {
+        return false; // Overdue task wins
+      }
 
-    // 2. If same priority, compare importance
-    if (todayTask.importance && !overdueTask.importance) {
-      return true; // Today's task wins
+      // 4. If all are same (priority, importance, urgency), overdue task wins
+      return false;
     }
-    if (!todayTask.importance && overdueTask.importance) {
-      return false; // Overdue task wins
-    }
-
-    // 3. If same priority and importance, compare urgency
-    if (todayTask.urgency && !overdueTask.urgency) {
-      return true; // Today's task wins
-    }
-    if (!todayTask.urgency && overdueTask.urgency) {
-      return false; // Overdue task wins
-    }
-
-    // 4. If all are same (priority, importance, urgency), overdue task wins
-    return false;
   }
 
   /**
-   * Select best task for current moment considering urgency, importance, and duration fit
+   * Select best task for current moment using new priority service
    */
-  private selectBestTaskForNow(tasks: TodayTaskResponse[], currentMinutes: number): TodayTaskResponse {
-    // Sort by priority: urgency → importance → closest to recommended time
-    const sorted = tasks.sort((a, b) => {
-      // 1. Urgent tasks first
-      if (a.urgency !== b.urgency) {
-        return b.urgency ? 1 : -1;
-      }
-      
-      // 2. Important tasks second
-      if (a.importance !== b.importance) {
-        return b.importance ? 1 : -1;
-      }
-      
-      // 3. Closest to recommended time
-      const aDiff = Math.abs((currentMinutes) - this.parseTimeToMinutes(a.aiRecommendation!.recommendedTime));
-      const bDiff = Math.abs((currentMinutes) - this.parseTimeToMinutes(b.aiRecommendation!.recommendedTime));
-      return aDiff - bDiff;
-    });
-    
-    if (sorted.length === 0) {
+  private async selectBestTaskForNow(
+    tasks: TodayTaskResponse[],
+    currentMinutes: number,
+    userId: number,
+    userPreferences?: any
+  ): Promise<TodayTaskResponse> {
+    if (tasks.length === 0) {
       throw new Error("No tasks available for selection");
     }
-    return sorted[0]!;
+
+    try {
+      // Prepare tasks for ranking
+      const tasksForRanking = tasks.map(task => ({
+        id: task.id,
+        priority: task.priority,
+        importance: task.importance,
+        urgency: task.urgency,
+        dueDate: task.dueDate || null,
+        okrId: null, // OKR data not available in TodayTaskResponse, would need to fetch
+        okr: null,
+        aiRecommendation: task.aiRecommendation ? {
+          category: task.aiRecommendation.category,
+          confidence: task.aiRecommendation.confidence,
+          recommendedTime: task.aiRecommendation.recommendedTime
+        } : null,
+        duration: task.duration,
+        category: 'execution' // Default category
+      }));
+
+      // Rank tasks using priority service
+      const rankedTasks = await taskPriorityService.rankTasksByPriority(
+        tasksForRanking,
+        userId,
+        new Date(),
+        userPreferences
+      );
+
+      // Return the highest ranked task
+      const bestTaskId = rankedTasks[0]?.id;
+      const bestTask = tasks.find(t => t.id === bestTaskId) || tasks[0]!;
+      return bestTask;
+    } catch (error) {
+      console.error("Error selecting best task using priority service, falling back to simple sort:", error);
+      // Fallback to simple sorting
+      const sorted = tasks.sort((a, b) => {
+        if (a.urgency !== b.urgency) {
+          return b.urgency ? 1 : -1;
+        }
+        if (a.importance !== b.importance) {
+          return b.importance ? 1 : -1;
+        }
+        if (a.aiRecommendation && b.aiRecommendation) {
+          const aDiff = Math.abs((currentMinutes) - this.parseTimeToMinutes(a.aiRecommendation.recommendedTime));
+          const bDiff = Math.abs((currentMinutes) - this.parseTimeToMinutes(b.aiRecommendation.recommendedTime));
+          return aDiff - bDiff;
+        }
+        return 0;
+      });
+      return sorted[0]!;
+    }
   }
 
   /**

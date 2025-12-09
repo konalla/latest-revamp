@@ -7,7 +7,8 @@ import {
   endFocusSession,
   pauseSession,
   resumeSession,
-  getFocusPatterns
+  getFocusPatterns,
+  getFocusSessionsWithInsights
 } from "../controllers/focus.controller.js";
 import { authenticateToken, optionalAuth } from "../middleware/auth.middleware.js";
 import { requireWriteAccess } from "../middleware/subscription.middleware.js";
@@ -37,6 +38,9 @@ router.get("/focus/plan", optionalAuth, getFocusPlan);
 
 // GET /api/focus/patterns - optional auth with bypass header support
 router.get("/focus/patterns", optionalAuth, getFocusPatterns);
+
+// GET /api/focus-sessions/with-insights - Get all focus sessions with insights (requires auth)
+router.get("/focus-sessions/with-insights", authenticateToken, getFocusSessionsWithInsights);
 
 export default router;
 

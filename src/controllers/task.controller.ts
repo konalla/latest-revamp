@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 import { taskService } from "../services/task.service.js";
-import type { CreateTaskRequest, UpdateTaskRequest, TaskQueryParams, BulkTaskRequest } from "../types/task.types.js";
+import type { CreateTaskRequest, UpdateTaskRequest, TaskQueryParams, BulkTaskRequest, BatchUpdateTaskRequest } from "../types/task.types.js";
 
 /**
  * Helper function to handle backward compatibility and filter legacy fields
@@ -90,9 +90,9 @@ const createBulkTasks = async (req: Request, res: Response) => {
     // Validate each task in the array
     for (let i = 0; i < bulkData.tasks.length; i++) {
       const task = bulkData.tasks[i];
-      if (!task || !task.title || !task.category || typeof task.duration !== 'number' || !task.priority || !task.dueDate) {
+      if (!task || !task.title || !task.category || typeof task.duration !== 'number' || !task.priority) {
         return res.status(400).json({ 
-          message: `Task ${i + 1} is missing required fields: title, category, duration, priority, and dueDate are required` 
+          message: `Task ${i + 1} is missing required fields: title, category, duration, and priority are required` 
         });
       }
 
@@ -100,14 +100,6 @@ const createBulkTasks = async (req: Request, res: Response) => {
       if (task.duration <= 0) {
         return res.status(400).json({ 
           message: `Task ${i + 1} duration must be a positive number` 
-        });
-      }
-
-      // Validate dueDate is a valid date string
-      const dueDate = new Date(task.dueDate);
-      if (isNaN(dueDate.getTime())) {
-        return res.status(400).json({ 
-          message: `Task ${i + 1} dueDate must be a valid date string` 
         });
       }
     }
@@ -165,6 +157,39 @@ const getAllTasks = async (req: Request, res: Response) => {
         total: result.total,
         totalPages: Math.ceil(result.total / queryParams.limit!),
       },
+    });
+  } catch (error: any) {
+    res.status(400).json({ message: error.message });
+  }
+};
+
+const getAllTasksWithoutPagination = async (req: Request, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: "User not authenticated" });
+    }
+
+    const filters: any = {
+      userId: req.user.userId,
+      ...(req.query.completed !== undefined && { completed: req.query.completed === 'true' }),
+      ...(req.query.priority && { priority: req.query.priority as string }),
+      ...(req.query.category && { category: req.query.category as string }),
+      ...(req.query.importance !== undefined && { importance: req.query.importance === 'true' }),
+      ...(req.query.urgency !== undefined && { urgency: req.query.urgency === 'true' }),
+      ...(req.query.projectId && { projectId: parseInt(req.query.projectId as string) }),
+      ...(req.query.objectiveId && { objectiveId: parseInt(req.query.objectiveId as string) }),
+      ...(req.query.okrId && { okrId: parseInt(req.query.okrId as string) }),
+    };
+
+    const sortBy = req.query.sortBy as string || 'createdAt';
+    const sortOrder = req.query.sortOrder as 'asc' | 'desc' || 'desc';
+
+    const result = await taskService.getAllTasksWithoutPagination(req.user.userId, filters, sortBy, sortOrder);
+    
+    res.json({
+      message: "All tasks retrieved successfully",
+      data: result,
+      total: result.length,
     });
   } catch (error: any) {
     res.status(400).json({ message: error.message });
@@ -520,10 +545,50 @@ const getTaskStats = async (req: Request, res: Response) => {
   }
 };
 
+const batchUpdateTasks = async (req: Request, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ success: false, error: "User not authenticated" });
+    }
+
+    const batchData: BatchUpdateTaskRequest = req.body;
+    
+    // Validate required fields
+    if (!batchData.tasks || !Array.isArray(batchData.tasks) || batchData.tasks.length === 0) {
+      return res.status(400).json({ 
+        success: false,
+        error: "Tasks array is required and must not be empty" 
+      });
+    }
+
+    // Validate each task in the array
+    for (let i = 0; i < batchData.tasks.length; i++) {
+      const task = batchData.tasks[i];
+      if (!task || !task.id || typeof task.id !== 'number') {
+        return res.status(400).json({ 
+          success: false,
+          error: `Task ${i + 1} is missing required field: id` 
+        });
+      }
+    }
+
+    const result = await taskService.batchUpdateTasks(batchData, req.user.userId);
+    
+    res.json(result);
+  } catch (error: any) {
+    console.error("Error in batchUpdateTasks controller:", error);
+    res.status(400).json({ 
+      success: false,
+      error: error.message || "Failed to batch update tasks" 
+    });
+  }
+};
+
 export {
   createTask,
   createBulkTasks,
   getAllTasks,
+  getAllTasksWithoutPagination,
   getTasksByProject,
   getTasksByObjective,
   getTasksByOkr,
@@ -535,4 +600,5 @@ export {
   getArchivedTasks,
   restoreTask,
   getTaskStats,
+  batchUpdateTasks,
 };

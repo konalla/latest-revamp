@@ -481,6 +481,37 @@ export class CognitiveLoadController {
   }
 
   /**
+   * Get coaching message before starting a session
+   * GET /api/cognitive-load/pre-session-coaching
+   */
+  async getPreSessionCoaching(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = (req.user as any)?.userId || (req.user as any)?.id;
+
+      if (!userId) {
+        res.status(401).json({
+          error: 'Unauthorized',
+          details: 'User authentication required'
+        });
+        return;
+      }
+
+      const coaching = await this.cognitiveLoadService.getPreSessionCoaching(userId);
+
+      res.json({
+        success: true,
+        ...coaching
+      });
+    } catch (error) {
+      console.error('Error getting pre-session coaching:', error);
+      res.status(500).json({
+        error: 'Failed to get pre-session coaching',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  }
+
+  /**
    * Health check for cognitive load service
    * GET /api/cognitive-load/health
    */

@@ -8,8 +8,11 @@ const router = Router();
 // All task routes are protected and require authentication
 router.use(authenticateToken);
 
-// GET /api/tasks - Get all tasks for logged-in user
+// GET /api/tasks - Get all tasks for logged-in user (paginated)
 router.get("/", taskController.getAllTasks);
+
+// GET /api/tasks/all - Get all tasks without pagination
+router.get("/all", taskController.getAllTasksWithoutPagination);
 
 // GET /api/tasks/stats - Get task statistics for logged-in user
 router.get("/stats", taskController.getTaskStats);
@@ -34,6 +37,9 @@ router.post("/", requireTaskCreationAccess, taskController.createTask);
 
 // POST /api/tasks/bulk - Create multiple tasks in bulk with AI classification (requires task creation access)
 router.post("/bulk", requireTaskCreationAccess, taskController.createBulkTasks);
+
+// POST /api/tasks/batch-update - Update multiple tasks in batch (requires write access)
+router.post("/batch-update", requireWriteAccess, taskController.batchUpdateTasks);
 
 // PATCH /api/tasks/:id - Restore task (set completed: false) (requires write access)
 router.patch("/:id", requireWriteAccess, taskController.restoreTask);

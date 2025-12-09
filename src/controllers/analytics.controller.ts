@@ -18,11 +18,19 @@ class AnalyticsController {
         return;
       }
       
-      // Parse the timeframe - it can be a string like '30days' or a number of days
-      let days = 30; // Default to 30 days
-      const timeframe = req.query.timeframe as string || '30days';
+      // Parse the timeframe - if not provided, calculate for all time
+      let days: number | undefined = undefined;
+      const timeframe = req.query.timeframe as string;
+      const daysParam = req.query.days as string;
       
-      if (timeframe) {
+      // Only apply filter if explicitly provided
+      if (daysParam) {
+        try {
+          days = parseInt(daysParam, 10);
+        } catch (parseError) {
+          console.warn("Invalid days format, calculating for all time:", parseError);
+        }
+      } else if (timeframe) {
         try {
           // Convert to days if it's a number
           if (/^\d+$/.test(timeframe)) {
@@ -32,11 +40,15 @@ class AnalyticsController {
             days = parseInt(timeframe.replace('days', ''), 10);
           }
         } catch (parseError) {
-          console.warn("Invalid timeframe format, using default 30 days:", parseError);
+          console.warn("Invalid timeframe format, calculating for all time:", parseError);
         }
       }
       
-      console.log(`Fetching productivity analytics for user ${userId} with ${days} days timeframe`);
+      if (days !== undefined) {
+        console.log(`Fetching productivity analytics for user ${userId} with ${days} days timeframe`);
+      } else {
+        console.log(`Fetching productivity analytics for user ${userId} for all time`);
+      }
       const data = await analyticsService.getProductivityAnalytics(userId, days);
       
       // Set JSON content type to ensure client processes response as JSON

@@ -114,6 +114,98 @@ export class FocusSessionService {
 
     return response;
   }
+
+  /**
+   * Get all focus sessions with insights for a user
+   * @param userId User ID
+   * @returns Array of sessions with insights
+   */
+  async getAllSessionsWithInsights(userId: number): Promise<any[]> {
+    try {
+      const sessions = await prisma.focusSession.findMany({
+        where: {
+          userId
+        },
+        orderBy: {
+          startedAt: 'desc'
+        }
+      });
+
+      return sessions.map(session => this.mapSessionToInsightsResponse(session));
+    } catch (error) {
+      console.error(`Error getting all sessions with insights for user ${userId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Map session to response format with insights
+   */
+  private mapSessionToInsightsResponse(session: any): any {
+    // Calculate duration from timestamps (not duration field)
+    let durationMinutes = 0;
+    const startedAt = session.startedAt instanceof Date ? session.startedAt : new Date(session.startedAt);
+    const endedAt = session.endedAt ? (session.endedAt instanceof Date ? session.endedAt : new Date(session.endedAt)) : null;
+    
+    if (endedAt && startedAt) {
+      const diffMs = endedAt.getTime() - startedAt.getTime();
+      durationMinutes = Math.max(0, Math.floor(diffMs / 1000 / 60));
+    }
+
+    // Extract insights and category from intention JSON
+    let insights: any[] = [];
+    let category: string | undefined;
+    try {
+      const intention = session.intention as any;
+      if (intention) {
+        // Extract category
+        category = intention.category;
+        
+        // Extract insights array
+        if (Array.isArray(intention.insights)) {
+          insights = intention.insights.map((insight: any) => ({
+            id: insight.id || `${session.id}-${insight.createdAt || Date.now()}`,
+            sessionId: session.id.toString(),
+            userId: session.userId,
+            insightType: insight.insightType || 'reflection',
+            content: insight.content || '',
+            createdAt: insight.createdAt || (session.createdAt instanceof Date ? session.createdAt.toISOString() : new Date(session.createdAt).toISOString())
+          }));
+        }
+      }
+    } catch (error) {
+      console.error('Error parsing insights from intention:', error);
+      insights = [];
+    }
+
+    const response: any = {
+      id: session.id.toString(),
+      startTime: startedAt.toISOString(),
+      endTime: endedAt ? endedAt.toISOString() : null,
+      durationMinutes,
+      completed: session.completed,
+      sessionType: session.sessionType,
+      notes: session.notes || null,
+      tasksCompleted: session.tasksCompleted || 0,
+      insights,
+      distractions: session.distractions ?? null,
+      environment: session.environment || null,
+      mood: session.mood || null,
+      energyLevel: session.energyLevel || null,
+      aiScore: session.aiScore ?? null,
+      cognitiveFlowScore: session.cognitiveFlowScore ?? null,
+      contextSwitchCount: session.contextSwitchCount ?? null,
+      flowState: session.flowState || null
+    };
+
+    // Add category if it exists
+    if (category) {
+      response.category = category;
+    }
+
+    return response;
+  }
+
   async getCurrentFocusSession(userId: number): Promise<FocusSessionResponse | null> {
     try {
       const sessions = await prisma.$queryRaw`

@@ -69,17 +69,35 @@ export class CognitiveLoadService {
         meter = await this.createCognitiveLoadMeter(userId, meterData);
       } else {
         // For existing meters, recalculate workload score to ensure accuracy
-        console.log(`Recalculating workload for existing meter for user ${userId}`);
-        const recalculatedScore = await this.recalculateWorkloadScore(userId);
+        // Only recalculate if score is stale (more than 5 minutes old or significant change expected)
+        const lastUpdate = new Date(meter.updatedAt);
+        const now = new Date();
+        const minutesSinceUpdate = (now.getTime() - lastUpdate.getTime()) / (1000 * 60);
         
-        // Only update if the score has changed significantly (more than 5 points difference)
-        if (Math.abs(meter.currentWorkloadScore - recalculatedScore) > 5) {
-          console.log(`Updating workload score from ${meter.currentWorkloadScore} to ${recalculatedScore}`);
-          meter = await this.updateCognitiveLoadMeter(userId, { currentWorkloadScore: recalculatedScore });
+        // Only recalculate if it's been more than 5 minutes since last update
+        if (minutesSinceUpdate > 5) {
+          console.log(`Recalculating workload for existing meter for user ${userId} (last update: ${minutesSinceUpdate.toFixed(1)} min ago)`);
+          const recalculatedScore = await this.recalculateWorkloadScore(userId);
+          
+          // Only update if the score has changed significantly (more than 5 points difference)
+          if (Math.abs(meter.currentWorkloadScore - recalculatedScore) > 5) {
+            console.log(`Updating workload score from ${meter.currentWorkloadScore} to ${recalculatedScore}`);
+            meter = await this.updateCognitiveLoadMeter(userId, { currentWorkloadScore: recalculatedScore });
+          } else {
+            // Update timestamp to prevent frequent recalculations
+            meter = await (prisma as any).cognitiveLoadMeter.update({
+              where: { userId },
+              data: { updatedAt: new Date() }
+            });
+          }
+          // Skip recalculation in mapDatabaseToResponse since we just did it
+          return await this.mapDatabaseToResponse(meter, true);
+        } else {
+          console.log(`Using cached workload for user ${userId} (updated ${minutesSinceUpdate.toFixed(1)} min ago)`);
+          // Use cached value, no recalculation needed
+          return await this.mapDatabaseToResponse(meter, true);
         }
       }
-      
-      return this.mapDatabaseToResponse(meter);
     } catch (error) {
       console.error(`Error getting cognitive load meter for user ${userId}:`, error);
       throw error;
@@ -129,6 +147,56 @@ export class CognitiveLoadService {
     } catch (error) {
       console.error(`Error creating cognitive load meter for user ${userId}:`, error);
       throw error;
+    }
+  }
+
+  /**
+   * Get coaching message before starting a session
+   * @param userId User ID
+   * @returns Coaching message and workload info
+   */
+  async getPreSessionCoaching(userId: number): Promise<{
+    message: string;
+    workloadScore: number;
+    workloadZone: string;
+    canProceed: boolean;
+    warning?: string;
+  }> {
+    try {
+      const meter = await this.getUserCognitiveLoadMeter(userId);
+      const zone = meter.workloadZone || "BASELINE";
+      const score = meter.currentWorkloadScore;
+      const sustainableCapacity = meter.sustainableCapacity;
+
+      let message = meter.coachingMessage || "Ready to start your session.";
+      let canProceed = true;
+      let warning: string | undefined;
+
+      // Special warnings for overload zone
+      if (zone === "OVERLOAD") {
+        message = `You're currently in overload (${score}/100). Starting another deep session may impact tomorrow's performance.`;
+        warning = "Consider lighter work or taking a break instead.";
+        canProceed = false; // Still allow, but warn
+      } else if (score >= sustainableCapacity && score < 100) {
+        message = `You're at optimal capacity (${score}/${sustainableCapacity}). Consider scheduling lighter work.`;
+        canProceed = true;
+      }
+
+      return {
+        message,
+        workloadScore: score,
+        workloadZone: zone,
+        canProceed,
+        warning
+      };
+    } catch (error) {
+      console.error(`Error getting pre-session coaching for user ${userId}:`, error);
+      return {
+        message: "Ready to start your session.",
+        workloadScore: 15,
+        workloadZone: "BASELINE",
+        canProceed: true
+      };
     }
   }
 
@@ -254,8 +322,11 @@ export class CognitiveLoadService {
       const currentRiskScore = Object.values(riskFactors).reduce((sum, factor) => sum + factor.score, 0) / 
         Object.values(riskFactors).length;
       
+      // Round to 2 decimal places
+      const roundedRiskScore = Math.round(currentRiskScore * 100) / 100;
+      
       // Determine risk level based on score
-      const riskLevel = this.determineRiskLevel(currentRiskScore);
+      const riskLevel = this.determineRiskLevel(roundedRiskScore);
       
       // Get key contributing factors (those with highest scores)
       const keyContributingFactors = Object.entries(riskFactors)
@@ -264,19 +335,23 @@ export class CognitiveLoadService {
         .map(([key]) => this.formatRiskFactor(key));
       
       // Calculate historical comparison
+      const previousScore = loadMeter.burnoutRiskScore || 0;
+      const roundedPreviousScore = Math.round(previousScore * 100) / 100;
+      const percentageChange = previousScore ? 
+        Math.abs(((roundedRiskScore - previousScore) / previousScore) * 100) : 0;
+      
       const historicalComparison: HistoricalComparison = {
-        previousScore: loadMeter.burnoutRiskScore || 0,
-        trend: currentRiskScore > (loadMeter.burnoutRiskScore || 0) * 1.1 ? 'worsening' :
-              currentRiskScore < (loadMeter.burnoutRiskScore || 0) * 0.9 ? 'improving' : 'stable',
-        percentageChange: loadMeter.burnoutRiskScore ? 
-          Math.abs(((currentRiskScore - loadMeter.burnoutRiskScore) / loadMeter.burnoutRiskScore) * 100) : 0
+        previousScore: roundedPreviousScore,
+        trend: roundedRiskScore > previousScore * 1.1 ? 'worsening' :
+              roundedRiskScore < previousScore * 0.9 ? 'improving' : 'stable',
+        percentageChange: Math.round(percentageChange * 100) / 100
       };
       
       // Generate recovery recommendations
       const recoveryRecommendations = this.generateRecoveryRecommendations(riskFactors, loadMeter);
       
       return {
-        currentRiskScore,
+        currentRiskScore: roundedRiskScore,
         riskLevel,
         keyContributingFactors,
         historicalComparison,
@@ -444,88 +519,452 @@ export class CognitiveLoadService {
   }
 
   /**
-   * Recalculate workload score based on current tasks and focus sessions
-   * @param userId User ID
-   * @returns Calculated workload score (0-100)
+   * Detect work mode from task categories in a session
+   * @param taskIds Array of task IDs from session intention
+   * @returns Detected work mode
    */
-  private async recalculateWorkloadScore(userId: number): Promise<number> {
+  private async detectWorkModeFromTasks(taskIds: number[]): Promise<string> {
+    if (!taskIds || taskIds.length === 0) {
+      return "EXECUTIVE"; // Default to Executive if no tasks
+    }
+
     try {
-      // Get current active tasks
-      const activeTasks = await prisma.task.findMany({
-        where: { 
-          userId,
-          completed: false
+      const tasks = await prisma.task.findMany({
+        where: { id: { in: taskIds } },
+        select: { category: true }
+      });
+
+      if (tasks.length === 0) {
+        return "EXECUTIVE";
+      }
+
+      // Count categories (task.category values: "deepWork", "creative", "reflection", "execution")
+      const categoryCounts: Record<string, number> = {
+        DEEP: 0,
+        CREATIVE: 0,
+        REFLECTIVE: 0,
+        EXECUTIVE: 0
+      };
+
+      tasks.forEach(task => {
+        const category = (task.category || "").toLowerCase();
+        if (category === "deepwork" || category.includes("deep")) {
+          categoryCounts.DEEP++;
+        } else if (category === "creative" || category.includes("creative")) {
+          categoryCounts.CREATIVE++;
+        } else if (category === "reflection" || category.includes("reflective") || category.includes("reflection")) {
+          categoryCounts.REFLECTIVE++;
+        } else {
+          // Default to executive (includes "execution" and any unknown categories)
+          categoryCounts.EXECUTIVE++;
         }
       });
 
-      console.log(`Recalculating workload for user ${userId}: Found ${activeTasks.length} active tasks`);
+      // Return the most common category
+      const maxCategory = Object.entries(categoryCounts).reduce((a, b) => 
+        categoryCounts[a[0]] > categoryCounts[b[0]] ? a : b
+      );
 
-      // Get recent focus sessions (last 7 days)
-      const sevenDaysAgo = new Date();
-      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-      
-      const recentSessions = await prisma.focusSession.findMany({
+      return maxCategory[0];
+    } catch (error) {
+      console.error("Error detecting work mode from tasks:", error);
+      return "EXECUTIVE";
+    }
+  }
+
+  /**
+   * Calculate work mode weight multiplier
+   * @param workMode Work mode string
+   * @param durationMinutes Duration in minutes
+   * @returns Weight multiplier (0-1)
+   */
+  private getWorkModeWeight(workMode: string, durationMinutes: number): number {
+    const mode = workMode.toUpperCase();
+    const buffer = 5; // 4-5 minute buffer
+
+    // Very short sessions (<25 min with buffer = <20 min)
+    if (durationMinutes < 20) {
+      return 0.2;
+    }
+
+    // Deep work
+    if (mode === "DEEP" || mode.includes("DEEP")) {
+      // 60-90 minutes (55-95 with buffer)
+      if (durationMinutes >= 55 && durationMinutes <= 95) {
+        return 1.0;
+      } else if (durationMinutes < 55) {
+        return 0.8;
+      } else {
+        // >95 minutes, still count as deep work
+        return 1.0;
+      }
+    }
+
+    // Executive work
+    if (mode === "EXECUTIVE" || mode.includes("EXECUTIVE")) {
+      return 0.6;
+    }
+
+    // Creative work
+    if (mode === "CREATIVE" || mode.includes("CREATIVE")) {
+      return 0.5;
+    }
+
+    // Reflective work
+    if (mode === "REFLECTIVE" || mode.includes("REFLECTIVE")) {
+      return 0.4;
+    }
+
+    // Default to Executive
+    return 0.6;
+  }
+
+  /**
+   * Calculate task pressure from due/overdue tasks
+   * @param userId User ID
+   * @returns Task pressure score (0-20)
+   */
+  private async calculateTaskPressure(userId: number): Promise<number> {
+    try {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      // Get tasks due today or overdue
+      const dueTasks = await prisma.task.findMany({
         where: {
           userId,
-          createdAt: {
-            gte: sevenDaysAgo
+          completed: false,
+          dueDate: {
+            lte: new Date() // Due today or in the past
           }
         }
       });
 
-      console.log(`Found ${recentSessions.length} recent focus sessions`);
+      let pressure = 0;
 
-      // Calculate base workload from active tasks
-      let workloadScore = 0;
-      
-      // Each active task adds to workload based on priority and urgency
-      activeTasks.forEach(task => {
-        let taskWeight = 10; // Base weight
-        
-        if (task.importance) taskWeight += 5;
-        if (task.urgency) taskWeight += 5;
-        if (task.priority === 'high') taskWeight += 10;
-        if (task.priority === 'medium') taskWeight += 5;
-        
-        workloadScore += taskWeight;
+      dueTasks.forEach(task => {
+        // Priority weights
+        if (task.priority === 'high') pressure += 5;
+        else if (task.priority === 'medium') pressure += 3;
+        else if (task.priority === 'low') pressure += 1;
+
+        // Urgency weight
+        if (task.urgency) pressure += 3;
+
+        // Importance weight
+        if (task.importance) pressure += 2;
       });
 
-      console.log(`Base workload score from tasks: ${workloadScore}`);
+      // Cap at 20 points
+      return Math.min(20, pressure);
+    } catch (error) {
+      console.error(`Error calculating task pressure for user ${userId}:`, error);
+      return 0;
+    }
+  }
 
-      // Adjust based on recent focus session activity
-      const totalSessionTime = recentSessions.reduce((sum: number, session: any) => sum + (session.duration || 0), 0);
-      const avgSessionTime = recentSessions.length > 0 ? totalSessionTime / recentSessions.length : 0;
-      
-      console.log(`Total session time: ${totalSessionTime}, Average: ${avgSessionTime}`);
-      
-      // If user has been very active in focus sessions, reduce workload (they're being productive)
-      if (avgSessionTime > 60) { // More than 1 hour average
-        workloadScore *= 0.8; // Reduce workload by 20%
-        console.log(`Applied productivity bonus: ${workloadScore}`);
-      } else if (avgSessionTime < 15 && recentSessions.length > 0) { // Only apply penalty if there are sessions
-        workloadScore *= 1.2; // Increase workload by 20%
-        console.log(`Applied low activity penalty: ${workloadScore}`);
+  /**
+   * Calculate session duration from timestamps (not duration attribute)
+   * @param startedAt Session start time
+   * @param endedAt Session end time
+   * @returns Duration in minutes
+   */
+  private calculateSessionDuration(startedAt: Date, endedAt: Date | null): number {
+    if (!endedAt) {
+      return 0; // Incomplete session
+    }
+
+    const diffMs = endedAt.getTime() - startedAt.getTime();
+    const diffMinutes = Math.max(0, Math.floor(diffMs / 1000 / 60));
+    return diffMinutes;
+  }
+
+  /**
+   * Apply overnight decay - complete reset to baseline
+   * @param userId User ID
+   */
+  private async applyOvernightDecay(userId: number): Promise<void> {
+    try {
+      const meter = await (prisma as any).cognitiveLoadMeter.findUnique({
+        where: { userId }
+      });
+
+      if (!meter) return;
+
+      const lastUpdate = new Date(meter.updatedAt);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      lastUpdate.setHours(0, 0, 0, 0);
+
+      // If last update was before today, reset to baseline
+      if (lastUpdate < today) {
+        const baseline = 15; // Baseline between 10-20
+        const workloadHistory = Array.isArray(meter.workloadHistory) 
+          ? meter.workloadHistory 
+          : [];
+
+        // Archive yesterday's final score if it exists
+        if (workloadHistory.length > 0) {
+          const yesterday = new Date();
+          yesterday.setDate(yesterday.getDate() - 1);
+          yesterday.setHours(23, 59, 59, 999);
+
+          // Add yesterday's entry if not already there
+          const yesterdayEntry = {
+            date: yesterday.toISOString().split('T')[0],
+            workload: meter.currentWorkloadScore
+          };
+
+          // Check if entry for yesterday already exists
+          const existingEntry = workloadHistory.find((entry: any) => 
+            entry.date === yesterdayEntry.date
+          );
+
+          if (!existingEntry) {
+            workloadHistory.push(yesterdayEntry);
+          }
+        }
+
+        await (prisma as any).cognitiveLoadMeter.update({
+          where: { userId },
+          data: {
+            currentWorkloadScore: baseline,
+            workloadHistory: workloadHistory.slice(-30) // Keep last 30 days
+          }
+        });
+
+        console.log(`Applied overnight decay for user ${userId}: reset to baseline ${baseline}`);
+      }
+    } catch (error) {
+      console.error(`Error applying overnight decay for user ${userId}:`, error);
+    }
+  }
+
+  /**
+   * Recalculate workload score based on executed focus sessions (session-based, not task-count-based)
+   * @param userId User ID
+   * @param targetDate Optional target date (defaults to today)
+   * @returns Calculated workload score (0-100+)
+   */
+  private async recalculateWorkloadScore(userId: number, targetDate?: Date): Promise<number> {
+    try {
+      // Apply overnight decay first
+      await this.applyOvernightDecay(userId);
+
+      const today = targetDate || new Date();
+      const startOfDay = new Date(today);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(today);
+      endOfDay.setHours(23, 59, 59, 999);
+
+      // Get today's completed focus sessions (count toward day session started)
+      const todaySessions = await prisma.focusSession.findMany({
+        where: {
+          userId,
+          startedAt: {
+            gte: startOfDay,
+            lte: endOfDay
+          },
+          completed: true,
+          endedAt: {
+            not: null
+          }
+        }
+      });
+
+      console.log(`Recalculating workload for user ${userId}: Found ${todaySessions.length} completed sessions today`);
+
+      // Calculate weighted workload from sessions
+      let totalWeightedMinutes = 0;
+
+      for (const session of todaySessions) {
+        // Calculate duration from timestamps
+        const durationMinutes = this.calculateSessionDuration(
+          session.startedAt,
+          session.endedAt
+        );
+
+        if (durationMinutes <= 0) continue;
+
+        // Detect work mode from task categories
+        const intention = session.intention as any;
+        const taskIds = intention?.taskIds || [];
+        const workMode = await this.detectWorkModeFromTasks(taskIds);
+
+        // Get weight multiplier for this work mode and duration
+        const weight = this.getWorkModeWeight(workMode, durationMinutes);
+
+        // Add weighted minutes
+        totalWeightedMinutes += durationMinutes * weight;
+
+        console.log(`Session ${session.id}: ${durationMinutes}min ${workMode} mode, weight ${weight}, weighted: ${durationMinutes * weight}min`);
       }
 
-      // Cap the score between 0 and 100
-      const finalScore = Math.max(0, Math.min(100, Math.round(workloadScore)));
-      console.log(`Final calculated workload score: ${finalScore}`);
-      
+      // Convert to 0-100 scale (240 minutes = 4 hours deep-equivalent = 100)
+      const baseWorkload = (totalWeightedMinutes / 240) * 100;
+
+      // Add task pressure (only from due today/overdue tasks)
+      const taskPressure = await this.calculateTaskPressure(userId);
+
+      // Combined score (allow overflow for overload detection)
+      const finalScore = Math.max(0, Math.round(baseWorkload + taskPressure));
+
+      console.log(`Final workload calculation: ${totalWeightedMinutes} weighted min = ${baseWorkload.toFixed(1)} base + ${taskPressure} pressure = ${finalScore} total`);
+
       return finalScore;
     } catch (error) {
       console.error(`Error recalculating workload score for user ${userId}:`, error);
-      return 50; // Return default score if calculation fails
+      return 15; // Return baseline if calculation fails
+    }
+  }
+
+  /**
+   * Get workload zone based on score
+   */
+  private getWorkloadZone(score: number, sustainableCapacity: number): string {
+    if (score <= 30) return "BASELINE";
+    if (score <= 60) return "BUILDING";
+    if (score <= sustainableCapacity) return "SUSTAINABLE";
+    if (score <= 100) return "OPTIMAL";
+    return "OVERLOAD";
+  }
+
+  /**
+   * Get coaching message based on workload zone
+   */
+  private getCoachingMessage(workloadScore: number, sustainableCapacity: number, sessionsToday: number): string {
+    const zone = this.getWorkloadZone(workloadScore, sustainableCapacity);
+
+    switch (zone) {
+      case "BASELINE":
+        return "You're well-rested. Great time for deep work sessions.";
+      case "BUILDING":
+        return "You're building momentum. Consider scheduling your most important work now.";
+      case "SUSTAINABLE":
+        return `You're at your optimal daily load (${workloadScore}/${sustainableCapacity}). You can keep going, but consider winding down high-intensity work.`;
+      case "OPTIMAL":
+        return `You're at peak capacity (${workloadScore}/100). Excellent work today! Consider lighter tasks or breaks.`;
+      case "OVERLOAD":
+        return `You're moving into overload (${workloadScore}/100). Adding another deep session today may impact tomorrow's performance. Do you still want to continue?`;
+      default:
+        return "Monitor your workload to maintain optimal performance.";
+    }
+  }
+
+  /**
+   * Update hourly workload history
+   */
+  private async updateHourlyWorkloadHistory(userId: number, workloadScore: number): Promise<void> {
+    try {
+      const meter = await (prisma as any).cognitiveLoadMeter.findUnique({
+        where: { userId }
+      });
+
+      if (!meter) return;
+
+      const now = new Date();
+      const currentHour = now.getHours();
+      const today = now.toISOString().split('T')[0];
+
+      let workloadHistory = Array.isArray(meter.workloadHistory) 
+        ? [...meter.workloadHistory] 
+        : [];
+
+      // Find or create today's hourly entry
+      const hourlyEntryKey = `${today}-${currentHour}`;
+      let hourlyEntry = workloadHistory.find((entry: any) => 
+        entry.hour === currentHour && entry.date === today
+      );
+
+      if (hourlyEntry) {
+        // Update existing entry
+        hourlyEntry.workload = workloadScore;
+      } else {
+        // Create new hourly entry
+        hourlyEntry = {
+          date: today,
+          hour: currentHour,
+          workload: workloadScore
+        };
+        workloadHistory.push(hourlyEntry);
+      }
+
+      // Keep only last 7 days of hourly data (24 hours * 7 days = 168 entries max)
+      // Group by date and keep most recent
+      const dateGroups: Record<string, any[]> = {};
+      workloadHistory.forEach((entry: any) => {
+        if (entry.date) {
+          if (!dateGroups[entry.date]) {
+            dateGroups[entry.date] = [];
+          }
+          dateGroups[entry.date].push(entry);
+        }
+      });
+
+      // Sort dates and keep last 7 days
+      const sortedDates = Object.keys(dateGroups).sort().slice(-7);
+      workloadHistory = sortedDates.flatMap(date => dateGroups[date]);
+
+      await (prisma as any).cognitiveLoadMeter.update({
+        where: { userId },
+        data: { workloadHistory }
+      });
+    } catch (error) {
+      console.error(`Error updating hourly workload history for user ${userId}:`, error);
+    }
+  }
+
+  /**
+   * Get count of sessions today
+   */
+  private async getSessionsTodayCount(userId: number): Promise<number> {
+    try {
+      const today = new Date();
+      const startOfDay = new Date(today);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(today);
+      endOfDay.setHours(23, 59, 59, 999);
+
+      const count = await prisma.focusSession.count({
+        where: {
+          userId,
+          startedAt: {
+            gte: startOfDay,
+            lte: endOfDay
+          },
+          completed: true
+        }
+      });
+
+      return count;
+    } catch (error) {
+      console.error(`Error getting sessions today count for user ${userId}:`, error);
+      return 0;
     }
   }
 
   /**
    * Map database model to response format
    */
-  private mapDatabaseToResponse(meter: CognitiveLoadMeter): CognitiveLoadMeterResponse {
+  private async mapDatabaseToResponse(meter: CognitiveLoadMeter, skipRecalculation: boolean = false): Promise<CognitiveLoadMeterResponse> {
+    // Use existing workload score if we just recalculated, otherwise use stored value
+    const currentWorkload = skipRecalculation ? meter.currentWorkloadScore : await this.recalculateWorkloadScore(meter.userId);
+    const sessionsToday = await this.getSessionsTodayCount(meter.userId);
+    const zone = this.getWorkloadZone(currentWorkload, meter.sustainableCapacity);
+    const coachingMessage = this.getCoachingMessage(currentWorkload, meter.sustainableCapacity, sessionsToday);
+
+    // Update hourly history (only if we recalculated)
+    if (!skipRecalculation) {
+      await this.updateHourlyWorkloadHistory(meter.userId, currentWorkload);
+    }
+
+    // Calculate deep-equivalent hours
+    const deepEquivalentHours = (currentWorkload / 100) * 4; // 100 = 4 hours
+
     return {
       id: meter.id,
       userId: meter.userId,
-      currentWorkloadScore: meter.currentWorkloadScore,
+      currentWorkloadScore: currentWorkload,
       cognitiveCapacity: meter.cognitiveCapacity,
       sustainableCapacity: meter.sustainableCapacity,
       burnoutRiskScore: meter.burnoutRiskScore,
@@ -538,7 +977,12 @@ export class CognitiveLoadService {
       recommendedBreakFrequency: meter.recommendedBreakFrequency || 5,
       currentStatus: meter.currentStatus,
       createdAt: meter.createdAt.toISOString(),
-      updatedAt: meter.updatedAt.toISOString()
+      updatedAt: meter.updatedAt.toISOString(),
+      // Extended fields for new system
+      workloadZone: zone as any,
+      coachingMessage,
+      sessionsToday,
+      deepEquivalentHours: parseFloat(deepEquivalentHours.toFixed(2))
     };
   }
 
@@ -680,55 +1124,73 @@ export class CognitiveLoadService {
   }
 
   /**
-   * Calculate burnout risk factors
+   * Calculate burnout risk factors (updated for session-based workload)
    */
   private calculateBurnoutRiskFactors(tasks: any[], focusSessions: any[], loadMeter: CognitiveLoadMeterResponse): RiskFactors {
-    // Handle case when no tasks exist
-    if (!tasks || tasks.length === 0) {
-      return {
-        workloadIntensity: { score: 0, weight: 0.3 },
-        recoveryDeficit: { score: 0, weight: 0.3 },
-        workloadVariability: { score: 0, weight: 0.2 },
-        currentWorkloadLevel: { score: loadMeter.currentWorkloadScore / 10, weight: 0.2 }
-      };
+    // 1. Workload intensity based on sessions (0-10)
+    // Count sessions in last 7 days with high cognitive load
+    const recentDate = new Date();
+    recentDate.setDate(recentDate.getDate() - 7);
+    const recentSessions = focusSessions.filter(session => 
+      session.startedAt && new Date(session.startedAt) >= recentDate && session.completed
+    );
+
+    // Calculate weighted session minutes per day
+    let totalWeightedMinutes = 0;
+    for (const session of recentSessions) {
+      if (!session.endedAt || !session.startedAt) continue;
+      const duration = this.calculateSessionDuration(session.startedAt, session.endedAt);
+      if (duration <= 0) continue;
+
+      // Get work mode from tasks
+      const intention = session.intention as any;
+      const taskIds = intention?.taskIds || [];
+      // Use a simplified approach - count deep work sessions
+      const isDeepWork = duration >= 55 && duration <= 95; // Deep work range
+      const weight = isDeepWork ? 1.0 : 0.6; // Simplified weights
+      totalWeightedMinutes += duration * weight;
     }
-    
-    // 1. Workload intensity (0-10)
-    const activeTaskCount = tasks.filter(task => !task.completed).length;
-    const workloadIntensity = Math.min(10, activeTaskCount / 2);
+
+    const avgDailyWeightedMinutes = totalWeightedMinutes / 7;
+    // 240 minutes = 4 hours = sustainable, so >300 = high intensity
+    const workloadIntensity = Math.min(10, (avgDailyWeightedMinutes / 30)); // Scale to 0-10
     
     // 2. Recovery periods (0-10, higher = higher risk)
-    const recentDate = new Date();
-    recentDate.setDate(recentDate.getDate() - 7); // Last 7 days
-    const recentSessions = focusSessions.filter(session => 
-      session.createdAt && new Date(session.createdAt) >= recentDate
-    );
-    
     // Calculate daily session time
     const sessionsByDay: Record<string, number> = {};
     recentSessions.forEach(session => {
-      const day = new Date(session.createdAt).toISOString().split('T')[0];
-      if (day && !sessionsByDay[day]) sessionsByDay[day] = 0;
-      if (day) sessionsByDay[day] += session.duration || 0;
+      if (!session.startedAt) return;
+      const day = new Date(session.startedAt).toISOString().split('T')[0];
+      if (day) {
+        if (!sessionsByDay[day]) sessionsByDay[day] = 0;
+        const duration = session.endedAt && session.startedAt
+          ? this.calculateSessionDuration(session.startedAt, session.endedAt)
+          : (session.duration || 0);
+        sessionsByDay[day] += duration;
+      }
     });
     
-    // Check for days with excessive focus time (more than 6 hours)
+    // Check for days with excessive focus time (more than 6 hours = 360 minutes)
     const daysWithExcessiveWork = Object.values(sessionsByDay).filter(minutes => minutes > 360).length;
     const recoveryDeficit = Math.min(10, daysWithExcessiveWork * 2);
     
     // 3. Workload consistency (0-10, higher = higher risk)
-    const workloadHistory = loadMeter.workloadHistory;
+    const workloadHistory = loadMeter.workloadHistory || [];
     
-    let workloadVariability = 0; // Default to low risk when no history
-    if (workloadHistory.length > 1) {
+    let workloadVariability = 0;
+    // Filter to daily entries (not hourly) for variability calculation
+    const dailyEntries = workloadHistory.filter((entry: any) => entry.date && !entry.hour);
+    
+    if (dailyEntries.length > 1) {
       // Calculate standard deviation of workload
-      const mean = workloadHistory.reduce((sum, w) => sum + w.workload, 0) / workloadHistory.length;
-      const variance = workloadHistory.reduce((sum, w) => sum + Math.pow(w.workload - mean, 2), 0) / workloadHistory.length;
+      const workloads = dailyEntries.map((w: any) => w.workload || 0);
+      const mean = workloads.reduce((sum: number, w: number) => sum + w, 0) / workloads.length;
+      const variance = workloads.reduce((sum: number, w: number) => sum + Math.pow(w - mean, 2), 0) / workloads.length;
       const stdDev = Math.sqrt(variance);
       
       // Scale to 0-10 (higher variability = higher risk)
       workloadVariability = Math.min(10, stdDev / 5);
-    } else if (workloadHistory.length === 1) {
+    } else if (dailyEntries.length === 1) {
       // Single data point = low variability
       workloadVariability = 1;
     }

@@ -3,10 +3,15 @@ import prisma from "../config/prisma.js";
 export class AnalyticsService {
   /**
    * Get productivity analytics for a user within a specified timeframe
+   * If days is undefined, calculates for all time
    */
-  async getProductivityAnalytics(userId: number, days: number = 30): Promise<any> {
+  async getProductivityAnalytics(userId: number, days?: number): Promise<any> {
     try {
-      console.log(`Getting productivity analytics for user ${userId} with ${days} days timeframe`);
+      if (days !== undefined) {
+        console.log(`Getting productivity analytics for user ${userId} with ${days} days timeframe`);
+      } else {
+        console.log(`Getting productivity analytics for user ${userId} for all time`);
+      }
       
       // Get tasks for the user
       const allTasks = await prisma.task.findMany({
@@ -25,34 +30,42 @@ export class AnalyticsService {
         return this.getDefaultProductivityAnalytics();
       }
       
-      // Calculate date range
-      const startDate = new Date();
-      startDate.setDate(startDate.getDate() - days);
-      console.log(`Using date range from ${startDate.toISOString()} to now`);
+      // Filter tasks by date range only if days is provided
+      let filteredTasks = allTasks;
+      let filteredCompletedTasks = completedTasks;
       
-      // Filter tasks created within the time range
-      const filteredTasks = allTasks.filter(task => {
-        try {
-          const taskDate = new Date(task.createdAt);
-          return taskDate >= startDate;
-        } catch (error) {
-          console.error('Error parsing task date, skipping task:', error);
-          return false;
-        }
-      });
-      console.log(`Filtered to ${filteredTasks.length} tasks within the timeframe`);
-      
-      // Filter completed tasks within the time range
-      const filteredCompletedTasks = completedTasks.filter(task => {
-        try {
-          const taskDate = new Date(task.createdAt);
-          return taskDate >= startDate;
-        } catch (error) {
-          console.error('Error parsing completed task date, skipping task:', error);
-          return false;
-        }
-      });
-      console.log(`Filtered to ${filteredCompletedTasks.length} completed tasks within the timeframe`);
+      if (days !== undefined) {
+        // Calculate date range
+        const startDate = new Date();
+        startDate.setDate(startDate.getDate() - days);
+        console.log(`Using date range from ${startDate.toISOString()} to now`);
+        
+        // Filter tasks created within the time range
+        filteredTasks = allTasks.filter(task => {
+          try {
+            const taskDate = new Date(task.createdAt);
+            return taskDate >= startDate;
+          } catch (error) {
+            console.error('Error parsing task date, skipping task:', error);
+            return false;
+          }
+        });
+        console.log(`Filtered to ${filteredTasks.length} tasks within the timeframe`);
+        
+        // Filter completed tasks within the time range
+        filteredCompletedTasks = completedTasks.filter(task => {
+          try {
+            const taskDate = new Date(task.createdAt);
+            return taskDate >= startDate;
+          } catch (error) {
+            console.error('Error parsing completed task date, skipping task:', error);
+            return false;
+          }
+        });
+        console.log(`Filtered to ${filteredCompletedTasks.length} completed tasks within the timeframe`);
+      } else {
+        console.log(`No date filter applied - calculating for all time`);
+      }
       
       // Calculate task completion rate
       const totalTasksCount = filteredTasks.length;
