@@ -1,5 +1,5 @@
 import prisma from "../config/prisma.js";
-import type { CreateTaskRequest, UpdateTaskRequest, TaskQueryParams, TaskResponse, TaskListResponse, TodayTasksResponse, TodayTaskResponse, BulkTaskRequest, BulkTaskResponse, BulkTaskItem, BatchUpdateTaskRequest, BatchUpdateTaskResponse } from "../types/task.types.js";
+import type { CreateTaskRequest, UpdateTaskRequest, TaskQueryParams, TaskResponse, TaskListResponse, TodayTasksResponse, TodayTaskResponse, BulkTaskRequest, BulkTaskResponse, BulkTaskItem, BatchUpdateTaskRequest, BatchUpdateTaskResponse, AIRecommendationResponse } from "../types/task.types.js";
 import { aiRecommendationService } from "./ai-recommendation.service.js";
 import { WorkCategory } from "./ai-recommendation.service.js";
 import { CognitiveLoadService } from "./cognitive-load.service.js";
@@ -638,26 +638,66 @@ export class TaskService {
       },
     });
 
-    return tasks.map(task => ({
-      id: task.id,
-      title: task.title,
-      description: task.description,
-      category: task.category,
-      duration: task.duration,
-      priority: task.priority,
-      position: task.position,
-      completed: task.completed,
-      dueDate: task.dueDate,
-      importance: task.importance,
-      urgency: task.urgency,
-      createdAt: task.createdAt,
-      user: task.user,
-      project: task.project,
-      objective: task.objective,
-      okr: task.okr,
-      plan: task.plan,
-      aiRecommendation: task.aiRecommendation,
-    }));
+    return tasks.map(task => {
+      const response: TaskResponse = {
+        id: task.id,
+        title: task.title,
+        category: task.category,
+        duration: task.duration,
+        priority: task.priority,
+        position: task.position,
+        completed: task.completed,
+        importance: task.importance,
+        urgency: task.urgency,
+        createdAt: task.createdAt,
+        userId: task.userId,
+        user: task.user,
+      };
+      
+      if (task.description !== null) {
+        response.description = task.description;
+      }
+      
+      if (task.dueDate !== null) {
+        response.dueDate = task.dueDate;
+      }
+      
+      if (task.project !== null) {
+        response.project = task.project;
+      }
+      
+      if (task.objective !== null) {
+        response.objective = task.objective;
+      }
+      
+      if (task.okr !== null) {
+        response.okr = task.okr;
+      }
+      
+      if (task.plan !== null) {
+        response.plan = task.plan;
+      }
+      
+      if (task.aiRecommendation !== null) {
+        const aiRec: AIRecommendationResponse = {
+          id: task.aiRecommendation.id,
+          taskId: task.aiRecommendation.taskId,
+          category: task.aiRecommendation.category,
+          recommendedTime: task.aiRecommendation.recommendedTime,
+          confidence: task.aiRecommendation.confidence,
+          createdAt: task.aiRecommendation.createdAt,
+          updatedAt: task.aiRecommendation.updatedAt,
+        };
+        
+        if (task.aiRecommendation.reasoning !== null) {
+          aiRec.reasoning = task.aiRecommendation.reasoning;
+        }
+        
+        response.aiRecommendation = aiRec;
+      }
+      
+      return response;
+    });
   }
 
   /**
@@ -942,7 +982,7 @@ export class TaskService {
       // Validate all task IDs are provided
       for (let i = 0; i < batchData.tasks.length; i++) {
         const task = batchData.tasks[i];
-        if (!task.id || typeof task.id !== 'number') {
+        if (!task || !task.id || typeof task.id !== 'number') {
           throw new Error(`Task ${i + 1} is missing required field: id`);
         }
       }
@@ -1325,16 +1365,24 @@ export class TaskService {
             }
           }
 
-          return {
+          const result: TodayTaskResponse = {
             id: task.id,
             title: task.title,
-            description: task.description || undefined,
             duration: task.duration,
             priority: task.priority,
             importance: task.importance,
             urgency: task.urgency,
             dueDate: (task as any).dueDate,
-            aiRecommendation: aiRecommendation ? {
+            aiRecommendationStatus,
+            rank: index + 1
+          };
+          
+          if (task.description) {
+            result.description = task.description;
+          }
+          
+          if (aiRecommendation) {
+            result.aiRecommendation = {
               id: aiRecommendation.id,
               taskId: aiRecommendation.taskId,
               category: aiRecommendation.category,
@@ -1343,10 +1391,10 @@ export class TaskService {
               reasoning: aiRecommendation.reasoning,
               createdAt: aiRecommendation.createdAt,
               updatedAt: aiRecommendation.updatedAt
-            } : undefined,
-            aiRecommendationStatus,
-            rank: index + 1
-          };
+            };
+          }
+          
+          return result;
         })
       );
 

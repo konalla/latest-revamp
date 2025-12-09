@@ -453,8 +453,8 @@ export class TaskPriorityService {
     const timeInRange = (start: string, end: string): boolean => {
       const [startHour, startMin] = start.split(":").map(Number);
       const [endHour, endMin] = end.split(":").map(Number);
-      const startMinutes = startHour * 60 + startMin;
-      const endMinutes = endHour * 60 + endMin;
+      const startMinutes = (startHour || 0) * 60 + (startMin || 0);
+      const endMinutes = (endHour || 0) * 60 + (endMin || 0);
 
       if (startMinutes <= endMinutes) {
         return currentTimeMinutes >= startMinutes && currentTimeMinutes <= endMinutes;

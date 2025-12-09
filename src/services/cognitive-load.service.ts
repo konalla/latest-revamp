@@ -31,12 +31,12 @@ export class CognitiveLoadService {
    * @returns User's cognitive load meter data
    */
   async getUserCognitiveLoadMeter(userId: number): Promise<CognitiveLoadMeterResponse> {
+    if (!userId || userId === null || userId === undefined) {
+      throw new Error(`Invalid user ID: ${userId}`);
+    }
+    
     try {
       console.log(`Getting cognitive load meter for user ${userId}`);
-      
-      if (!userId || userId === null || userId === undefined) {
-        throw new Error(`Invalid user ID: ${userId}`);
-      }
       
       // Get user's cognitive load meter from database
       let meter = await (prisma as any).cognitiveLoadMeter.findUnique({
@@ -98,6 +98,9 @@ export class CognitiveLoadService {
           return await this.mapDatabaseToResponse(meter, true);
         }
       }
+      
+      // Return the meter response
+      return await this.mapDatabaseToResponse(meter, false);
     } catch (error) {
       console.error(`Error getting cognitive load meter for user ${userId}:`, error);
       throw error;
@@ -187,7 +190,7 @@ export class CognitiveLoadService {
         workloadScore: score,
         workloadZone: zone,
         canProceed,
-        warning
+        ...(warning !== undefined && { warning })
       };
     } catch (error) {
       console.error(`Error getting pre-session coaching for user ${userId}:`, error);
@@ -549,21 +552,23 @@ export class CognitiveLoadService {
       tasks.forEach(task => {
         const category = (task.category || "").toLowerCase();
         if (category === "deepwork" || category.includes("deep")) {
-          categoryCounts.DEEP++;
+          categoryCounts.DEEP = (categoryCounts.DEEP || 0) + 1;
         } else if (category === "creative" || category.includes("creative")) {
-          categoryCounts.CREATIVE++;
+          categoryCounts.CREATIVE = (categoryCounts.CREATIVE || 0) + 1;
         } else if (category === "reflection" || category.includes("reflective") || category.includes("reflection")) {
-          categoryCounts.REFLECTIVE++;
+          categoryCounts.REFLECTIVE = (categoryCounts.REFLECTIVE || 0) + 1;
         } else {
           // Default to executive (includes "execution" and any unknown categories)
-          categoryCounts.EXECUTIVE++;
+          categoryCounts.EXECUTIVE = (categoryCounts.EXECUTIVE || 0) + 1;
         }
       });
 
       // Return the most common category
-      const maxCategory = Object.entries(categoryCounts).reduce((a, b) => 
-        categoryCounts[a[0]] > categoryCounts[b[0]] ? a : b
-      );
+      const maxCategory = Object.entries(categoryCounts).reduce((a, b) => {
+        const aValue = categoryCounts[a[0]] || 0;
+        const bValue = categoryCounts[b[0]] || 0;
+        return aValue > bValue ? a : b;
+      });
 
       return maxCategory[0];
     } catch (error) {
@@ -897,7 +902,10 @@ export class CognitiveLoadService {
           if (!dateGroups[entry.date]) {
             dateGroups[entry.date] = [];
           }
-          dateGroups[entry.date].push(entry);
+          const dateGroup = dateGroups[entry.date];
+          if (dateGroup) {
+            dateGroup.push(entry);
+          }
         }
       });
 

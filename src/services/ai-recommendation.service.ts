@@ -293,7 +293,7 @@ ${formatInstructions}`;
       const response = await this.llm.invoke(messages);
       
       // Parse the structured response
-      const recommendation = await priorityParser.parse(response.content as string);
+      const recommendation = await priorityParser.parse(response.content as string) as TaskRecommendationWithPriority;
       
       // Validate and adjust recommendation based on user preferences
       const validatedRecommendation = this.validateRecommendationWithPriority(recommendation, userPreferences);

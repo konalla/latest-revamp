@@ -238,6 +238,10 @@ export class SubscriptionService {
         subscription = await this.initializeTrial(userId);
       }
 
+      if (!subscription) {
+        throw new Error("Failed to create or retrieve subscription");
+      }
+
       // Check if subscription is canceled but still within billing period
       // In this case, user should use resume endpoint instead of creating new checkout
       if (subscription.status === "CANCELED") {
@@ -363,6 +367,10 @@ export class SubscriptionService {
       // If no subscription exists, initialize trial
       if (!subscription) {
         subscription = await this.initializeTrial(userId);
+      }
+
+      if (!subscription) {
+        throw new Error("Failed to create or retrieve subscription");
       }
 
       // Update subscription status based on current state
@@ -1071,11 +1079,11 @@ export class SubscriptionService {
       // Update subscription
       const now = new Date();
       // Safely handle period dates - check if they exist and are valid
-      const periodStart = stripeSubscription.current_period_start
-        ? new Date(stripeSubscription.current_period_start * 1000)
+      const periodStart = (stripeSubscription as any).current_period_start
+        ? new Date((stripeSubscription as any).current_period_start * 1000)
         : now;
-      const periodEnd = stripeSubscription.current_period_end
-        ? new Date(stripeSubscription.current_period_end * 1000)
+      const periodEnd = (stripeSubscription as any).current_period_end
+        ? new Date((stripeSubscription as any).current_period_end * 1000)
         : null;
 
       // Validate dates before using
@@ -1119,7 +1127,7 @@ export class SubscriptionService {
             currency: invoice.currency || "usd",
             paymentType: "subscription",
             status: "succeeded",
-            stripePaymentIntentId: invoice.payment_intent as string,
+            stripePaymentIntentId: (invoice as any).payment_intent as string,
             stripeInvoiceId: invoice.id,
             receiptUrl: invoice.hosted_invoice_url || null,
           },
@@ -1150,11 +1158,11 @@ export class SubscriptionService {
       }
 
       // Safely handle period dates - check if they exist and are valid
-      const periodStart = stripeSubscription.current_period_start
-        ? new Date(stripeSubscription.current_period_start * 1000)
+      const periodStart = (stripeSubscription as any).current_period_start
+        ? new Date((stripeSubscription as any).current_period_start * 1000)
         : null;
-      const periodEnd = stripeSubscription.current_period_end
-        ? new Date(stripeSubscription.current_period_end * 1000)
+      const periodEnd = (stripeSubscription as any).current_period_end
+        ? new Date((stripeSubscription as any).current_period_end * 1000)
         : null;
 
       // Validate dates before using
@@ -1211,7 +1219,7 @@ export class SubscriptionService {
    */
   private async handleInvoicePaymentSucceeded(invoice: Stripe.Invoice): Promise<void> {
     try {
-      const subscriptionId = invoice.subscription as string;
+      const subscriptionId = (invoice as any).subscription as string;
       if (!subscriptionId) {
         return;
       }
@@ -1225,11 +1233,11 @@ export class SubscriptionService {
       }
 
       // Safely handle period dates from invoice
-      const periodStart = invoice.period_start
-        ? new Date(invoice.period_start * 1000)
+      const periodStart = (invoice as any).period_start
+        ? new Date((invoice as any).period_start * 1000)
         : null;
-      const periodEnd = invoice.period_end
-        ? new Date(invoice.period_end * 1000)
+      const periodEnd = (invoice as any).period_end
+        ? new Date((invoice as any).period_end * 1000)
         : null;
 
       // Validate dates before using
@@ -1264,7 +1272,7 @@ export class SubscriptionService {
             currency: invoice.currency || "usd",
             paymentType: "subscription",
             status: "succeeded",
-            stripePaymentIntentId: invoice.payment_intent as string,
+            stripePaymentIntentId: (invoice as any).payment_intent as string,
             stripeInvoiceId: invoice.id,
             receiptUrl: invoice.hosted_invoice_url || null,
           },
@@ -1281,7 +1289,7 @@ export class SubscriptionService {
    */
   private async handleInvoicePaymentFailed(invoice: Stripe.Invoice): Promise<void> {
     try {
-      const subscriptionId = invoice.subscription as string;
+      const subscriptionId = (invoice as any).subscription as string;
       if (!subscriptionId) {
         return;
       }
@@ -1296,7 +1304,7 @@ export class SubscriptionService {
 
       // Increment retry count
       const newRetryCount = subscription.paymentRetryCount + 1;
-      const failureReason = invoice.last_payment_error?.message || "Payment failed";
+      const failureReason = (invoice as any).last_payment_error?.message || "Payment failed";
       const now = new Date();
 
       // Update subscription with retry tracking
@@ -1324,7 +1332,7 @@ export class SubscriptionService {
             currency: invoice.currency || "usd",
             paymentType: "subscription",
             status: "failed",
-            stripePaymentIntentId: invoice.payment_intent as string,
+            stripePaymentIntentId: (invoice as any).payment_intent as string,
             stripeInvoiceId: invoice.id,
             failureReason: failureReason,
           },
@@ -1344,7 +1352,7 @@ export class SubscriptionService {
    */
   private async handleInvoicePaymentActionRequired(invoice: Stripe.Invoice): Promise<void> {
     try {
-      const subscriptionId = invoice.subscription as string;
+      const subscriptionId = (invoice as any).subscription as string;
       if (!subscriptionId) {
         return;
       }
@@ -1363,7 +1371,7 @@ export class SubscriptionService {
           where: { id: subscription.id },
           data: {
             status: "PAST_DUE",
-            paymentFailureReason: invoice.last_payment_error?.message || "Payment requires user action after 3 retry attempts",
+            paymentFailureReason: (invoice as any).last_payment_error?.message || "Payment requires user action after 3 retry attempts",
           },
         });
 
