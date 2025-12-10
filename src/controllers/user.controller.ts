@@ -4,6 +4,7 @@ import type { CreateUserRequest } from "../types/user.types.js";
 import sharp from "sharp";
 import path from "path";
 import fs from "fs";
+import prisma from "../config/prisma.js";
 
 const createUser = async (req: Request<{}, {}, CreateUserRequest>, res: Response) => {
   try {
@@ -58,10 +59,25 @@ const getCurrentUser = async (req: Request, res: Response) => {
     // Don't return password
     const { password, ...userWithoutPassword } = user;
     
-    // Add default language for now
+    // Get referral status for badge information
+    const referralStatus = await prisma.userReferralStatus.findUnique({
+      where: { userId: user.id },
+      select: {
+        earlyAccessStatus: true,
+        originId: true,
+        vanguardId: true,
+      },
+    });
+    
+    // Add default language and badge info
     const response = {
       ...userWithoutPassword,
-      language: "english"
+      language: "english",
+      badge: referralStatus ? {
+        status: referralStatus.earlyAccessStatus.toLowerCase(),
+        originId: referralStatus.originId,
+        vanguardId: referralStatus.vanguardId,
+      } : null,
     };
     
     res.json(response);

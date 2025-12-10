@@ -19,6 +19,7 @@ import workspaceRoutes from "./routes/workspace.routes.js";
 import teamRoutes from "./routes/team.routes.js";
 import subscriptionRoutes from "./routes/subscription.routes.js";
 import webhookRoutes from "./routes/webhook.routes.js";
+import referralRoutes from "./routes/referral.routes.js";
 
 const app = express();
 
@@ -58,5 +59,6 @@ app.use("/api/analytics", analyticsRoutes);
 app.use("/api", workspaceRoutes);
 app.use("/api", teamRoutes);
 app.use("/api/subscriptions", subscriptionRoutes);
+app.use("/api/referrals", referralRoutes);
 
 export default app;

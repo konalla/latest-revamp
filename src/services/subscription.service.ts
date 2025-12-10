@@ -1,5 +1,7 @@
 import Stripe from "stripe";
 import prisma from "../config/prisma.js";
+import { statusAssignmentService } from "./status-assignment.service.js";
+import { referralService } from "./referral.service.js";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "", {
   apiVersion: "2025-10-29.clover",
@@ -1118,7 +1120,20 @@ export class SubscriptionService {
         where: { name: "stripe" },
       });
 
-      if (stripeProvider) {
+      // Check if this is user's first payment BEFORE creating the payment record
+      const existingPaymentsBefore = await prisma.payment.count({
+        where: {
+          subscription: {
+            userId: subscription.userId,
+          },
+          status: "succeeded",
+          amount: {
+            gt: 0,
+          },
+        },
+      });
+
+      if (stripeProvider && (invoice.amount_paid || 0) > 0) {
         await prisma.payment.create({
           data: {
             subscriptionId: subscription.id,
@@ -1132,6 +1147,40 @@ export class SubscriptionService {
             receiptUrl: invoice.hosted_invoice_url || null,
           },
         });
+      }
+
+      // If this is the first successful payment:
+      // 1. Assign Origin 1000 status to the paying user
+      // 2. Complete referral (if user was referred) - this counts toward referrer's Vanguard qualification
+      if ((invoice.amount_paid || 0) > 0 && existingPaymentsBefore === 0) {
+        console.log(`[Referral] First payment detected for user ${subscription.userId} (checkout session), processing Origin and referral completion...`);
+        
+        try {
+          // Assign Origin status to the paying user
+          await statusAssignmentService.assignOriginStatus(subscription.userId);
+          
+          // Complete referral if user was referred (marks referral as COMPLETED)
+          // This will automatically check and update referrer's Vanguard status
+          try {
+            const referralResult = await referralService.completeReferralOnboarding(subscription.userId);
+            if (referralResult.success) {
+              console.log(`[Referral] Successfully completed referral for user ${subscription.userId}`);
+              if (referralResult.referrerStatusUpdated) {
+                console.log(`[Referral] Referrer status updated to: ${referralResult.newReferrerStatus}`);
+              }
+            }
+          } catch (error: any) {
+            // Log error but don't fail payment processing if referral completion fails
+            // This is expected if user wasn't referred
+            if (error.message?.includes("No referral found")) {
+              console.log(`[Referral] User ${subscription.userId} was not referred, skipping referral completion`);
+            } else {
+              console.error("[Referral] Error completing referral on first payment (checkout session):", error);
+            }
+          }
+        } catch (error: any) {
+          console.error("[Referral] Error in first payment processing (checkout session):", error);
+        }
       }
     } catch (error: any) {
       console.error("Error handling checkout session completed:", error);
@@ -1277,6 +1326,61 @@ export class SubscriptionService {
             receiptUrl: invoice.hosted_invoice_url || null,
           },
         });
+      }
+
+      // Check if this is user's first payment and assign Origin 1000 status if eligible
+      // Only check if invoice amount > 0 (not a $0 trial payment)
+      if ((invoice.amount_paid || 0) > 0) {
+        try {
+          // Check if user already has a successful payment (BEFORE creating the current one)
+          // We need to check BEFORE creating the payment to see if this is truly the first
+          const existingPaymentsBefore = await prisma.payment.count({
+            where: {
+              subscription: {
+                userId: subscription.userId,
+              },
+              status: "succeeded",
+              amount: {
+                gt: 0,
+              },
+            },
+          });
+
+          // If this is the first successful payment (count was 0 before creating this one):
+          // 1. Assign Origin 1000 status to the paying user
+          // 2. Complete referral (if user was referred) - this counts toward referrer's Vanguard qualification
+          if (existingPaymentsBefore === 0) {
+            console.log(`[Referral] First payment detected for user ${subscription.userId}, processing Origin and referral completion...`);
+            
+            // Assign Origin status to the paying user
+            await statusAssignmentService.assignOriginStatus(subscription.userId);
+            
+            // Complete referral if user was referred (marks referral as COMPLETED)
+            // This will automatically check and update referrer's Vanguard status
+            try {
+              const referralResult = await referralService.completeReferralOnboarding(subscription.userId);
+              if (referralResult.success) {
+                console.log(`[Referral] Successfully completed referral for user ${subscription.userId}`);
+                if (referralResult.referrerStatusUpdated) {
+                  console.log(`[Referral] Referrer status updated to: ${referralResult.newReferrerStatus}`);
+                }
+              }
+            } catch (error: any) {
+              // Log error but don't fail payment processing if referral completion fails
+              // This is expected if user wasn't referred
+              if (error.message?.includes("No referral found")) {
+                console.log(`[Referral] User ${subscription.userId} was not referred, skipping referral completion`);
+              } else {
+                console.error("[Referral] Error completing referral on first payment:", error);
+              }
+            }
+          } else {
+            console.log(`[Referral] User ${subscription.userId} already has ${existingPaymentsBefore} payment(s), skipping first payment logic`);
+          }
+        } catch (error: any) {
+          // Log error but don't fail payment processing if Origin assignment or referral completion fails
+          console.error("[Referral] Error in first payment processing:", error);
+        }
       }
     } catch (error: any) {
       console.error("Error handling invoice payment succeeded:", error);

@@ -64,6 +64,9 @@ model User {
   credit_refresh_amount      Int      @default(100)
   last_credit_refresh        DateTime @default(now())
 
+  // Profile Visibility
+  profileVisibility          ProfileVisibility @default(PRIVATE)
+
   created_at                 DateTime @default(now())
   updated_at                 DateTime @updatedAt
   
@@ -85,6 +88,11 @@ model User {
   
   // Subscription relation
   subscription               Subscription?
+  
+  // Referral relations
+  referralStatus             UserReferralStatus?
+  referralsMade              Referral[]              @relation("Referrer")
+  referralsReceived          Referral[]              @relation("ReferredUser")
 }
 
 model Project {
@@ -528,4 +536,90 @@ model Payment {
   
   @@index([subscriptionId, status])
   @@index([stripePaymentIntentId])
+}
+
+// ============================================
+// Referral System Models
+// ============================================
+
+enum EarlyAccessStatus {
+  NONE
+  ORIGIN
+  VANGUARD
+}
+
+enum ReferralStatus {
+  INVITED
+  REGISTERED
+  COMPLETED
+}
+
+enum ProfileVisibility {
+  PRIVATE
+  PUBLIC
+  FRIENDS_ONLY
+}
+
+model ReferralProgram {
+  id                Int      @id @default(autoincrement())
+  name              String   @unique // "Origin 1000" or "Vanguard 300"
+  description       String?
+  totalSeats        Int      // 1000 for Origin, 300 for Vanguard
+  requiredReferrals Int      @default(0) // 0 for Origin, 3 for Vanguard
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@map("referral_programs")
+}
+
+model UserReferralStatus {
+  id                Int               @id @default(autoincrement())
+  userId            Int               @unique
+  earlyAccessStatus EarlyAccessStatus @default(NONE)
+  referralCode      String            @unique // Unique 10-character code
+  rewardsUnlocked  Boolean           @default(false)
+  originId          String?           @unique // Format: ORG-001
+  vanguardId       String?           @unique // Format: VNG-001
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([referralCode])
+  @@index([earlyAccessStatus])
+  @@map("user_referral_status")
+}
+
+model Referral {
+  id          Int            @id @default(autoincrement())
+  referrerId  Int            // User who made the referral
+  referredId  Int            @unique // User who was referred (unique)
+  referralCode String        // Referral code used
+  status      ReferralStatus @default(INVITED)
+  completedAt DateTime?      // When onboarding completed
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  referrer    User           @relation("Referrer", fields: [referrerId], references: [id], onDelete: Cascade)
+  referred    User           @relation("ReferredUser", fields: [referredId], references: [id], onDelete: Cascade)
+
+  @@index([referrerId, status])
+  @@index([referralCode])
+  @@index([status])
+  @@map("referrals")
+}
+
+model ReferralClick {
+  id            Int      @id @default(autoincrement())
+  referralCode  String   // Referral code clicked
+  visitorIpHash String   // Hashed IP for privacy (SHA-256)
+  userAgent     String?
+  referer       String?
+  converted     Boolean  @default(false) // Whether click led to signup
+  createdAt     DateTime @default(now())
+
+  @@index([referralCode])
+  @@index([createdAt])
+  @@map("referral_clicks")
 }

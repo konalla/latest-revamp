@@ -74,13 +74,16 @@ export class CognitiveLoadService {
         const now = new Date();
         const minutesSinceUpdate = (now.getTime() - lastUpdate.getTime()) / (1000 * 60);
         
-        // Only recalculate if it's been more than 5 minutes since last update
-        if (minutesSinceUpdate > 5) {
-          console.log(`Recalculating workload for existing meter for user ${userId} (last update: ${minutesSinceUpdate.toFixed(1)} min ago)`);
+        // Always recalculate for accuracy, but cache for performance
+        // If score is 50 (default) and user has no activity, force recalculation
+        const hasDefaultScore = meter.currentWorkloadScore === 50;
+        
+        if (minutesSinceUpdate > 5 || hasDefaultScore) {
+          console.log(`Recalculating workload for existing meter for user ${userId} (last update: ${minutesSinceUpdate.toFixed(1)} min ago${hasDefaultScore ? ', has default score' : ''})`);
           const recalculatedScore = await this.recalculateWorkloadScore(userId);
           
-          // Only update if the score has changed significantly (more than 5 points difference)
-          if (Math.abs(meter.currentWorkloadScore - recalculatedScore) > 5) {
+          // Always update if score changed (or if it was default 50)
+          if (hasDefaultScore || Math.abs(meter.currentWorkloadScore - recalculatedScore) > 1) {
             console.log(`Updating workload score from ${meter.currentWorkloadScore} to ${recalculatedScore}`);
             meter = await this.updateCognitiveLoadMeter(userId, { currentWorkloadScore: recalculatedScore });
           } else {
@@ -703,7 +706,7 @@ export class CognitiveLoadService {
 
       // If last update was before today, reset to baseline
       if (lastUpdate < today) {
-        const baseline = 15; // Baseline between 10-20
+        const baseline = 0; // Start at 0 for new day - will be calculated from actual activity
         const workloadHistory = Array.isArray(meter.workloadHistory) 
           ? meter.workloadHistory 
           : [];
