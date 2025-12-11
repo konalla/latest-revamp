@@ -17,9 +17,12 @@ export const getWorkspaceLimits = async (userId: number): Promise<{
     const planName = updatedSubscription.subscriptionPlan?.name || null;
     const status = updatedSubscription.status || "TRIAL";
     
-    // Check if user has essential_twenty or business_pro
+    // Check if user has plans with workspace limits
     const hasEssentialTwenty = planName === "essential_twenty";
     const hasBusinessPro = planName === "business_pro";
+    const hasFocusMaster = planName === "focus_master";
+    const hasPerformanceFounder = planName === "performance_founder";
+    const hasWorkspacePlan = hasEssentialTwenty || hasBusinessPro || hasFocusMaster || hasPerformanceFounder;
     
     // Default limits (no subscription or other plans)
     let maxWorkspaces = 1; // Only default workspace
@@ -27,15 +30,21 @@ export const getWorkspaceLimits = async (userId: number): Promise<{
     let canCreateWorkspace = false;
     let canCreateTeam = false;
     
-    if (hasEssentialTwenty || hasBusinessPro) {
+    if (hasWorkspacePlan) {
       if (status === "ACTIVE") {
-        // Full access
+        // Full access (including during 7-day trial for focus_master and performance_founder)
         if (hasEssentialTwenty) {
           maxWorkspaces = 3; // 1 default + 2 more
           maxTeamsPerWorkspace = 5;
         } else if (hasBusinessPro) {
           maxWorkspaces = 5; // 1 default + 4 more
           maxTeamsPerWorkspace = 7;
+        } else if (hasFocusMaster) {
+          maxWorkspaces = 7; // 1 default + 6 more
+          maxTeamsPerWorkspace = 5;
+        } else if (hasPerformanceFounder) {
+          maxWorkspaces = 12; // 1 default + 11 more
+          maxTeamsPerWorkspace = 5;
         }
         canCreateWorkspace = true;
         canCreateTeam = true;
@@ -47,6 +56,12 @@ export const getWorkspaceLimits = async (userId: number): Promise<{
         } else if (hasBusinessPro) {
           maxWorkspaces = 5;
           maxTeamsPerWorkspace = 7;
+        } else if (hasFocusMaster) {
+          maxWorkspaces = 7;
+          maxTeamsPerWorkspace = 5;
+        } else if (hasPerformanceFounder) {
+          maxWorkspaces = 12;
+          maxTeamsPerWorkspace = 5;
         }
         canCreateWorkspace = false;
         canCreateTeam = true;
@@ -58,7 +73,7 @@ export const getWorkspaceLimits = async (userId: number): Promise<{
         canCreateTeam = true; // Can still create teams in default workspace up to 5
       }
     } else {
-      // No essential_twenty or business_pro subscription
+      // No workspace plan subscription
       // Only default workspace with 5 teams, but can create teams up to limit
       maxWorkspaces = 1;
       maxTeamsPerWorkspace = 5;
@@ -508,14 +523,15 @@ export const createWorkspace = async (userId: number, name: string) => {
   
   if (!limits.canCreateWorkspace) {
     const planName = limits.planName;
-    if (planName === "essential_twenty" || planName === "business_pro") {
+    const hasWorkspacePlan = planName === "essential_twenty" || planName === "business_pro" || planName === "focus_master" || planName === "performance_founder";
+    if (hasWorkspacePlan) {
       if (limits.status === "GRACE_PERIOD") {
         throw new Error("Cannot create new workspaces during grace period. Please renew your subscription to create more workspaces.");
       } else {
         throw new Error("Your subscription has expired. Please renew your subscription to create more workspaces.");
       }
     } else {
-      throw new Error("Workspace creation is only available with Essential Twenty or Business Pro subscriptions. Please upgrade to create additional workspaces.");
+      throw new Error("Workspace creation is only available with Essential Twenty, Business Pro, Focus Master, or Performance Founder subscriptions. Please upgrade to create additional workspaces.");
     }
   }
 
@@ -528,11 +544,15 @@ export const createWorkspace = async (userId: number, name: string) => {
   if (existingWorkspacesCount >= limits.maxWorkspaces) {
     const planName = limits.planName;
     if (planName === "essential_twenty") {
-      throw new Error(`You've reached your workspace limit (${limits.maxWorkspaces} workspaces). Upgrade to Business Pro to create up to 5 workspaces.`);
+      throw new Error(`You've reached your workspace limit (${limits.maxWorkspaces} workspaces). Upgrade to Business Pro, Focus Master, or Performance Founder to create more workspaces.`);
     } else if (planName === "business_pro") {
+      throw new Error(`You've reached your workspace limit (${limits.maxWorkspaces} workspaces). Upgrade to Focus Master or Performance Founder to create more workspaces.`);
+    } else if (planName === "focus_master") {
+      throw new Error(`You've reached your workspace limit (${limits.maxWorkspaces} workspaces). Upgrade to Performance Founder to create up to 12 workspaces.`);
+    } else if (planName === "performance_founder") {
       throw new Error(`You've reached your workspace limit (${limits.maxWorkspaces} workspaces).`);
     } else {
-      throw new Error("You can only have 1 workspace (the default workspace). Upgrade to Essential Twenty or Business Pro to create additional workspaces.");
+      throw new Error("You can only have 1 workspace (the default workspace). Upgrade to Essential Twenty, Business Pro, Focus Master, or Performance Founder to create additional workspaces.");
     }
   }
 

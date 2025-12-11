@@ -29,6 +29,14 @@ async function updateStripeIds() {
   // Business Pro Plan
   const businessProPriceId = process.env.STRIPE_BUSINESS_PRO_PRICE_ID;
   const businessProProductId = process.env.STRIPE_BUSINESS_PRO_PRODUCT_ID;
+  
+  // Focus Master Plan
+  const focusMasterPriceId = process.env.STRIPE_FOCUS_MASTER_PRICE_ID;
+  const focusMasterProductId = process.env.STRIPE_FOCUS_MASTER_PRODUCT_ID;
+  
+  // Performance Founder Plan
+  const founderPriceId = process.env.STRIPE_FOUNDER_PRICE_ID;
+  const founderProductId = process.env.STRIPE_FOUNDER_PRODUCT_ID;
 
   // Validate required environment variables
   if (!monthlyPriceId || !monthlyProductId) {
@@ -122,6 +130,40 @@ async function updateStripeIds() {
       console.log("⚠️  Business Pro Plan not updated (STRIPE_BUSINESS_PRO_PRICE_ID and STRIPE_BUSINESS_PRO_PRODUCT_ID not set)\n");
     }
 
+    // Update Focus Master Plan
+    if (focusMasterPriceId && focusMasterProductId) {
+      const focusMasterPlan = await prisma.subscriptionPlan.update({
+        where: { name: "focus_master" },
+        data: {
+          stripePriceId: focusMasterPriceId,
+          stripeProductId: focusMasterProductId,
+        },
+      });
+
+      console.log("✅ Updated Focus Master Plan:");
+      console.log(`   Price ID: ${focusMasterPlan.stripePriceId}`);
+      console.log(`   Product ID: ${focusMasterPlan.stripeProductId}\n`);
+    } else {
+      console.log("⚠️  Focus Master Plan not updated (STRIPE_FOCUS_MASTER_PRICE_ID and STRIPE_FOCUS_MASTER_PRODUCT_ID not set)\n");
+    }
+
+    // Update Performance Founder Plan
+    if (founderPriceId && founderProductId) {
+      const founderPlan = await prisma.subscriptionPlan.update({
+        where: { name: "performance_founder" },
+        data: {
+          stripePriceId: founderPriceId,
+          stripeProductId: founderProductId,
+        },
+      });
+
+      console.log("✅ Updated Performance Founder Plan:");
+      console.log(`   Price ID: ${founderPlan.stripePriceId}`);
+      console.log(`   Product ID: ${founderPlan.stripeProductId}\n`);
+    } else {
+      console.log("⚠️  Performance Founder Plan not updated (STRIPE_FOUNDER_PRICE_ID and STRIPE_FOUNDER_PRODUCT_ID not set)\n");
+    }
+
     console.log("✅ Successfully updated all subscription plans with Stripe IDs!");
     
     if (!clarityPriceId || !clarityProductId) {
@@ -134,6 +176,14 @@ async function updateStripeIds() {
     
     if (!businessProPriceId || !businessProProductId) {
       console.log("💡 Tip: Set STRIPE_BUSINESS_PRO_PRICE_ID and STRIPE_BUSINESS_PRO_PRODUCT_ID to enable Business Pro Plan in Stripe.");
+    }
+    
+    if (!focusMasterPriceId || !focusMasterProductId) {
+      console.log("💡 Tip: Set STRIPE_FOCUS_MASTER_PRICE_ID and STRIPE_FOCUS_MASTER_PRODUCT_ID to enable Focus Master Plan in Stripe.");
+    }
+    
+    if (!founderPriceId || !founderProductId) {
+      console.log("💡 Tip: Set STRIPE_FOUNDER_PRICE_ID and STRIPE_FOUNDER_PRODUCT_ID to enable Performance Founder Plan in Stripe.");
     }
   } catch (error: any) {
     console.error("Error updating subscription plans:", error);

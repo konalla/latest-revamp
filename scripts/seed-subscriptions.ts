@@ -167,6 +167,66 @@ async function main() {
 
   console.log("Created Business Pro Plan");
 
+  const focusMasterPlan = await prisma.subscriptionPlan.upsert({
+    where: { name: "focus_master" },
+    update: {
+      displayName: "Focus Master Plan",
+      description: "Monthly subscription with unlimited tasks and 7 workspaces max",
+      price: 20.00,
+      currency: "USD",
+      billingInterval: "monthly",
+      trialDays: 7,
+      maxTasks: null, // Unlimited tasks
+      features: {},
+      isActive: true,
+      // Note: stripePriceId and stripeProductId should be set manually after creating products in Stripe Dashboard
+    },
+    create: {
+      name: "focus_master",
+      displayName: "Focus Master Plan",
+      description: "Monthly subscription with unlimited tasks and 7 workspaces max",
+      price: 20.00,
+      currency: "USD",
+      billingInterval: "monthly",
+      trialDays: 7,
+      maxTasks: null, // Unlimited tasks
+      features: {},
+      isActive: true,
+    },
+  });
+
+  console.log("Created Focus Master Plan");
+
+  const performanceFounderPlan = await prisma.subscriptionPlan.upsert({
+    where: { name: "performance_founder" },
+    update: {
+      displayName: "Performance Founder Plan",
+      description: "Yearly subscription with unlimited tasks and 12 workspaces max",
+      price: 200.00,
+      currency: "USD",
+      billingInterval: "yearly",
+      trialDays: 7,
+      maxTasks: null, // Unlimited tasks
+      features: {},
+      isActive: true,
+      // Note: stripePriceId and stripeProductId should be set manually after creating products in Stripe Dashboard
+    },
+    create: {
+      name: "performance_founder",
+      displayName: "Performance Founder Plan",
+      description: "Yearly subscription with unlimited tasks and 12 workspaces max",
+      price: 200.00,
+      currency: "USD",
+      billingInterval: "yearly",
+      trialDays: 7,
+      maxTasks: null, // Unlimited tasks
+      features: {},
+      isActive: true,
+    },
+  });
+
+  console.log("Created Performance Founder Plan");
+
   console.log("Seeding completed!");
   console.log("\nIMPORTANT: After creating products in Stripe Dashboard, update the stripePriceId and stripeProductId fields:");
   console.log("- Clarity Plan ID:", trialPlan.id);
@@ -174,6 +234,8 @@ async function main() {
   console.log("- Pro Plan - Yearly ID:", yearlyPlan.id);
   console.log("- Essential Twenty Plan ID:", essentialTwentyPlan.id);
   console.log("- Business Pro Plan ID:", businessProPlan.id);
+  console.log("- Focus Master Plan ID:", focusMasterPlan.id);
+  console.log("- Performance Founder Plan ID:", performanceFounderPlan.id);
 }
 
 main()

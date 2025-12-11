@@ -214,7 +214,7 @@ export class SubscriptionService {
    */
   async createCheckoutSession(
     userId: number,
-    planName: "monthly" | "yearly" | "essential_twenty" | "business_pro"
+    planName: "monthly" | "yearly" | "essential_twenty" | "business_pro" | "focus_master" | "performance_founder"
   ): Promise<{ url: string; sessionId: string }> {
     try {
       // Get user
@@ -246,13 +246,37 @@ export class SubscriptionService {
 
       // Check if subscription is canceled but still within billing period
       // In this case, user should use resume endpoint instead of creating new checkout
-      if (subscription.status === "CANCELED") {
+      // Exception: If switching to focus_master or performance_founder, allow it (they get 7-day trial)
+      const isNewPlanWithTrial = planName === "focus_master" || planName === "performance_founder";
+      if (subscription.status === "CANCELED" && !isNewPlanWithTrial) {
         const now = new Date();
         if (subscription.currentPeriodEnd && now < subscription.currentPeriodEnd) {
           throw new Error(
             "Your subscription is canceled but still active within the billing period. Please use the resume endpoint to reactivate it without additional charges."
           );
         }
+      }
+
+      // If user has an existing active subscription and is switching to a new plan,
+      // cancel the old subscription immediately (for focus_master and performance_founder)
+      if (isNewPlanWithTrial && subscription.status === "ACTIVE" && subscription.stripeSubscriptionId) {
+        try {
+          // Cancel the old Stripe subscription immediately
+          await stripe.subscriptions.cancel(subscription.stripeSubscriptionId);
+        } catch (error: any) {
+          console.error("Error canceling old Stripe subscription:", error);
+          // Continue anyway - we'll update the local subscription
+        }
+        
+        // Update local subscription to canceled
+        await prisma.subscription.update({
+          where: { id: subscription.id },
+          data: {
+            status: "CANCELED",
+            cancelAtPeriodEnd: false,
+            canceledAt: new Date(),
+          },
+        });
       }
 
       // Get target plan
@@ -317,6 +341,19 @@ export class SubscriptionService {
       }
 
       // Create checkout session
+      // For focus_master and performance_founder, add 7-day trial in Stripe
+      const subscriptionData: any = {
+        metadata: {
+          userId: userId.toString(),
+          planName: planName,
+          subscriptionId: subscription.id.toString(),
+        },
+      };
+      
+      if (isNewPlanWithTrial) {
+        subscriptionData.trial_period_days = 7;
+      }
+
       const session = await stripe.checkout.sessions.create({
         customer: stripeCustomerId,
         payment_method_types: ["card"],
@@ -334,13 +371,7 @@ export class SubscriptionService {
           planName: planName,
           subscriptionId: subscription.id.toString(),
         },
-        subscription_data: {
-          metadata: {
-            userId: userId.toString(),
-            planName: planName,
-            subscriptionId: subscription.id.toString(),
-          },
-        },
+        subscription_data: subscriptionData,
       });
 
       return {
@@ -504,6 +535,19 @@ export class SubscriptionService {
         return {
           canCreate: false,
           reason: "Subscription canceled. Please renew to continue creating tasks.",
+          subscription: updatedSubscription,
+        };
+      }
+
+      // Check if plan has unlimited tasks (focus_master or performance_founder)
+      const planName = updatedSubscription.subscriptionPlan?.name;
+      const hasUnlimitedTasks = planName === "focus_master" || planName === "performance_founder";
+      
+      // If unlimited tasks, skip task limit checks
+      if (hasUnlimitedTasks) {
+        return {
+          canCreate: true,
+          tasksRemaining: null, // null indicates unlimited
           subscription: updatedSubscription,
         };
       }
@@ -793,12 +837,22 @@ export class SubscriptionService {
         throw new Error("Subscription not found");
       }
 
+      // Check if we're in 7-day trial period (focus_master or performance_founder)
+      const isInTrialPeriod = subscription.trialEnd && new Date() < subscription.trialEnd;
+      const isTrialPlan = subscription.subscriptionPlan.name === "focus_master" || subscription.subscriptionPlan.name === "performance_founder";
+
       // If has Stripe subscription, cancel it
       if (subscription.stripeSubscriptionId) {
         try {
-          await stripe.subscriptions.update(subscription.stripeSubscriptionId, {
-            cancel_at_period_end: true,
-          });
+          // If in trial period, cancel immediately in Stripe
+          if (isInTrialPeriod && isTrialPlan) {
+            await stripe.subscriptions.cancel(subscription.stripeSubscriptionId);
+          } else {
+            // Otherwise, cancel at period end
+            await stripe.subscriptions.update(subscription.stripeSubscriptionId, {
+              cancel_at_period_end: true,
+            });
+          }
         } catch (error) {
           console.error("Error canceling Stripe subscription:", error);
           // Continue with local cancellation even if Stripe fails
@@ -806,6 +860,7 @@ export class SubscriptionService {
       }
 
       // Cancel immediately (user requirement)
+      // If in trial period, user loses access immediately
       const updated = await prisma.subscription.update({
         where: { id: subscription.id },
         data: {
@@ -896,6 +951,16 @@ export class SubscriptionService {
         return {
           maxWorkspaces: 5, // 1 default + 4 additional
           maxTeamsPerWorkspace: 7
+        };
+      case "focus_master":
+        return {
+          maxWorkspaces: 7, // 1 default + 6 additional
+          maxTeamsPerWorkspace: 5
+        };
+      case "performance_founder":
+        return {
+          maxWorkspaces: 12, // 1 default + 11 additional
+          maxTeamsPerWorkspace: 5
         };
       default:
         // For monthly, yearly, trial, or any other plan
@@ -1092,17 +1157,26 @@ export class SubscriptionService {
       const validPeriodStart = periodStart && !isNaN(periodStart.getTime()) ? periodStart : now;
       const validPeriodEnd = periodEnd && !isNaN(periodEnd.getTime()) ? periodEnd : null;
 
+      // Check if this is a plan with 7-day trial (focus_master or performance_founder)
+      const has7DayTrial = targetPlan.name === "focus_master" || targetPlan.name === "performance_founder";
+      const trialStartDate = has7DayTrial ? now : (subscription.status === "TRIAL" ? subscription.trialStart : null);
+      const trialEndDate = has7DayTrial ? (() => {
+        const endDate = new Date(now);
+        endDate.setDate(endDate.getDate() + 7);
+        return endDate;
+      })() : null;
+
       await prisma.subscription.update({
         where: { id: subscription.id },
         data: {
           subscriptionPlanId: targetPlan.id,
-          status: "ACTIVE",
+          status: "ACTIVE", // Status is ACTIVE even during 7-day trial
           stripeSubscriptionId: stripeSubscriptionId,
           stripeCustomerId: stripeSubscription.customer as string,
           currentPeriodStart: validPeriodStart,
           currentPeriodEnd: validPeriodEnd,
-          trialStart: subscription.status === "TRIAL" ? subscription.trialStart : null,
-          trialEnd: null, // End trial when subscription starts
+          trialStart: trialStartDate,
+          trialEnd: trialEndDate, // 7 days from now for focus_master and performance_founder
           tasksCreatedThisPeriod: 0, // Reset task count
           lastTaskCountReset: validPeriodStart,
           cancelAtPeriodEnd: false,
@@ -1133,7 +1207,17 @@ export class SubscriptionService {
         },
       });
 
-      if (stripeProvider && (invoice.amount_paid || 0) > 0) {
+      // Check if we're in the 7-day trial period - if so, don't create payment record yet
+      // The first charge will happen after the trial ends
+      const updatedSubscription = await prisma.subscription.findUnique({
+        where: { id: subscription.id },
+        include: { subscriptionPlan: true },
+      });
+      
+      const isInTrialPeriod = updatedSubscription?.trialEnd && new Date() < updatedSubscription.trialEnd;
+      const shouldCreatePayment = stripeProvider && (invoice.amount_paid || 0) > 0 && !isInTrialPeriod;
+
+      if (shouldCreatePayment) {
         await prisma.payment.create({
           data: {
             subscriptionId: subscription.id,
@@ -1152,7 +1236,8 @@ export class SubscriptionService {
       // If this is the first successful payment:
       // 1. Assign Origin 1000 status to the paying user
       // 2. Complete referral (if user was referred) - this counts toward referrer's Vanguard qualification
-      if ((invoice.amount_paid || 0) > 0 && existingPaymentsBefore === 0) {
+      // Only process if not in trial period (first charge after trial ends)
+      if ((invoice.amount_paid || 0) > 0 && existingPaymentsBefore === 0 && !isInTrialPeriod) {
         console.log(`[Referral] First payment detected for user ${subscription.userId} (checkout session), processing Origin and referral completion...`);
         
         try {

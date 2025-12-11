@@ -281,7 +281,8 @@ export const createTeam = async (userId: number, name: string, workspaceId?: num
   
   if (!limits.canCreateTeam) {
     const planName = limits.planName;
-    if (planName === "essential_twenty" || planName === "business_pro") {
+    const hasWorkspacePlan = planName === "essential_twenty" || planName === "business_pro" || planName === "focus_master" || planName === "performance_founder";
+    if (hasWorkspacePlan) {
       if (limits.status === "GRACE_PERIOD") {
         throw new Error("Cannot create new teams during grace period. Please renew your subscription to create more teams.");
       } else {

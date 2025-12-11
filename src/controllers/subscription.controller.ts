@@ -41,8 +41,8 @@ export class SubscriptionController {
 
       const { planName } = req.body;
 
-      if (!planName || (planName !== "monthly" && planName !== "yearly" && planName !== "essential_twenty" && planName !== "business_pro")) {
-        res.status(400).json({ error: "Invalid plan name. Must be 'monthly', 'yearly', 'essential_twenty', or 'business_pro'" });
+      if (!planName || (planName !== "monthly" && planName !== "yearly" && planName !== "essential_twenty" && planName !== "business_pro" && planName !== "focus_master" && planName !== "performance_founder")) {
+        res.status(400).json({ error: "Invalid plan name. Must be 'monthly', 'yearly', 'essential_twenty', 'business_pro', 'focus_master', or 'performance_founder'" });
         return;
       }
 
