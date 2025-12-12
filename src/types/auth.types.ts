@@ -8,6 +8,7 @@ export interface RegisterRequest {
   password: string;
   username: string;
   name: string;
+  referralCode?: string; // Optional referral code for signup
 }
 
 export interface AuthResponse {

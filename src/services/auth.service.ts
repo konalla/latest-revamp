@@ -14,6 +14,7 @@ import { generateToken } from "../utils/jwt.utils.js";
 import { ensureWorkspaceAndTeamForUser } from "./workspace.service.js";
 import { subscriptionService } from "./subscription.service.js";
 import { sendPasswordResetEmail } from "./email.service.js";
+import { referralService } from "./referral.service.js";
 
 const SALT_ROUNDS = 10;
 
@@ -59,6 +60,16 @@ const register = async (data: RegisterRequest): Promise<AuthResponse> => {
 
   // Ensure workspace and team exist for this user
   await ensureWorkspaceAndTeamForUser(user.id, user.name, user.username);
+
+  // Register referral if referral code is provided
+  if (data.referralCode) {
+    try {
+      await referralService.registerReferral(user.id, data.referralCode);
+    } catch (error: any) {
+      // Log error but don't fail registration if referral fails
+      console.error("Error registering referral during signup:", error);
+    }
+  }
 
   // Note: Trial subscription will be created when user sets up payment method
   // via POST /api/subscriptions/setup-clarity-plan endpoint

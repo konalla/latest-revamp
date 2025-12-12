@@ -36,7 +36,10 @@ const sendPasswordResetEmail = async (
 
   const msg = {
     to: email,
-    from: fromEmail,
+    from: {
+      email: fromEmail,
+      name: "IQniti"
+    },
     subject: "Reset Your Password - IQniti",
     text: `Hi ${name},\n\nYou requested to reset your password. Click the link below to reset it:\n\n${resetUrl}\n\nThis link will expire in ${expiryHours} hour(s).\n\nIf you didn't request this password reset, please ignore this email. Your password will remain unchanged.\n\nBest regards,\nIQniti Team`,
     html: `

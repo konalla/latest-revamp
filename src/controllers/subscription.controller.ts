@@ -15,6 +15,15 @@ export class SubscriptionController {
 
       const subscription = await subscriptionService.getUserSubscription(userId);
 
+      // If no subscription exists, return null (frontend should show plan selection)
+      if (!subscription) {
+        res.status(200).json({
+          subscription: null,
+          message: "No subscription found. Please choose a subscription plan.",
+        });
+        return;
+      }
+
       // Calculate warnings
       const warnings = this.calculateWarnings(subscription);
 
@@ -41,8 +50,8 @@ export class SubscriptionController {
 
       const { planName } = req.body;
 
-      if (!planName || (planName !== "monthly" && planName !== "yearly" && planName !== "essential_twenty" && planName !== "business_pro")) {
-        res.status(400).json({ error: "Invalid plan name. Must be 'monthly', 'yearly', 'essential_twenty', or 'business_pro'" });
+      if (!planName || (planName !== "monthly" && planName !== "yearly" && planName !== "essential_twenty" && planName !== "business_pro" && planName !== "focus_master" && planName !== "performance_founder")) {
+        res.status(400).json({ error: "Invalid plan name. Must be 'monthly', 'yearly', 'essential_twenty', 'business_pro', 'focus_master', or 'performance_founder'" });
         return;
       }
 

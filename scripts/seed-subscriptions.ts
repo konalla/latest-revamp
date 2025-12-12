@@ -22,11 +22,11 @@ async function main() {
     where: { name: "trial" },
     update: {
       displayName: "Clarity Plan",
-      description: "Free plan with 3-day trial and 50 tasks",
+      description: "Free plan with 7-day trial and 50 tasks",
       price: 0,
       currency: "USD",
       billingInterval: "trial",
-      trialDays: 3,
+      trialDays: 7,
       maxTasks: 50,
       features: {},
       isActive: true,
@@ -34,11 +34,11 @@ async function main() {
     create: {
       name: "trial",
       displayName: "Clarity Plan",
-      description: "Free plan with 3-day trial and 50 tasks",
+      description: "Free plan with 7-day trial and 50 tasks",
       price: 0,
       currency: "USD",
       billingInterval: "trial",
-      trialDays: 3,
+      trialDays: 7,
       maxTasks: 50,
       features: {},
       isActive: true,
@@ -55,7 +55,7 @@ async function main() {
       price: 18.00,
       currency: "USD",
       billingInterval: "monthly",
-      trialDays: null,
+      trialDays: 7,
       maxTasks: 1000,
       features: {},
       isActive: true,
@@ -68,7 +68,7 @@ async function main() {
       price: 18.00,
       currency: "USD",
       billingInterval: "monthly",
-      trialDays: null,
+      trialDays: 7,
       maxTasks: 1000,
       features: {},
       isActive: true,
@@ -85,7 +85,7 @@ async function main() {
       price: 180.00,
       currency: "USD",
       billingInterval: "yearly",
-      trialDays: null,
+      trialDays: 7,
       maxTasks: 10000,
       features: {},
       isActive: true,
@@ -98,7 +98,7 @@ async function main() {
       price: 180.00,
       currency: "USD",
       billingInterval: "yearly",
-      trialDays: null,
+      trialDays: 7,
       maxTasks: 10000,
       features: {},
       isActive: true,
@@ -115,7 +115,7 @@ async function main() {
       price: 24.00,
       currency: "USD",
       billingInterval: "monthly",
-      trialDays: null,
+      trialDays: 7,
       maxTasks: 1500,
       features: {},
       isActive: true,
@@ -128,7 +128,7 @@ async function main() {
       price: 24.00,
       currency: "USD",
       billingInterval: "monthly",
-      trialDays: null,
+      trialDays: 7,
       maxTasks: 1500,
       features: {},
       isActive: true,
@@ -145,7 +145,7 @@ async function main() {
       price: 49.00,
       currency: "USD",
       billingInterval: "monthly",
-      trialDays: null,
+      trialDays: 7,
       maxTasks: 2000,
       features: {},
       isActive: true,
@@ -158,7 +158,7 @@ async function main() {
       price: 49.00,
       currency: "USD",
       billingInterval: "monthly",
-      trialDays: null,
+      trialDays: 7,
       maxTasks: 2000,
       features: {},
       isActive: true,
@@ -167,6 +167,66 @@ async function main() {
 
   console.log("Created Business Pro Plan");
 
+  const focusMasterPlan = await prisma.subscriptionPlan.upsert({
+    where: { name: "focus_master" },
+    update: {
+      displayName: "Focus Master Plan",
+      description: "Monthly subscription with unlimited tasks and 7 workspaces max",
+      price: 20.00,
+      currency: "USD",
+      billingInterval: "monthly",
+      trialDays: 7,
+      maxTasks: null, // Unlimited tasks
+      features: {},
+      isActive: true,
+      // Note: stripePriceId and stripeProductId should be set manually after creating products in Stripe Dashboard
+    },
+    create: {
+      name: "focus_master",
+      displayName: "Focus Master Plan",
+      description: "Monthly subscription with unlimited tasks and 7 workspaces max",
+      price: 20.00,
+      currency: "USD",
+      billingInterval: "monthly",
+      trialDays: 7,
+      maxTasks: null, // Unlimited tasks
+      features: {},
+      isActive: true,
+    },
+  });
+
+  console.log("Created Focus Master Plan");
+
+  const performanceFounderPlan = await prisma.subscriptionPlan.upsert({
+    where: { name: "performance_founder" },
+    update: {
+      displayName: "Performance Founder Plan",
+      description: "Yearly subscription with unlimited tasks and 12 workspaces max",
+      price: 200.00,
+      currency: "USD",
+      billingInterval: "yearly",
+      trialDays: 7,
+      maxTasks: null, // Unlimited tasks
+      features: {},
+      isActive: true,
+      // Note: stripePriceId and stripeProductId should be set manually after creating products in Stripe Dashboard
+    },
+    create: {
+      name: "performance_founder",
+      displayName: "Performance Founder Plan",
+      description: "Yearly subscription with unlimited tasks and 12 workspaces max",
+      price: 200.00,
+      currency: "USD",
+      billingInterval: "yearly",
+      trialDays: 7,
+      maxTasks: null, // Unlimited tasks
+      features: {},
+      isActive: true,
+    },
+  });
+
+  console.log("Created Performance Founder Plan");
+
   console.log("Seeding completed!");
   console.log("\nIMPORTANT: After creating products in Stripe Dashboard, update the stripePriceId and stripeProductId fields:");
   console.log("- Clarity Plan ID:", trialPlan.id);
@@ -174,6 +234,8 @@ async function main() {
   console.log("- Pro Plan - Yearly ID:", yearlyPlan.id);
   console.log("- Essential Twenty Plan ID:", essentialTwentyPlan.id);
   console.log("- Business Pro Plan ID:", businessProPlan.id);
+  console.log("- Focus Master Plan ID:", focusMasterPlan.id);
+  console.log("- Performance Founder Plan ID:", performanceFounderPlan.id);
 }
 
 main()
