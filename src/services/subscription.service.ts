@@ -47,7 +47,7 @@ export class SubscriptionService {
 
       const now = new Date();
       const trialEnd = new Date(now);
-      trialEnd.setDate(trialEnd.getDate() + 3); // 3 days trial
+      trialEnd.setDate(trialEnd.getDate() + 7); // 7 days trial
 
       // Use upsert to handle race conditions gracefully
       const subscription = await prisma.subscription.upsert({
@@ -102,8 +102,10 @@ export class SubscriptionService {
   }
 
   /**
-   * Setup Clarity Plan - Create Stripe customer and $0 subscription
-   * This collects payment method without charging
+   * Setup Clarity Plan - DEPRECATED
+   * Users should now choose a paid plan directly instead of using the Clarity Plan
+   * This endpoint is kept for backward compatibility but should not be used for new users
+   * @deprecated Use createCheckoutSession with a paid plan instead
    */
   async setupClarityPlan(userId: number): Promise<{ url: string; sessionId: string }> {
     try {
@@ -235,20 +237,16 @@ export class SubscriptionService {
         },
       });
 
-      // If no subscription exists, initialize trial first
+      // Users should choose a paid plan directly - no automatic Clarity Plan creation
       if (!subscription) {
-        subscription = await this.initializeTrial(userId);
-      }
-
-      if (!subscription) {
-        throw new Error("Failed to create or retrieve subscription");
+        throw new Error("No subscription found. Please choose a subscription plan first.");
       }
 
       // Check if subscription is canceled but still within billing period
       // In this case, user should use resume endpoint instead of creating new checkout
-      // Exception: If switching to focus_master or performance_founder, allow it (they get 7-day trial)
-      const isNewPlanWithTrial = planName === "focus_master" || planName === "performance_founder";
-      if (subscription.status === "CANCELED" && !isNewPlanWithTrial) {
+      // Exception: All paid plans now get 7-day trial, so allow switching
+      const isPaidPlan = planName !== "trial";
+      if (subscription.status === "CANCELED" && !isPaidPlan) {
         const now = new Date();
         if (subscription.currentPeriodEnd && now < subscription.currentPeriodEnd) {
           throw new Error(
@@ -257,9 +255,9 @@ export class SubscriptionService {
         }
       }
 
-      // If user has an existing active subscription and is switching to a new plan,
-      // cancel the old subscription immediately (for focus_master and performance_founder)
-      if (isNewPlanWithTrial && subscription.status === "ACTIVE" && subscription.stripeSubscriptionId) {
+      // If user has an existing active subscription and is switching to a new paid plan,
+      // cancel the old subscription immediately (all paid plans get 7-day trial)
+      if (isPaidPlan && subscription.status === "ACTIVE" && subscription.stripeSubscriptionId) {
         try {
           // Cancel the old Stripe subscription immediately
           await stripe.subscriptions.cancel(subscription.stripeSubscriptionId);
@@ -341,7 +339,7 @@ export class SubscriptionService {
       }
 
       // Create checkout session
-      // For focus_master and performance_founder, add 7-day trial in Stripe
+      // All paid plans now get 7-day trial in Stripe
       const subscriptionData: any = {
         metadata: {
           userId: userId.toString(),
@@ -350,7 +348,8 @@ export class SubscriptionService {
         },
       };
       
-      if (isNewPlanWithTrial) {
+      // Set 7-day trial for all paid plans (not the "trial" plan itself)
+      if (planName !== "trial") {
         subscriptionData.trial_period_days = 7;
       }
 
@@ -397,13 +396,16 @@ export class SubscriptionService {
         },
       });
 
-      // If no subscription exists, initialize trial
+      // Users should choose a paid plan directly - no automatic Clarity Plan creation
+      // Return null if no subscription exists (frontend should show plan selection)
       if (!subscription) {
-        subscription = await this.initializeTrial(userId);
+        return null;
       }
 
-      if (!subscription) {
-        throw new Error("Failed to create or retrieve subscription");
+      // If user has Clarity Plan (trial plan), return null to force them to choose a paid plan
+      // This ensures users skip the Clarity Plan and choose a paid plan directly
+      if (subscription.subscriptionPlan.name === "trial") {
+        return null;
       }
 
       // Update subscription status based on current state
@@ -516,7 +518,11 @@ export class SubscriptionService {
       const subscription = await this.getUserSubscription(userId);
 
       if (!subscription) {
-        return { canCreate: false, reason: "No subscription found" };
+        return { 
+          canCreate: false, 
+          reason: "No subscription found. Please choose a subscription plan to continue creating tasks.",
+          tasksRemaining: 0
+        };
       }
 
       const updatedSubscription = await this.updateSubscriptionStatus(subscription.id);
@@ -790,6 +796,16 @@ export class SubscriptionService {
   }> {
     try {
       const subscription = await this.getUserSubscription(userId);
+      
+      // If no subscription exists, user needs to choose a plan
+      if (!subscription) {
+        return {
+          canWrite: false,
+          reason: "No subscription found. Please choose a subscription plan to continue.",
+          subscription: null,
+        };
+      }
+      
       const updatedSubscription = await this.updateSubscriptionStatus(subscription.id);
 
       // If expired (after grace period), can only view
@@ -837,15 +853,15 @@ export class SubscriptionService {
         throw new Error("Subscription not found");
       }
 
-      // Check if we're in 7-day trial period (focus_master or performance_founder)
+      // Check if we're in 7-day trial period (all paid plans now have 7-day trial)
       const isInTrialPeriod = subscription.trialEnd && new Date() < subscription.trialEnd;
-      const isTrialPlan = subscription.subscriptionPlan.name === "focus_master" || subscription.subscriptionPlan.name === "performance_founder";
+      const isPaidPlan = subscription.subscriptionPlan.name !== "trial";
 
       // If has Stripe subscription, cancel it
       if (subscription.stripeSubscriptionId) {
         try {
-          // If in trial period, cancel immediately in Stripe
-          if (isInTrialPeriod && isTrialPlan) {
+          // If in trial period for paid plans, cancel immediately in Stripe
+          if (isInTrialPeriod && isPaidPlan) {
             await stripe.subscriptions.cancel(subscription.stripeSubscriptionId);
           } else {
             // Otherwise, cancel at period end
@@ -1059,6 +1075,8 @@ export class SubscriptionService {
       }
 
       // Handle setup mode (payment method collection for Clarity Plan)
+      // DEPRECATED: This flow is deprecated. Users should choose a paid plan directly.
+      // Keeping for backward compatibility with existing users who may have started this flow.
       if (session.mode === "setup") {
         const setupIntent = await stripe.setupIntents.retrieve(session.setup_intent as string);
         const customerId = session.customer as string;
@@ -1157,8 +1175,11 @@ export class SubscriptionService {
       const validPeriodStart = periodStart && !isNaN(periodStart.getTime()) ? periodStart : now;
       const validPeriodEnd = periodEnd && !isNaN(periodEnd.getTime()) ? periodEnd : null;
 
-      // Check if this is a plan with 7-day trial (focus_master or performance_founder)
-      const has7DayTrial = targetPlan.name === "focus_master" || targetPlan.name === "performance_founder";
+      // All paid plans now get 7-day trial
+      const isPaidPlan = targetPlan.name !== "trial";
+      const has7DayTrial = isPaidPlan && targetPlan.trialDays === 7;
+      
+      // Set trial dates for all paid plans with 7-day trial
       const trialStartDate = has7DayTrial ? now : (subscription.status === "TRIAL" ? subscription.trialStart : null);
       const trialEndDate = has7DayTrial ? (() => {
         const endDate = new Date(now);
@@ -1166,17 +1187,20 @@ export class SubscriptionService {
         return endDate;
       })() : null;
 
+      // Status is TRIAL during 7-day trial period, will be updated to ACTIVE after first payment
+      const subscriptionStatus = has7DayTrial ? "TRIAL" : "ACTIVE";
+
       await prisma.subscription.update({
         where: { id: subscription.id },
         data: {
           subscriptionPlanId: targetPlan.id,
-          status: "ACTIVE", // Status is ACTIVE even during 7-day trial
+          status: subscriptionStatus, // TRIAL during 7-day trial, ACTIVE after payment
           stripeSubscriptionId: stripeSubscriptionId,
           stripeCustomerId: stripeSubscription.customer as string,
           currentPeriodStart: validPeriodStart,
           currentPeriodEnd: validPeriodEnd,
           trialStart: trialStartDate,
-          trialEnd: trialEndDate, // 7 days from now for focus_master and performance_founder
+          trialEnd: trialEndDate, // 7 days from now for all paid plans
           tasksCreatedThisPeriod: 0, // Reset task count
           lastTaskCountReset: validPeriodStart,
           cancelAtPeriodEnd: false,

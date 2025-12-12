@@ -32,7 +32,7 @@ export const getWorkspaceLimits = async (userId: number): Promise<{
     
     if (hasWorkspacePlan) {
       if (status === "ACTIVE") {
-        // Full access (including during 7-day trial for focus_master and performance_founder)
+        // Full access (including during 7-day trial for all paid plans)
         if (hasEssentialTwenty) {
           maxWorkspaces = 3; // 1 default + 2 more
           maxTeamsPerWorkspace = 5;

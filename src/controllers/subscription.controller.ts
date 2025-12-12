@@ -15,6 +15,15 @@ export class SubscriptionController {
 
       const subscription = await subscriptionService.getUserSubscription(userId);
 
+      // If no subscription exists, return null (frontend should show plan selection)
+      if (!subscription) {
+        res.status(200).json({
+          subscription: null,
+          message: "No subscription found. Please choose a subscription plan.",
+        });
+        return;
+      }
+
       // Calculate warnings
       const warnings = this.calculateWarnings(subscription);
 

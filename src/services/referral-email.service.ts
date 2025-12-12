@@ -35,7 +35,10 @@ export const sendReferralInvitationEmail = async (
 
   const msg = {
     to,
-    from: fromEmail,
+    from: {
+      email: fromEmail,
+      name: "IQniti"
+    },
     subject: "Join me on IQniti - Exclusive Early Access! 🚀",
     text: generatePlainTextEmail(referrerName, referrerEmail, referralLink),
     html: generateHtmlEmail(referrerName, referrerEmail, referralLink),
