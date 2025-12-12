@@ -237,16 +237,26 @@ export class SubscriptionService {
         },
       });
 
-      // Users should choose a paid plan directly - no automatic Clarity Plan creation
-      if (!subscription) {
-        throw new Error("No subscription found. Please choose a subscription plan first.");
+      // Allow checkout if:
+      // 1. No subscription exists (new user choosing first plan)
+      // 2. User has Clarity Plan (trial plan) - they're switching to paid plan
+      // 3. User has canceled subscription - they're resubscribing
+      const canProceed = !subscription || 
+                         (subscription && subscription.subscriptionPlan.name === "trial") ||
+                         (subscription && subscription.status === "CANCELED") ||
+                         (subscription && subscription.status === "EXPIRED");
+
+      if (subscription && !canProceed && subscription.status === "ACTIVE") {
+        throw new Error("You already have an active subscription. Please cancel it first before subscribing to a new plan.");
       }
 
       // Check if subscription is canceled but still within billing period
       // In this case, user should use resume endpoint instead of creating new checkout
       // Exception: All paid plans now get 7-day trial, so allow switching
       const isPaidPlan = planName !== "trial";
-      if (subscription.status === "CANCELED" && !isPaidPlan) {
+      const hasClarityPlan = subscription && subscription.subscriptionPlan.name === "trial";
+      
+      if (subscription && !hasClarityPlan && subscription.status === "CANCELED" && !isPaidPlan) {
         const now = new Date();
         if (subscription.currentPeriodEnd && now < subscription.currentPeriodEnd) {
           throw new Error(
@@ -255,9 +265,9 @@ export class SubscriptionService {
         }
       }
 
-      // If user has an existing active subscription and is switching to a new paid plan,
+      // If user has an existing active paid subscription and is switching to a new paid plan,
       // cancel the old subscription immediately (all paid plans get 7-day trial)
-      if (isPaidPlan && subscription.status === "ACTIVE" && subscription.stripeSubscriptionId) {
+      if (subscription && !hasClarityPlan && isPaidPlan && subscription.status === "ACTIVE" && subscription.stripeSubscriptionId) {
         try {
           // Cancel the old Stripe subscription immediately
           await stripe.subscriptions.cancel(subscription.stripeSubscriptionId);
@@ -287,7 +297,7 @@ export class SubscriptionService {
       }
 
       // Get or create Stripe customer
-      let stripeCustomerId = subscription.stripeCustomerId;
+      let stripeCustomerId = subscription?.stripeCustomerId;
 
       if (!stripeCustomerId) {
         const customer = await stripe.customers.create({
@@ -300,11 +310,13 @@ export class SubscriptionService {
 
         stripeCustomerId = customer.id;
 
-        // Update subscription with Stripe customer ID
-        await prisma.subscription.update({
-          where: { id: subscription.id },
-          data: { stripeCustomerId },
-        });
+        // Update subscription with Stripe customer ID if subscription exists
+        if (subscription) {
+          await prisma.subscription.update({
+            where: { id: subscription.id },
+            data: { stripeCustomerId },
+          });
+        }
       } else {
         // Verify the customer exists in Stripe
         // If it doesn't exist, create a new one
@@ -326,11 +338,13 @@ export class SubscriptionService {
 
             stripeCustomerId = customer.id;
 
-            // Update subscription with new Stripe customer ID
-            await prisma.subscription.update({
-              where: { id: subscription.id },
-              data: { stripeCustomerId },
-            });
+            // Update subscription with new Stripe customer ID if subscription exists
+            if (subscription) {
+              await prisma.subscription.update({
+                where: { id: subscription.id },
+                data: { stripeCustomerId },
+              });
+            }
           } else {
             // Re-throw other errors
             throw error;
@@ -344,7 +358,7 @@ export class SubscriptionService {
         metadata: {
           userId: userId.toString(),
           planName: planName,
-          subscriptionId: subscription.id.toString(),
+          subscriptionId: subscription?.id?.toString() || "0", // 0 if no subscription exists
         },
       };
       
@@ -368,7 +382,7 @@ export class SubscriptionService {
         metadata: {
           userId: userId.toString(),
           planName: planName,
-          subscriptionId: subscription.id.toString(),
+          subscriptionId: subscription?.id?.toString() || "0", // 0 if no subscription exists
         },
         subscription_data: subscriptionData,
       });
@@ -721,6 +735,16 @@ export class SubscriptionService {
   }> {
     try {
       const subscription = await this.getUserSubscription(userId);
+      
+      // If no subscription exists, user needs to choose a plan
+      if (!subscription) {
+        return {
+          canAdd: false,
+          reason: "No subscription found. Please choose a subscription plan to add team members.",
+          subscription: null,
+        };
+      }
+      
       const updatedSubscription = await this.updateSubscriptionStatus(subscription.id);
 
       // Only allow adding team members if subscription is ACTIVE
@@ -757,6 +781,16 @@ export class SubscriptionService {
   }> {
     try {
       const subscription = await this.getUserSubscription(userId);
+      
+      // If no subscription exists, user doesn't have active subscription
+      if (!subscription) {
+        return {
+          hasActive: false,
+          reason: "No subscription found. User must subscribe to join a team.",
+          subscription: null,
+        };
+      }
+      
       const updatedSubscription = await this.updateSubscriptionStatus(subscription.id);
 
       // Only ACTIVE status is considered active subscription
@@ -850,7 +884,12 @@ export class SubscriptionService {
       });
 
       if (!subscription) {
-        throw new Error("Subscription not found");
+        throw new Error("No subscription found. Please choose a subscription plan first.");
+      }
+
+      // If user has Clarity Plan (trial plan), they should choose a paid plan instead
+      if (subscription.subscriptionPlan.name === "trial") {
+        throw new Error("Clarity Plan subscriptions cannot be canceled. Please choose a paid subscription plan.");
       }
 
       // Check if we're in 7-day trial period (all paid plans now have 7-day trial)
@@ -909,7 +948,12 @@ export class SubscriptionService {
       });
 
       if (!subscription) {
-        throw new Error("Subscription not found");
+        throw new Error("No subscription found. Please choose a subscription plan first.");
+      }
+
+      // If user has Clarity Plan (trial plan), they should choose a paid plan instead
+      if (subscription.subscriptionPlan.name === "trial") {
+        throw new Error("Clarity Plan subscriptions cannot be resumed. Please choose a paid subscription plan.");
       }
 
       if (subscription.status !== "CANCELED") {
@@ -1132,17 +1176,13 @@ export class SubscriptionService {
         throw new Error("Missing planName in session metadata");
       }
 
-      // Get subscription
-      const subscription = await prisma.subscription.findUnique({
-        where: { userId },
-        include: {
-          subscriptionPlan: true,
-        },
-      });
-
-      if (!subscription) {
-        throw new Error("Subscription not found");
+      // Get Stripe subscription first (needed for customer ID)
+      const stripeSubscriptionId = session.subscription as string;
+      if (!stripeSubscriptionId) {
+        throw new Error("No subscription ID in session");
       }
+
+      const stripeSubscription = await stripe.subscriptions.retrieve(stripeSubscriptionId);
 
       // Get target plan
       const targetPlan = await prisma.subscriptionPlan.findUnique({
@@ -1153,13 +1193,47 @@ export class SubscriptionService {
         throw new Error(`Plan ${planName} not found`);
       }
 
-      // Get Stripe subscription
-      const stripeSubscriptionId = session.subscription as string;
-      if (!stripeSubscriptionId) {
-        throw new Error("No subscription ID in session");
-      }
+      // Get subscription (or create if doesn't exist for new users)
+      let subscription = await prisma.subscription.findUnique({
+        where: { userId },
+        include: {
+          subscriptionPlan: true,
+        },
+      });
 
-      const stripeSubscription = await stripe.subscriptions.retrieve(stripeSubscriptionId);
+      // If no subscription exists or user has Clarity Plan, create/update subscription
+      const hasClarityPlan = subscription && subscription.subscriptionPlan.name === "trial";
+      
+      if (!subscription || hasClarityPlan) {
+        const stripeProvider = await prisma.paymentProvider.findUnique({
+          where: { name: "stripe" },
+        });
+
+        if (!stripeProvider) {
+          throw new Error("Stripe payment provider not found");
+        }
+
+        if (!subscription) {
+          // Create a new subscription record (will be updated with plan details below)
+          subscription = await prisma.subscription.create({
+            data: {
+              userId,
+              subscriptionPlanId: 1, // Temporary - will be updated below
+              paymentProviderId: stripeProvider.id,
+              status: "TRIAL",
+              stripeCustomerId: stripeSubscription.customer as string,
+              tasksCreatedThisPeriod: 0,
+              lastTaskCountReset: new Date(),
+            },
+            include: {
+              subscriptionPlan: true,
+            },
+          });
+        } else if (hasClarityPlan) {
+          // Update Clarity Plan subscription to the new paid plan
+          // The plan details will be updated below
+        }
+      }
 
       // Update subscription
       const now = new Date();
@@ -1613,10 +1687,22 @@ export class SubscriptionService {
       // Get subscription
       const subscription = await prisma.subscription.findUnique({
         where: { userId },
+        include: {
+          subscriptionPlan: true,
+        },
       });
 
-      if (!subscription || !subscription.stripeCustomerId) {
-        throw new Error("Subscription or Stripe customer not found");
+      if (!subscription) {
+        throw new Error("No subscription found. Please choose a subscription plan first.");
+      }
+
+      // If user has Clarity Plan (trial plan), they should choose a paid plan instead
+      if (subscription.subscriptionPlan.name === "trial") {
+        throw new Error("Clarity Plan subscriptions cannot update payment method. Please choose a paid subscription plan.");
+      }
+
+      if (!subscription.stripeCustomerId) {
+        throw new Error("Stripe customer not found. Please complete a subscription checkout first.");
       }
 
       // Verify the customer exists in Stripe
