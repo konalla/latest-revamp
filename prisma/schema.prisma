@@ -210,6 +210,10 @@ model Task {
   importance Boolean @default(false)
   urgency    Boolean @default(false)
 
+  // Signal Layer (User-controlled toggles from frontend UI)
+  isHighLeverage     Boolean @default(false) // HLA toggle - High-Leverage Activity
+  advancesKeyResults Boolean @default(false) // AKR toggle - Advances Key Results
+
   // Relations
   userId      Int
   projectId   Int?
@@ -232,14 +236,22 @@ model Task {
 }
 
 model AIRecommendation {
-  id              Int      @id @default(autoincrement())
-  taskId          Int      @unique
+  id              Int     @id @default(autoincrement())
+  taskId          Int     @unique
   category        String // DEEP_WORK, CREATIVE_WORK, REFLECTIVE_WORK, EXECUTIVE_WORK
   recommendedTime String // Time in HH:MM format
   confidence      Float // 0.0 to 1.0
   reasoning       String? // Optional reasoning text
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+
+  // Enhanced Signal Layer fields
+  signalType          String? // Core-Signal | High-Signal | Strategic-Signal | Neutral | Noise
+  recommendedDuration Int? // Recommended duration in minutes (25-90)
+  breakRecommendation String? // Break advice (e.g., "Take a 5-10 min break")
+  loadWarning         String? // Load warning message (e.g., "Multiple high-load sessions detected")
+  importanceFlag      Boolean? // For conflict detection with Signal Layer
+  urgencyFlag         Boolean? // For conflict detection with Signal Layer
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
   // Relations
   task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)

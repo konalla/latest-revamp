@@ -14,6 +14,9 @@ interface TaskWithRelations {
   priority: string;
   importance: boolean;
   urgency: boolean;
+  // Signal Layer fields
+  isHighLeverage?: boolean;
+  advancesKeyResults?: boolean;
   dueDate?: Date | null;
   okrId?: number | null;
   okr?: {
@@ -27,6 +30,7 @@ interface TaskWithRelations {
     category: string;
     confidence: number;
     recommendedTime: string;
+    signalType?: string;
   } | null;
   duration: number;
   category: string;
@@ -54,7 +58,40 @@ export class TaskPriorityService {
   }
 
   /**
+   * Calculate Signal Layer score (Tier 0 - Highest Priority)
+   * Signal Layer outranks all other priority calculations
+   */
+  private calculateSignalLayerScore(task: TaskWithRelations): number {
+    const isHighLeverage = task.isHighLeverage || false;
+    const advancesKeyResults = task.advancesKeyResults || false;
+
+    // Core-Signal: Both HLA and AKR ON = Maximum priority (100000 points)
+    if (isHighLeverage && advancesKeyResults) {
+      return 100000;
+    }
+
+    // High-Signal: Only HLA ON = Very high priority (80000 points)
+    if (isHighLeverage) {
+      return 80000;
+    }
+
+    // Strategic-Signal: Only AKR ON = High priority (60000 points)
+    if (advancesKeyResults) {
+      return 60000;
+    }
+
+    // Noise: All toggles OFF = Minimum priority (1000 points)
+    if (!isHighLeverage && !advancesKeyResults && !task.importance && !task.urgency) {
+      return 1000;
+    }
+
+    // Neutral: Default (no Signal Layer bonus)
+    return 0;
+  }
+
+  /**
    * Calculate complete priority score for a task
+   * Now includes Signal Layer as Tier 0 (highest priority)
    */
   async calculatePriorityScore(
     task: TaskWithRelations,
@@ -73,7 +110,10 @@ export class TaskPriorityService {
   ): Promise<PriorityScore> {
     const now = currentTime || new Date();
 
-    // Calculate all three tiers
+    // Calculate Signal Layer score (Tier 0 - highest priority)
+    const signalLayerScore = this.calculateSignalLayerScore(task);
+
+    // Calculate all three tiers (only used if Signal Layer is 0)
     const hardRuleScore = this.calculateHardRuleScore(task);
     const weightedRuleScore = await this.calculateWeightedRuleScore(task);
     const enhancementRuleScore = await this.calculateEnhancementRuleScore(
@@ -83,10 +123,14 @@ export class TaskPriorityService {
       userPreferences
     );
 
-    const totalScore = hardRuleScore * 10000 + weightedRuleScore * 100 + enhancementRuleScore;
+    // Signal Layer score is added as highest tier (multiplied by 1000000)
+    // If Signal Layer is 0, use standard scoring
+    const totalScore = signalLayerScore > 0 
+      ? signalLayerScore * 1000000 + hardRuleScore * 10000 + weightedRuleScore * 100 + enhancementRuleScore
+      : hardRuleScore * 10000 + weightedRuleScore * 100 + enhancementRuleScore;
 
     return {
-      hardRuleScore,
+      hardRuleScore: signalLayerScore > 0 ? signalLayerScore : hardRuleScore,
       weightedRuleScore,
       enhancementRuleScore,
       totalScore,

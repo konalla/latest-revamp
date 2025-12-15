@@ -365,7 +365,7 @@ export class TaskService {
       },
     });
 
-    // Generate AI recommendation synchronously and update task category
+    // Generate enhanced AI recommendation with Signal Layer integration
     try {
       const userPreferences = await aiRecommendationService.getUserWorkPreferences(userId);
       const taskAnalysis = {
@@ -374,6 +374,9 @@ export class TaskService {
         duration: task.duration,
         importance: task.importance,
         urgency: task.urgency,
+        // Signal Layer fields (user-controlled toggles from frontend)
+        isHighLeverage: (task as any).isHighLeverage || false,
+        advancesKeyResults: (task as any).advancesKeyResults || false,
         dueDate: (task as any).dueDate,
         projectName: (task as any).project?.name || "",
         objectiveName: (task as any).objective?.name || "",
@@ -382,7 +385,8 @@ export class TaskService {
         okrDescription: (task as any).okr?.description || ""
       };
 
-      const recommendation = await aiRecommendationService.generateTaskRecommendation(
+      // Use enhanced recommendation method
+      const recommendation = await aiRecommendationService.generateEnhancedTaskRecommendation(
         taskAnalysis,
         userPreferences,
         userId
@@ -396,7 +400,7 @@ export class TaskService {
         data: { category: mappedCategory }
       });
 
-      // Create AI recommendation record
+      // Create or update AI recommendation record with enhanced fields
       await (prisma as any).aIRecommendation.upsert({
         where: {
           taskId: task.id
@@ -405,14 +409,26 @@ export class TaskService {
           category: recommendation.category,
           recommendedTime: recommendation.recommendedTime,
           confidence: recommendation.confidence,
-          reasoning: recommendation.reasoning
+          reasoning: recommendation.reasoning,
+          signalType: recommendation.signalType,
+          recommendedDuration: recommendation.recommendedDuration,
+          breakRecommendation: recommendation.breakRecommendation,
+          loadWarning: recommendation.loadWarning,
+          importanceFlag: recommendation.importanceFlag,
+          urgencyFlag: recommendation.urgencyFlag
         },
         create: {
           taskId: task.id,
           category: recommendation.category,
           recommendedTime: recommendation.recommendedTime,
           confidence: recommendation.confidence,
-          reasoning: recommendation.reasoning
+          reasoning: recommendation.reasoning,
+          signalType: recommendation.signalType,
+          recommendedDuration: recommendation.recommendedDuration,
+          breakRecommendation: recommendation.breakRecommendation,
+          loadWarning: recommendation.loadWarning,
+          importanceFlag: recommendation.importanceFlag,
+          urgencyFlag: recommendation.urgencyFlag
         }
       });
 
@@ -649,6 +665,9 @@ export class TaskService {
         completed: task.completed,
         importance: task.importance,
         urgency: task.urgency,
+        // Signal Layer fields
+        isHighLeverage: (task as any).isHighLeverage || false,
+        advancesKeyResults: (task as any).advancesKeyResults || false,
         createdAt: task.createdAt,
         userId: task.userId,
         user: task.user,
@@ -688,6 +707,26 @@ export class TaskService {
           createdAt: task.aiRecommendation.createdAt,
           updatedAt: task.aiRecommendation.updatedAt,
         };
+        
+        // Add enhanced Signal Layer fields if available
+        if ((task.aiRecommendation as any).signalType) {
+          aiRec.signalType = (task.aiRecommendation as any).signalType;
+        }
+        if ((task.aiRecommendation as any).recommendedDuration) {
+          aiRec.recommendedDuration = (task.aiRecommendation as any).recommendedDuration;
+        }
+        if ((task.aiRecommendation as any).breakRecommendation) {
+          aiRec.breakRecommendation = (task.aiRecommendation as any).breakRecommendation;
+        }
+        if ((task.aiRecommendation as any).loadWarning) {
+          aiRec.loadWarning = (task.aiRecommendation as any).loadWarning;
+        }
+        if ((task.aiRecommendation as any).importanceFlag !== null && (task.aiRecommendation as any).importanceFlag !== undefined) {
+          aiRec.importanceFlag = (task.aiRecommendation as any).importanceFlag;
+        }
+        if ((task.aiRecommendation as any).urgencyFlag !== null && (task.aiRecommendation as any).urgencyFlag !== undefined) {
+          aiRec.urgencyFlag = (task.aiRecommendation as any).urgencyFlag;
+        }
         
         if (task.aiRecommendation.reasoning !== null) {
           aiRec.reasoning = task.aiRecommendation.reasoning;

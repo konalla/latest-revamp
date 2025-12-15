@@ -22,6 +22,25 @@ const TaskRecommendationSchema = z.object({
 
 export type TaskRecommendation = z.infer<typeof TaskRecommendationSchema>;
 
+// Enhanced recommendation schema with Signal Layer and scheduling intelligence
+const EnhancedTaskRecommendationSchema = z.object({
+  category: z.nativeEnum(WorkCategory),
+  signalType: z.enum(["Core-Signal", "High-Signal", "Strategic-Signal", "Neutral", "Noise"]).describe("Signal type based on HLA/AKR toggles"),
+  importance: z.boolean().describe("Whether the task is important"),
+  urgency: z.boolean().describe("Whether the task is urgent"),
+  importanceFlag: z.boolean().nullable().describe("Flag for conflict detection with Signal Layer"),
+  urgencyFlag: z.boolean().nullable().describe("Flag for conflict detection with Signal Layer"),
+  priority: z.enum(["High", "Medium", "Low", "Noise"]).describe("Task priority level"),
+  recommendedTime: z.string().describe("Recommended time slot in HH:MM format"),
+  recommendedDuration: z.number().min(25).max(90).describe("Recommended duration in minutes (25-90)"),
+  breakRecommendation: z.string().nullable().describe("Break advice (e.g., 'Take a 5-10 min break')"),
+  loadWarning: z.string().nullable().describe("Load warning message if overload detected"),
+  confidence: z.number().min(0).max(1).describe("Confidence score between 0 and 1"),
+  reasoning: z.string().describe("Brief explanation for the recommendation")
+});
+
+export type EnhancedTaskRecommendation = z.infer<typeof EnhancedTaskRecommendationSchema>;
+
 // Define the recommendation schema with priority evaluation (for bulk tasks with importance=false and urgency=false)
 const TaskRecommendationWithPrioritySchema = z.object({
   category: z.nativeEnum(WorkCategory),
@@ -47,6 +66,16 @@ export interface UserWorkPreferences {
   executiveWorkEndTime: string;
 }
 
+// Signal Layer Types
+export type SignalType =
+  | "Core-Signal"
+  | "High-Signal"
+  | "Strategic-Signal"
+  | "Neutral"
+  | "Noise";
+
+export type PriorityLevel = "High" | "Medium" | "Low" | "Noise";
+
 // Define the task analysis interface
 export interface TaskAnalysis {
   title: string;
@@ -54,6 +83,9 @@ export interface TaskAnalysis {
   duration: number;
   importance: boolean;
   urgency: boolean;
+  // Signal Layer fields (user-controlled toggles from frontend)
+  isHighLeverage?: boolean; // HLA toggle
+  advancesKeyResults?: boolean; // AKR toggle
   dueDate?: Date;
   projectName?: string;
   objectiveName?: string;
@@ -79,6 +111,282 @@ export class AIRecommendationService {
       temperature: 0.3,
       openAIApiKey: process.env.OPENAI_API_KEY || "",
     });
+  }
+
+  /**
+   * Determine Signal Type based on HLA, AKR, Importance, and Urgency toggles
+   * This implements the Signal Layer priority hierarchy
+   */
+  determineSignalType(
+    isHighLeverage: boolean,
+    advancesKeyResults: boolean,
+    importance: boolean,
+    urgency: boolean
+  ): SignalType {
+    // Core-Signal: Both HLA and AKR are ON (highest priority)
+    if (isHighLeverage && advancesKeyResults) {
+      return "Core-Signal";
+    }
+    
+    // High-Signal: Only HLA is ON
+    if (isHighLeverage) {
+      return "High-Signal";
+    }
+    
+    // Strategic-Signal: Only AKR is ON
+    if (advancesKeyResults) {
+      return "Strategic-Signal";
+    }
+    
+    // Noise: All toggles are OFF
+    if (!isHighLeverage && !advancesKeyResults && !importance && !urgency) {
+      return "Noise";
+    }
+    
+    // Neutral: Default when HLA and AKR are OFF but Importance or Urgency is ON
+    return "Neutral";
+  }
+
+  /**
+   * Calculate break recommendation based on duration and consecutive sessions
+   */
+  calculateBreakRecommendation(
+    duration: number,
+    consecutiveSessions: number = 0
+  ): string | null {
+    // 3×90 min sessions → 1-hour recovery
+    if (consecutiveSessions >= 3 && duration >= 90) {
+      return "Take a 1-hour recovery break to prevent cognitive overload";
+    }
+    
+    // 2×90 min sessions → 15-30 min break
+    if (consecutiveSessions >= 2 && duration >= 90) {
+      return "Take a 15-30 minute break to maintain focus";
+    }
+    
+    // ≥45 min session → 5-10 min break
+    if (duration >= 45) {
+      return "Take a 5-10 minute break after this session";
+    }
+    
+    return null;
+  }
+
+  /**
+   * Detect load warning based on user's recent session history
+   */
+  async detectLoadWarning(
+    userId: number,
+    taskCategory: string,
+    currentTime: Date = new Date()
+  ): Promise<string | null> {
+    try {
+      // Get user's recent focus sessions from the last 24 hours
+      const oneDayAgo = new Date(currentTime);
+      oneDayAgo.setHours(oneDayAgo.getHours() - 24);
+
+      const recentSessions = await prisma.focusSession.findMany({
+        where: {
+          userId,
+          createdAt: {
+            gte: oneDayAgo,
+          },
+        },
+        select: {
+          id: true,
+          duration: true,
+          intention: true,
+          createdAt: true,
+        },
+        orderBy: {
+          createdAt: 'desc',
+        },
+        take: 10,
+      });
+
+      // Extract task IDs from intention JSON and get their categories
+      const taskIds: number[] = [];
+      for (const session of recentSessions) {
+        if (session.intention && typeof session.intention === 'object') {
+          const intention = session.intention as any;
+          if (intention.taskIds && Array.isArray(intention.taskIds)) {
+            taskIds.push(...intention.taskIds);
+          }
+        }
+      }
+
+      // Get task categories if we have task IDs
+      let taskCategories: string[] = [];
+      if (taskIds.length > 0) {
+        const tasks = await prisma.task.findMany({
+          where: {
+            id: { in: taskIds },
+            userId,
+          },
+          select: {
+            category: true,
+          },
+        });
+        taskCategories = tasks.map(t => t.category || '');
+      }
+
+      // Count consecutive high-load sessions (Deep Work or long sessions)
+      let consecutiveHighLoad = 0;
+      let deepWorkCount = 0;
+      
+      for (const session of recentSessions) {
+        // Check if session duration indicates high load
+        const isLongSession = session.duration && session.duration >= 90;
+        
+        // Check if any tasks in this session are Deep Work
+        // We approximate by checking if current task category is Deep Work
+        // or if we have recent Deep Work tasks
+        const hasDeepWork = taskCategory?.toLowerCase().includes('deep') || 
+                           taskCategory?.toLowerCase() === 'deepwork' ||
+                           taskCategories.some(cat => 
+                             cat?.toLowerCase().includes('deep') || 
+                             cat?.toLowerCase() === 'deepwork'
+                           );
+        
+        if (hasDeepWork || isLongSession) {
+          consecutiveHighLoad++;
+          if (hasDeepWork) {
+            deepWorkCount++;
+          }
+        } else {
+          break; // Reset count if we hit a non-high-load session
+        }
+      }
+
+      // Warn if multiple high-load sessions detected
+      if (consecutiveHighLoad >= 3) {
+        return "You have performed multiple high-load sessions. Reduce intensity to avoid fatigue.";
+      }
+
+      // Warn if too many Deep Work sessions clustered
+      if (deepWorkCount >= 3) {
+        return "Multiple Deep Work sessions detected. Consider switching to Reflective or Executive tasks.";
+      }
+
+      return null;
+    } catch (error) {
+      console.error("Error detecting load warning:", error);
+      return null;
+    }
+  }
+
+  /**
+   * Get mode balancing recommendation when one mode is overloaded
+   */
+  getModeBalancingRecommendation(overloadedMode: string): string | null {
+    const mode = overloadedMode.toLowerCase();
+    
+    if (mode.includes('deep') || mode.includes('creative')) {
+      return "Consider switching to Reflective or Executive tasks to balance your cognitive load";
+    }
+    
+    return null;
+  }
+
+  /**
+   * Get day-shaping recommendation based on time of day
+   */
+  getDayShapingRecommendation(category: string, currentTime: Date = new Date()): string {
+    const hour = currentTime.getHours();
+    const isMorning = hour >= 6 && hour < 12;
+    const isAfternoon = hour >= 12 && hour < 18;
+    
+    const cat = category.toLowerCase();
+    
+    if (isMorning) {
+      if (cat.includes('deep') || cat.includes('reflective')) {
+        return "Morning is optimal for Deep Work and Reflective tasks";
+      }
+      if (cat.includes('creative') || cat.includes('executive')) {
+        return "Consider scheduling this in the afternoon for better performance";
+      }
+    }
+    
+    if (isAfternoon) {
+      if (cat.includes('creative') || cat.includes('executive')) {
+        return "Afternoon is optimal for Creative and Executive tasks";
+      }
+      if (cat.includes('deep') || cat.includes('reflective')) {
+        return "Consider scheduling this in the morning for better performance";
+      }
+    }
+    
+    return "";
+  }
+
+  /**
+   * Apply disambiguation rules for ambiguous task classifications
+   */
+  applyDisambiguationRules(task: TaskAnalysis, initialCategory: WorkCategory): WorkCategory {
+    const title = (task.title || "").toLowerCase();
+    const description = (task.description || "").toLowerCase();
+    const combinedText = `${title} ${description}`;
+
+    // Design Tasks
+    if (combinedText.includes('design')) {
+      // Technical/system design → Deep
+      if (combinedText.includes('system') || combinedText.includes('technical') || 
+          combinedText.includes('architecture') || combinedText.includes('code')) {
+        return WorkCategory.DEEP_WORK;
+      }
+      // Visual/creative design → Creative
+      if (combinedText.includes('visual') || combinedText.includes('ui') || 
+          combinedText.includes('graphic') || combinedText.includes('art')) {
+        return WorkCategory.CREATIVE_WORK;
+      }
+    }
+
+    // Research Tasks
+    if (combinedText.includes('research')) {
+      // Analytical/evaluative research → Deep
+      if (combinedText.includes('analyze') || combinedText.includes('evaluate') || 
+          combinedText.includes('data') || combinedText.includes('statistics')) {
+        return WorkCategory.DEEP_WORK;
+      }
+      // Exploratory/learning research → Reflective
+      if (combinedText.includes('explore') || combinedText.includes('learn') || 
+          combinedText.includes('study') || combinedText.includes('understand')) {
+        return WorkCategory.REFLECTIVE_WORK;
+      }
+    }
+
+    // Planning Tasks
+    if (combinedText.includes('plan') || combinedText.includes('strategy')) {
+      // Strategic planning → Reflective
+      if (combinedText.includes('strategic') || combinedText.includes('long-term') || 
+          combinedText.includes('vision') || combinedText.includes('roadmap')) {
+        return WorkCategory.REFLECTIVE_WORK;
+      }
+      // Execution planning → Deep
+      if (combinedText.includes('execute') || combinedText.includes('implement') || 
+          combinedText.includes('action') || combinedText.includes('tactical')) {
+        return WorkCategory.DEEP_WORK;
+      }
+    }
+
+    // Return initial category if no disambiguation rules match
+    return initialCategory;
+  }
+
+  /**
+   * Calibrate confidence and determine if user confirmation is needed
+   */
+  calibrateConfidence(confidence: number): { level: string; action: string } {
+    if (confidence >= 0.90) {
+      return { level: "High", action: "High certainty - proceed" };
+    }
+    if (confidence >= 0.70) {
+      return { level: "Stable", action: "Stable classification - proceed" };
+    }
+    if (confidence >= 0.50) {
+      return { level: "Confirm", action: "Ask user to confirm" };
+    }
+    return { level: "Clarify", action: "Request clarification" };
   }
 
   /**
@@ -179,6 +487,7 @@ ${formatInstructions}`;
 
   /**
    * Generate AI recommendation for a task based on its attributes and user preferences
+   * Enhanced version with Signal Layer integration
    */
   async generateTaskRecommendation(
     task: TaskAnalysis,
@@ -186,10 +495,18 @@ ${formatInstructions}`;
     userId: number
   ): Promise<TaskRecommendation> {
     try {
+      // Determine Signal Type from user toggles
+      const signalType = this.determineSignalType(
+        task.isHighLeverage || false,
+        task.advancesKeyResults || false,
+        task.importance,
+        task.urgency
+      );
+
       // Get user's historical task patterns for better recommendations
       const userTaskHistory = await this.getUserTaskHistory(userId);
       
-      // Create compressed user prompt
+      // Create compressed user prompt (include Signal Layer info)
       const userPrompt = this.createCompressedUserPrompt(task, userPreferences, userTaskHistory);
       
       // Create messages array with system prompt and user prompt
@@ -204,6 +521,13 @@ ${formatInstructions}`;
       // Parse the structured response
       const recommendation = await this.parser.parse(response.content as string);
       
+      // Apply disambiguation rules if needed
+      const disambiguatedCategory = this.applyDisambiguationRules(task, recommendation.category);
+      if (disambiguatedCategory !== recommendation.category) {
+        recommendation.category = disambiguatedCategory;
+        recommendation.reasoning += " (Applied disambiguation rules)";
+      }
+      
       // Validate and adjust recommendation based on user preferences
       const validatedRecommendation = this.validateRecommendation(recommendation, userPreferences);
       
@@ -212,6 +536,134 @@ ${formatInstructions}`;
       console.error("Error generating AI recommendation:", error);
       // Return fallback recommendation
       return this.getFallbackRecommendation(task, userPreferences);
+    }
+  }
+
+  /**
+   * Generate enhanced AI recommendation with Signal Layer, scheduling intelligence, and all new features
+   */
+  async generateEnhancedTaskRecommendation(
+    task: TaskAnalysis,
+    userPreferences: UserWorkPreferences,
+    userId: number
+  ): Promise<EnhancedTaskRecommendation> {
+    try {
+      // Determine Signal Type from user toggles
+      const signalType = this.determineSignalType(
+        task.isHighLeverage || false,
+        task.advancesKeyResults || false,
+        task.importance,
+        task.urgency
+      );
+
+      // Get user's historical task patterns
+      const userTaskHistory = await this.getUserTaskHistory(userId);
+      
+      // Create compressed user prompt
+      const userPrompt = this.createCompressedUserPrompt(task, userPreferences, userTaskHistory);
+      
+      // Use enhanced system prompt (we'll create this separately)
+      // For now, use the standard prompt and enhance the response
+      const messages = [
+        { role: "system" as const, content: this.systemPrompt },
+        { role: "user" as const, content: userPrompt }
+      ];
+      
+      // Get AI recommendation
+      const response = await this.llm.invoke(messages);
+      
+      // Parse the structured response
+      const baseRecommendation = await this.parser.parse(response.content as string);
+      
+      // Apply disambiguation rules
+      const category = this.applyDisambiguationRules(task, baseRecommendation.category);
+      
+      // Calculate recommended duration (25-90 minutes based on category and signal)
+      let recommendedDuration = task.duration;
+      if (recommendedDuration < 25) recommendedDuration = 25;
+      if (recommendedDuration > 90) recommendedDuration = 90;
+      
+      // Adjust duration based on Signal Type
+      if (signalType === "Core-Signal" || signalType === "High-Signal") {
+        // Signal tasks should be 45-90 minutes
+        if (recommendedDuration < 45) recommendedDuration = 45;
+      }
+
+      // Calculate break recommendation
+      const breakRecommendation = this.calculateBreakRecommendation(recommendedDuration, 0);
+
+      // Detect load warning
+      const loadWarning = await this.detectLoadWarning(userId, category, new Date());
+
+      // Determine priority based on Signal Type and importance/urgency
+      let priority: "High" | "Medium" | "Low" | "Noise" = "Medium";
+      if (signalType === "Core-Signal") {
+        priority = "High";
+      } else if (signalType === "High-Signal" || signalType === "Strategic-Signal") {
+        priority = task.importance || task.urgency ? "High" : "Medium";
+      } else if (signalType === "Noise") {
+        priority = "Noise";
+      } else {
+        priority = task.importance ? (task.urgency ? "High" : "Medium") : "Low";
+      }
+
+      // Check for conflicts between Signal Layer and FocusZone
+      let importanceFlag: boolean | null = null;
+      let urgencyFlag: boolean | null = null;
+      
+      // If Signal Layer suggests high priority but user marked as not important/urgent, flag it
+      if ((signalType === "Core-Signal" || signalType === "High-Signal" || signalType === "Strategic-Signal") 
+          && !task.importance && !task.urgency) {
+        importanceFlag = true; // Suggest it should be important
+        urgencyFlag = signalType === "Core-Signal" ? true : null;
+      }
+
+      // Build enhanced recommendation
+      const enhancedRecommendation: EnhancedTaskRecommendation = {
+        category: category as any,
+        signalType: signalType,
+        importance: task.importance,
+        urgency: task.urgency,
+        importanceFlag,
+        urgencyFlag,
+        priority,
+        recommendedTime: baseRecommendation.recommendedTime,
+        recommendedDuration,
+        breakRecommendation,
+        loadWarning,
+        confidence: baseRecommendation.confidence,
+        reasoning: baseRecommendation.reasoning + 
+          (signalType !== "Neutral" ? ` Signal Type: ${signalType}.` : "") +
+          (breakRecommendation ? ` ${breakRecommendation}` : "") +
+          (loadWarning ? ` Warning: ${loadWarning}` : "")
+      };
+
+      return enhancedRecommendation;
+    } catch (error) {
+      console.error("Error generating enhanced AI recommendation:", error);
+      // Return fallback enhanced recommendation
+      const signalType = this.determineSignalType(
+        task.isHighLeverage || false,
+        task.advancesKeyResults || false,
+        task.importance,
+        task.urgency
+      );
+      const fallback = this.getFallbackRecommendation(task, userPreferences);
+      return {
+        category: fallback.category,
+        signalType,
+        importance: task.importance,
+        urgency: task.urgency,
+        importanceFlag: null,
+        urgencyFlag: null,
+        priority: signalType === "Noise" ? "Noise" : (task.importance ? "High" : "Medium"),
+        recommendedTime: fallback.recommendedTime,
+        recommendedDuration: Math.min(Math.max(task.duration, 25), 90),
+        breakRecommendation: this.calculateBreakRecommendation(task.duration),
+        loadWarning: null,
+        confidence: fallback.confidence,
+        reasoning: fallback.reasoning
+      };
     }
   }
 
@@ -359,8 +811,13 @@ ${formatInstructions}`;
     // Compress user history to reduce tokens
     const compressedHistory = this.compressUserHistory(userHistory);
     
-    // Create compact task representation
-    const taskInfo = `TASK: ${task.title} | ${task.description || 'No description'} | duration=${task.duration}m | important=${task.importance} | urgent=${task.urgency} | project=${task.projectName || 'None'}`;
+    // Create compact task representation with Signal Layer fields
+    const signalInfo = [];
+    if (task.isHighLeverage) signalInfo.push('HLA=true');
+    if (task.advancesKeyResults) signalInfo.push('AKR=true');
+    const signalStr = signalInfo.length > 0 ? ` | ${signalInfo.join(' | ')}` : '';
+    
+    const taskInfo = `TASK: ${task.title} | ${task.description || 'No description'} | duration=${task.duration}m | important=${task.importance} | urgent=${task.urgency}${signalStr} | project=${task.projectName || 'None'}`;
     
     // Add context if available
     const contextInfo = [];
