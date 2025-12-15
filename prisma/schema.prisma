@@ -11,138 +11,138 @@ datasource db {
 }
 
 model User {
-  id                         Int      @id @default(autoincrement())
-  username                   String   @unique
-  name                       String
-  email                      String   @unique
-  password                   String
-  role                       String   @default("user")
+  id       Int      @id @default(autoincrement())
+  username String   @unique
+  name     String
+  email    String   @unique
+  password String
+  role     UserRole @default(USER)
 
   // Password Reset
-  resetToken                 String?  @unique
-  resetTokenExpiry           DateTime?
+  resetToken       String?   @unique
+  resetTokenExpiry DateTime?
 
   // Profile Information
-  phone_number               String?
-  company_name               String?
-  company_size               String?
-  company_description        String?
-  founded_year               Int?
-  website                    String?
-  profile_photo_url          String?
-  job_title                  String?
-  industry                   String?
-  bio                        String?
-  timezone                   String?
+  phone_number        String?
+  company_name        String?
+  company_size        String?
+  company_description String?
+  founded_year        Int?
+  website             String?
+  profile_photo_url   String?
+  job_title           String?
+  industry            String?
+  bio                 String?
+  timezone            String?
 
   // Social Links
-  linkedin_url               String?
-  website_url                String?
-  secondary_social_url       String?
-  secondary_social_type      String?
+  linkedin_url          String?
+  website_url           String?
+  secondary_social_url  String?
+  secondary_social_type String?
 
   // Preferences & Settings
-  preferred_working_hours    Json     @default("{}")
-  communication_preference   String?
-  primary_work_focus         String?
-  profile_completion_percentage Int   @default(20)
-  last_profile_update        DateTime @default(now())
+  preferred_working_hours       Json     @default("{}")
+  communication_preference      String?
+  primary_work_focus            String?
+  profile_completion_percentage Int      @default(20)
+  last_profile_update           DateTime @default(now())
 
   // Work Duration Preferences (AI Recommendation System)
-  deep_work_start_time       String   @default("09:00")
-  deep_work_end_time         String   @default("12:00")
-  creative_work_start_time   String   @default("12:00")
-  creative_work_end_time     String   @default("15:00")
-  reflective_work_start_time String   @default("15:00")
-  reflective_work_end_time   String   @default("18:00")
-  executive_work_start_time  String   @default("18:00")
-  executive_work_end_time    String   @default("21:00")
+  deep_work_start_time       String @default("09:00")
+  deep_work_end_time         String @default("12:00")
+  creative_work_start_time   String @default("12:00")
+  creative_work_end_time     String @default("15:00")
+  reflective_work_start_time String @default("15:00")
+  reflective_work_end_time   String @default("18:00")
+  executive_work_start_time  String @default("18:00")
+  executive_work_end_time    String @default("21:00")
 
   // Credits System
-  credits                    Int      @default(100)
-  credit_refresh_period      String   @default("monthly")
-  credit_refresh_amount      Int      @default(100)
-  last_credit_refresh        DateTime @default(now())
+  credits               Int      @default(100)
+  credit_refresh_period String   @default("monthly")
+  credit_refresh_amount Int      @default(100)
+  last_credit_refresh   DateTime @default(now())
 
   // Profile Visibility
-  profileVisibility          ProfileVisibility @default(PRIVATE)
+  profileVisibility ProfileVisibility @default(PRIVATE)
 
-  created_at                 DateTime @default(now())
-  updated_at                 DateTime @updatedAt
-  
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
   // Relations
-  projects                   Project[]
-  objectives                 Objective[]
-  okrs                       Okr[]
-  tasks                      Task[]
-  userSettings               UserSettings?
-  focusSessions              FocusSession[]
-  cognitiveLoadMeter         CognitiveLoadMeter?
-  userProductivityPatterns   UserProductivityPatterns?
-  userFocusPreferences       UserFocusPreferences?
+  projects                 Project[]
+  objectives               Objective[]
+  okrs                     Okr[]
+  tasks                    Task[]
+  userSettings             UserSettings?
+  focusSessions            FocusSession[]
+  cognitiveLoadMeter       CognitiveLoadMeter?
+  userProductivityPatterns UserProductivityPatterns?
+  userFocusPreferences     UserFocusPreferences?
 
   // Workspace/Team relations
-  ownedWorkspaces            Workspace[]
-  teamMemberships            TeamMembership[]
-  workspaceMemberships       WorkspaceMembership[]
-  
+  ownedWorkspaces      Workspace[]
+  teamMemberships      TeamMembership[]
+  workspaceMemberships WorkspaceMembership[]
+
   // Subscription relation
-  subscription               Subscription?
-  
+  subscription Subscription?
+
   // Referral relations
-  referralStatus             UserReferralStatus?
-  referralsMade              Referral[]              @relation("Referrer")
-  referralsReceived          Referral[]              @relation("ReferredUser")
+  referralStatus    UserReferralStatus?
+  referralsMade     Referral[]          @relation("Referrer")
+  referralsReceived Referral[]          @relation("ReferredUser")
 }
 
 model Project {
-  id          Int      @id @default(autoincrement())
+  id          Int       @id @default(autoincrement())
   name        String
   description String?
   status      String?
-  color       String   @default("#4A6CF7")
+  color       String    @default("#4A6CF7")
   icon        String?
-  startDate   DateTime @default(now())
+  startDate   DateTime  @default(now())
   endDate     DateTime?
-  createdAt   DateTime @default(now())
+  createdAt   DateTime  @default(now())
   userId      Int
-  is_private  Boolean  @default(false)
-  visibility  String   @default("private")
+  is_private  Boolean   @default(false)
+  visibility  String    @default("private")
   workspaceId Int?
   teamId      Int?
-  
+
   // Relations
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  workspace   Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  team        Team?    @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  plans       Plan[]
-  tasks       Task[]
-  objectives  Objective[]
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace  Workspace?  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  team       Team?       @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  plans      Plan[]
+  tasks      Task[]
+  objectives Objective[]
 }
 
 model Objective {
-  id          Int      @id @default(autoincrement())
+  id          Int       @id @default(autoincrement())
   name        String
   description String?
-  status      String   @default("active")
-  color       String   @default("#4A6CF7")
-  start_date  DateTime @default(now())
+  status      String    @default("active")
+  color       String    @default("#4A6CF7")
+  start_date  DateTime  @default(now())
   end_date    DateTime?
-  created_at  DateTime @default(now())
-  position    Int      @default(0)
+  created_at  DateTime  @default(now())
+  position    Int       @default(0)
   workspaceId Int?
   teamId      Int?
 
   // Relations
-  userId      Int
-  projectId   Int?
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  project     Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  workspace   Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  team        Team?    @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  plans       Plan[]
-  okrs        Okr[]
-  tasks       Task[]
+  userId    Int
+  projectId Int?
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project   Project?   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  team      Team?      @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  plans     Plan[]
+  okrs      Okr[]
+  tasks     Task[]
 }
 
 model Plan {
@@ -152,7 +152,7 @@ model Plan {
   status      String   @default("active")
   created_at  DateTime @default(now())
   updated_at  DateTime @updatedAt
-  
+
   // Relations
   projectId   Int
   objectiveId Int
@@ -176,8 +176,8 @@ model Okr {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
   userId          Int
-  objectiveId     Int?      // Made optional
-  planId          Int?      // Added optional Plan reference
+  objectiveId     Int? // Made optional
+  planId          Int? // Added optional Plan reference
   position        Int       @default(0)
   confidenceScore Int       @default(3)
   keyResults      Json      @default("[]")
@@ -186,103 +186,103 @@ model Okr {
   teamId          Int?
 
   // Relations
-  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  objective       Objective? @relation(fields: [objectiveId], references: [id], onDelete: Cascade)
-  plan            Plan?     @relation(fields: [planId], references: [id], onDelete: Cascade)
-  workspace       Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  team            Team?    @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  tasks           Task[]
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  objective Objective? @relation(fields: [objectiveId], references: [id], onDelete: Cascade)
+  plan      Plan?      @relation(fields: [planId], references: [id], onDelete: Cascade)
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  team      Team?      @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  tasks     Task[]
 }
 
 model Task {
-  id                     Int       @id @default(autoincrement())
-  title                  String
-  description            String?
-  category               String
-  duration               Int
-  priority               String
-  position               Int
-  createdAt              DateTime  @default(now())
-  completed              Boolean   @default(false)
-  dueDate                DateTime?
+  id          Int       @id @default(autoincrement())
+  title       String
+  description String?
+  category    String
+  duration    Int
+  priority    String
+  position    Int
+  createdAt   DateTime  @default(now())
+  completed   Boolean   @default(false)
+  dueDate     DateTime?
 
   // Eisenhower Matrix
-  importance             Boolean   @default(false)
-  urgency                Boolean   @default(false)
+  importance Boolean @default(false)
+  urgency    Boolean @default(false)
 
   // Relations
-  userId                 Int
-  projectId              Int?
-  objectiveId            Int?
-  okrId                  Int?
-  planId                 Int?      // Added optional Plan reference
-  workspaceId            Int?
-  teamId                 Int?
+  userId      Int
+  projectId   Int?
+  objectiveId Int?
+  okrId       Int?
+  planId      Int? // Added optional Plan reference
+  workspaceId Int?
+  teamId      Int?
 
-  user                  User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  project               Project?   @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  objective             Objective? @relation(fields: [objectiveId], references: [id], onDelete: Cascade)
-  okr                   Okr?       @relation(fields: [okrId], references: [id], onDelete: Cascade)
-  plan                  Plan?      @relation(fields: [planId], references: [id], onDelete: Cascade)
-  workspace             Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  team                  Team?     @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project   Project?   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  objective Objective? @relation(fields: [objectiveId], references: [id], onDelete: Cascade)
+  okr       Okr?       @relation(fields: [okrId], references: [id], onDelete: Cascade)
+  plan      Plan?      @relation(fields: [planId], references: [id], onDelete: Cascade)
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  team      Team?      @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
   // AI Recommendation relation
-  aiRecommendation       AIRecommendation?
+  aiRecommendation AIRecommendation?
 }
 
 model AIRecommendation {
-  id                     Int       @id @default(autoincrement())
-  taskId                 Int       @unique
-  category               String    // DEEP_WORK, CREATIVE_WORK, REFLECTIVE_WORK, EXECUTIVE_WORK
-  recommendedTime        String    // Time in HH:MM format
-  confidence             Float     // 0.0 to 1.0
-  reasoning              String?   // Optional reasoning text
-  createdAt              DateTime  @default(now())
-  updatedAt              DateTime  @updatedAt
+  id              Int      @id @default(autoincrement())
+  taskId          Int      @unique
+  category        String // DEEP_WORK, CREATIVE_WORK, REFLECTIVE_WORK, EXECUTIVE_WORK
+  recommendedTime String // Time in HH:MM format
+  confidence      Float // 0.0 to 1.0
+  reasoning       String? // Optional reasoning text
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   // Relations
-  task                   Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
 }
 
 model UserSettings {
-  id                     Int       @id @default(autoincrement())
-  language               String    @default("english")
-  createdAt              DateTime  @default(now())
-  updatedAt              DateTime  @updatedAt
+  id        Int      @id @default(autoincrement())
+  language  String   @default("english")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Relations
-  userId                 Int       @unique
-  user                   User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId Int  @unique
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model FocusSession {
-  id                      Int      @id @default(autoincrement())
-  userId                  Int      @map("user_id")
-  sessionType             String   @map("session_type")
-  status                  String   @default("active")
-  intention               Json     @default("{}")
-  startedAt               DateTime @default(now()) @map("started_at")
-  endedAt                 DateTime? @map("ended_at")
-  duration                Int      @default(0)
-  completed               Boolean  @default(false)
-  notes                   String?
-  tasksCompleted          Int      @default(0) @map("tasks_completed")
-  createdAt               DateTime @default(now()) @map("created_at")
+  id             Int       @id @default(autoincrement())
+  userId         Int       @map("user_id")
+  sessionType    String    @map("session_type")
+  status         String    @default("active")
+  intention      Json      @default("{}")
+  startedAt      DateTime  @default(now()) @map("started_at")
+  endedAt        DateTime? @map("ended_at")
+  duration       Int       @default(0)
+  completed      Boolean   @default(false)
+  notes          String?
+  tasksCompleted Int       @default(0) @map("tasks_completed")
+  createdAt      DateTime  @default(now()) @map("created_at")
 
   // AI Analytics
-  aiScore                 Int?     @map("ai_score")
-  distractions            Int      @default(0)
-  environment             String?
-  mood                    String?
-  energyLevel             String?  @map("energy_level")
-  cognitiveFlowScore      Int?     @map("cognitive_flow_score")
-  contextSwitchCount      Int      @default(0) @map("context_switch_count")
-  flowState               String?  @map("flow_state")
-  taskGroupEffectiveness  Json     @default("{}") @map("task_group_effectiveness")
+  aiScore                Int?    @map("ai_score")
+  distractions           Int     @default(0)
+  environment            String?
+  mood                   String?
+  energyLevel            String? @map("energy_level")
+  cognitiveFlowScore     Int?    @map("cognitive_flow_score")
+  contextSwitchCount     Int     @default(0) @map("context_switch_count")
+  flowState              String? @map("flow_state")
+  taskGroupEffectiveness Json    @default("{}") @map("task_group_effectiveness")
 
   // Relations
-  user                    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, sessionType, status, startedAt], name: "focus_sessions_user_type_status_started_at_idx")
   @@map("focus_sessions")
@@ -300,60 +300,65 @@ model CognitiveLoadMeter {
   workloadHistory                 Json     @default("[]") @map("workload_history")
   capacityUtilization             Json     @default("[]") @map("capacity_utilization")
   recommendedTaskLimit            Int?     @map("recommended_task_limit")
-  recommendedFocusSessionDuration Int?    @map("recommended_focus_session_duration")
+  recommendedFocusSessionDuration Int?     @map("recommended_focus_session_duration")
   recommendedBreakFrequency       Int?     @map("recommended_break_frequency")
   currentStatus                   String   @default("OPTIMAL") @map("current_status")
   createdAt                       DateTime @default(now()) @map("created_at")
   updatedAt                       DateTime @updatedAt @map("updated_at")
 
   // Relations
-  user                            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId])
   @@map("cognitive_load_meters")
 }
 
 model UserProductivityPatterns {
-  id                              Int      @id @default(autoincrement())
-  userId                          Int      @map("user_id")
-  hourlyPatterns                  Json     @default("{}") @map("hourly_patterns")
-  dayOfWeekPatterns               Json     @default("{}") @map("day_of_week_patterns")
-  taskSwitchingMetrics            Json     @default("{}") @map("task_switching_metrics")
-  taskCompletionRate              Float    @default(0.0) @map("task_completion_rate")
-  averageFocusSessionDuration     Int      @default(25) @map("average_focus_session_duration")
-  peakProductivityHours           Json     @default("[]") @map("peak_productivity_hours")
-  energyPattern                   String?  @map("energy_pattern")
-  contextSwitchingProfile         String?  @map("context_switching_profile")
-  recoveryPattern                 String?  @map("recovery_pattern")
-  createdAt                       DateTime @default(now()) @map("created_at")
-  updatedAt                       DateTime @updatedAt @map("updated_at")
+  id                          Int      @id @default(autoincrement())
+  userId                      Int      @map("user_id")
+  hourlyPatterns              Json     @default("{}") @map("hourly_patterns")
+  dayOfWeekPatterns           Json     @default("{}") @map("day_of_week_patterns")
+  taskSwitchingMetrics        Json     @default("{}") @map("task_switching_metrics")
+  taskCompletionRate          Float    @default(0.0) @map("task_completion_rate")
+  averageFocusSessionDuration Int      @default(25) @map("average_focus_session_duration")
+  peakProductivityHours       Json     @default("[]") @map("peak_productivity_hours")
+  energyPattern               String?  @map("energy_pattern")
+  contextSwitchingProfile     String?  @map("context_switching_profile")
+  recoveryPattern             String?  @map("recovery_pattern")
+  createdAt                   DateTime @default(now()) @map("created_at")
+  updatedAt                   DateTime @updatedAt @map("updated_at")
 
   // Relations
-  user                            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId])
   @@map("user_productivity_patterns")
 }
 
 model UserFocusPreferences {
-  id                              Int      @id @default(autoincrement())
-  userId                          Int      @map("user_id")
-  workingHours                    Json     @default("{}") @map("working_hours")
-  cognitiveLoadPreferences        Json     @default("{}") @map("cognitive_load_preferences")
-  preferredFocusDuration          Int      @default(25) @map("preferred_focus_duration")
-  preferredBreakDuration          Int      @default(5) @map("preferred_break_duration")
-  maxConsecutiveSessions          Int      @default(4) @map("max_consecutive_sessions")
-  breakFrequency                  Int      @default(5) @map("break_frequency")
-  deepWorkPreferences             Json     @default("{}") @map("deep_work_preferences")
-  environmentPreferences          Json     @default("{}") @map("environment_preferences")
-  createdAt                       DateTime @default(now()) @map("created_at")
-  updatedAt                       DateTime @updatedAt @map("updated_at")
+  id                       Int      @id @default(autoincrement())
+  userId                   Int      @map("user_id")
+  workingHours             Json     @default("{}") @map("working_hours")
+  cognitiveLoadPreferences Json     @default("{}") @map("cognitive_load_preferences")
+  preferredFocusDuration   Int      @default(25) @map("preferred_focus_duration")
+  preferredBreakDuration   Int      @default(5) @map("preferred_break_duration")
+  maxConsecutiveSessions   Int      @default(4) @map("max_consecutive_sessions")
+  breakFrequency           Int      @default(5) @map("break_frequency")
+  deepWorkPreferences      Json     @default("{}") @map("deep_work_preferences")
+  environmentPreferences   Json     @default("{}") @map("environment_preferences")
+  createdAt                DateTime @default(now()) @map("created_at")
+  updatedAt                DateTime @updatedAt @map("updated_at")
 
   // Relations
-  user                            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId])
   @@map("user_focus_preferences")
+}
+
+enum UserRole {
+  USER
+  ADMIN
 }
 
 enum TeamRole {
@@ -374,27 +379,27 @@ enum WorkspaceRole {
 }
 
 model Workspace {
-  id         Int       @id @default(autoincrement())
-  name       String
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
+  id        Int      @id @default(autoincrement())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Relations
-  ownerId    Int
-  owner      User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  teams      Team[]
-  projects   Project[]
-  objectives Objective[]
-  okrs       Okr[]
-  tasks      Task[]
+  ownerId     Int
+  owner       User                  @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  teams       Team[]
+  projects    Project[]
+  objectives  Objective[]
+  okrs        Okr[]
+  tasks       Task[]
   memberships WorkspaceMembership[]
 }
 
 model Team {
-  id          Int              @id @default(autoincrement())
-  name        String
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
+  id        Int      @id @default(autoincrement())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Relations
   workspaceId Int
@@ -414,25 +419,25 @@ model TeamMembership {
   updatedAt DateTime         @updatedAt
 
   // Relations
-  userId    Int
-  teamId    Int
-  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  team      Team             @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  userId Int
+  teamId Int
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team   Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
 
   @@unique([userId, teamId])
 }
 
 model WorkspaceMembership {
-  id        Int              @id @default(autoincrement())
+  id        Int           @id @default(autoincrement())
   role      WorkspaceRole
-  createdAt DateTime         @default(now())
-  updatedAt DateTime         @updatedAt
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
 
   // Relations
-  userId    Int
+  userId      Int
   workspaceId Int
-  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  workspace Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@unique([userId, workspaceId])
 }
@@ -442,34 +447,34 @@ model WorkspaceMembership {
 // ============================================
 
 model PaymentProvider {
-  id          Int      @id @default(autoincrement())
-  name        String   @unique  // "stripe", "paypal", etc.
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  
+  id        Int      @id @default(autoincrement())
+  name      String   @unique // "stripe", "paypal", etc.
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   subscriptions Subscription[]
   payments      Payment[]
 }
 
 model SubscriptionPlan {
-  id                    Int      @id @default(autoincrement())
-  name                  String   @unique  // "trial", "monthly", "yearly"
-  displayName           String   // "Free Trial", "Monthly Plan", "Yearly Plan"
-  description           String?
-  price                 Float    // Price in USD (0 for trial)
-  currency              String   @default("USD")
-  billingInterval       String   // "trial", "monthly", "yearly"
-  trialDays             Int?     // 3 for trial plan
-  maxTasks              Int?     // 50 for trial, 1000 for monthly, 10000 for yearly
-  features              Json     @default("{}") // Feature flags as JSON
-  isActive              Boolean  @default(true)
-  stripePriceId         String?  // Stripe Price ID (set manually in Stripe Dashboard)
-  stripeProductId       String?  // Stripe Product ID (set manually in Stripe Dashboard)
-  createdAt             DateTime @default(now())
-  updatedAt              DateTime @updatedAt
-  
-  subscriptions         Subscription[]
+  id              Int      @id @default(autoincrement())
+  name            String   @unique // "trial", "monthly", "yearly"
+  displayName     String // "Free Trial", "Monthly Plan", "Yearly Plan"
+  description     String?
+  price           Float // Price in USD (0 for trial)
+  currency        String   @default("USD")
+  billingInterval String // "trial", "monthly", "yearly"
+  trialDays       Int? // 3 for trial plan
+  maxTasks        Int? // 50 for trial, 1000 for monthly, 10000 for yearly
+  features        Json     @default("{}") // Feature flags as JSON
+  isActive        Boolean  @default(true)
+  stripePriceId   String? // Stripe Price ID (set manually in Stripe Dashboard)
+  stripeProductId String? // Stripe Product ID (set manually in Stripe Dashboard)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  subscriptions Subscription[]
 }
 
 enum SubscriptionStatus {
@@ -483,33 +488,33 @@ enum SubscriptionStatus {
 }
 
 model Subscription {
-  id                    Int                @id @default(autoincrement())
-  userId                Int                @unique
-  subscriptionPlanId    Int
-  paymentProviderId     Int
-  status                SubscriptionStatus @default(TRIAL)
-  stripeSubscriptionId  String?            @unique  // Stripe Subscription ID
-  stripeCustomerId      String?            // Stripe Customer ID
-  currentPeriodStart    DateTime?
-  currentPeriodEnd      DateTime?
-  trialStart            DateTime?          // When trial started
-  trialEnd              DateTime?          // When trial ends (3 days from trialStart)
-  gracePeriodEnd        DateTime?          // When grace period ends (3 days after subscription expires)
-  cancelAtPeriodEnd     Boolean            @default(false)
-  canceledAt            DateTime?
-  tasksCreatedThisPeriod Int               @default(0) // Track tasks created in current billing period
-  lastTaskCountReset    DateTime?          // When task count was last reset
-  paymentRetryCount      Int               @default(0) // Track payment retry attempts (max 3)
-  lastPaymentRetryAt     DateTime?         // Timestamp of last payment retry
-  paymentFailureReason   String?           // Reason for payment failure
-  createdAt             DateTime          @default(now())
-  updatedAt             DateTime          @updatedAt
-  
-  user                  User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  subscriptionPlan      SubscriptionPlan   @relation(fields: [subscriptionPlanId], references: [id])
-  paymentProvider       PaymentProvider    @relation(fields: [paymentProviderId], references: [id])
-  payments              Payment[]
-  
+  id                     Int                @id @default(autoincrement())
+  userId                 Int                @unique
+  subscriptionPlanId     Int
+  paymentProviderId      Int
+  status                 SubscriptionStatus @default(TRIAL)
+  stripeSubscriptionId   String?            @unique // Stripe Subscription ID
+  stripeCustomerId       String? // Stripe Customer ID
+  currentPeriodStart     DateTime?
+  currentPeriodEnd       DateTime?
+  trialStart             DateTime? // When trial started
+  trialEnd               DateTime? // When trial ends (3 days from trialStart)
+  gracePeriodEnd         DateTime? // When grace period ends (3 days after subscription expires)
+  cancelAtPeriodEnd      Boolean            @default(false)
+  canceledAt             DateTime?
+  tasksCreatedThisPeriod Int                @default(0) // Track tasks created in current billing period
+  lastTaskCountReset     DateTime? // When task count was last reset
+  paymentRetryCount      Int                @default(0) // Track payment retry attempts (max 3)
+  lastPaymentRetryAt     DateTime? // Timestamp of last payment retry
+  paymentFailureReason   String? // Reason for payment failure
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+
+  user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subscriptionPlan SubscriptionPlan @relation(fields: [subscriptionPlanId], references: [id])
+  paymentProvider  PaymentProvider  @relation(fields: [paymentProviderId], references: [id])
+  payments         Payment[]
+
   @@index([userId, status])
   @@index([status, currentPeriodEnd])
 }
@@ -518,22 +523,22 @@ model Payment {
   id                    Int      @id @default(autoincrement())
   subscriptionId        Int
   paymentProviderId     Int
-  amount                Float    // Amount charged
+  amount                Float // Amount charged
   currency              String   @default("USD")
-  paymentType           String   // "subscription", "one_time", "refund", "partial_refund"
-  paymentMethod         String?  // "card", "bank_transfer", etc.
-  status                String   // "pending", "succeeded", "failed", "refunded", "partially_refunded"
-  stripePaymentIntentId String?  // Stripe Payment Intent ID or Charge ID
-  stripeInvoiceId       String?  // Stripe Invoice ID
-  receiptUrl            String?  // Link to receipt
-  failureReason         String?  // If payment failed
+  paymentType           String // "subscription", "one_time", "refund", "partial_refund"
+  paymentMethod         String? // "card", "bank_transfer", etc.
+  status                String // "pending", "succeeded", "failed", "refunded", "partially_refunded"
+  stripePaymentIntentId String? // Stripe Payment Intent ID or Charge ID
+  stripeInvoiceId       String? // Stripe Invoice ID
+  receiptUrl            String? // Link to receipt
+  failureReason         String? // If payment failed
   metadata              Json     @default("{}") // Additional metadata
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
-  
-  subscription          Subscription      @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
-  paymentProvider       PaymentProvider   @relation(fields: [paymentProviderId], references: [id])
-  
+
+  subscription    Subscription    @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  paymentProvider PaymentProvider @relation(fields: [paymentProviderId], references: [id])
+
   @@index([subscriptionId, status])
   @@index([stripePaymentIntentId])
 }
@@ -564,7 +569,7 @@ model ReferralProgram {
   id                Int      @id @default(autoincrement())
   name              String   @unique // "Origin 1000" or "Vanguard 300"
   description       String?
-  totalSeats        Int      // 1000 for Origin, 300 for Vanguard
+  totalSeats        Int // 1000 for Origin, 300 for Vanguard
   requiredReferrals Int      @default(0) // 0 for Origin, 3 for Vanguard
   isActive          Boolean  @default(true)
   createdAt         DateTime @default(now())
@@ -578,13 +583,13 @@ model UserReferralStatus {
   userId            Int               @unique
   earlyAccessStatus EarlyAccessStatus @default(NONE)
   referralCode      String            @unique // Unique 10-character code
-  rewardsUnlocked  Boolean           @default(false)
+  rewardsUnlocked   Boolean           @default(false)
   originId          String?           @unique // Format: ORG-001
-  vanguardId       String?           @unique // Format: VNG-001
+  vanguardId        String?           @unique // Format: VNG-001
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
 
-  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([referralCode])
   @@index([earlyAccessStatus])
@@ -592,17 +597,17 @@ model UserReferralStatus {
 }
 
 model Referral {
-  id          Int            @id @default(autoincrement())
-  referrerId  Int            // User who made the referral
-  referredId  Int            @unique // User who was referred (unique)
-  referralCode String        // Referral code used
-  status      ReferralStatus @default(INVITED)
-  completedAt DateTime?      // When onboarding completed
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
+  id           Int            @id @default(autoincrement())
+  referrerId   Int // User who made the referral
+  referredId   Int            @unique // User who was referred (unique)
+  referralCode String // Referral code used
+  status       ReferralStatus @default(INVITED)
+  completedAt  DateTime? // When onboarding completed
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
 
-  referrer    User           @relation("Referrer", fields: [referrerId], references: [id], onDelete: Cascade)
-  referred    User           @relation("ReferredUser", fields: [referredId], references: [id], onDelete: Cascade)
+  referrer User @relation("Referrer", fields: [referrerId], references: [id], onDelete: Cascade)
+  referred User @relation("ReferredUser", fields: [referredId], references: [id], onDelete: Cascade)
 
   @@index([referrerId, status])
   @@index([referralCode])
@@ -612,8 +617,8 @@ model Referral {
 
 model ReferralClick {
   id            Int      @id @default(autoincrement())
-  referralCode  String   // Referral code clicked
-  visitorIpHash String   // Hashed IP for privacy (SHA-256)
+  referralCode  String // Referral code clicked
+  visitorIpHash String // Hashed IP for privacy (SHA-256)
   userAgent     String?
   referer       String?
   converted     Boolean  @default(false) // Whether click led to signup

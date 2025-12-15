@@ -1040,7 +1040,7 @@ export class SubscriptionService {
         where: {
           isActive: true,
           name: {
-            not: "trial",
+            in: ["focus_master", "performance_founder"],
           },
         },
         orderBy: {
