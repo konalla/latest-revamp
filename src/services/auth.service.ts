@@ -115,6 +115,12 @@ const login = async (data: LoginRequest): Promise<AuthResponse> => {
     throw new Error("Invalid credentials");
   }
 
+  // Prevent admin users from logging into customer app
+  // Admin users must use /api/admin/auth/login endpoint
+  if (user.role === "ADMIN") {
+    throw new Error("Admin users must login through the admin panel");
+  }
+
   // Ensure workspace/team backfill for existing users
   try {
     await ensureWorkspaceAndTeamForUser(user.id, user.name, user.username);
