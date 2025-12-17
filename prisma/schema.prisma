@@ -233,6 +233,8 @@ model Task {
 
   // AI Recommendation relation
   aiRecommendation AIRecommendation?
+
+  @@index([userId, completed])
 }
 
 model AIRecommendation {

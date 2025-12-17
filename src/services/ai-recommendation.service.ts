@@ -390,6 +390,25 @@ export class AIRecommendationService {
   }
 
   /**
+   * Clean LLM response by removing markdown code block markers
+   * Handles cases where LLM wraps JSON in ```json ... ``` blocks
+   */
+  private cleanJsonResponse(content: string): string {
+    if (!content) return content;
+    
+    // Remove markdown code block markers
+    let cleaned = content.trim();
+    
+    // Remove opening ```json or ``` markers
+    cleaned = cleaned.replace(/^```(?:json)?\s*/i, '');
+    
+    // Remove closing ``` markers
+    cleaned = cleaned.replace(/\s*```$/g, '');
+    
+    return cleaned.trim();
+  }
+
+  /**
    * Create system prompt with comprehensive rulebook
    */
   private createSystemPrompt(): string {
@@ -772,8 +791,11 @@ ${formatInstructions}`;
       // Get AI recommendation
       const response = await this.llm.invoke(messages);
       
+      // Clean response content (remove markdown code blocks if present)
+      const cleanedContent = this.cleanJsonResponse(response.content as string);
+      
       // Parse the structured response
-      const recommendation = await this.parser.parse(response.content as string);
+      const recommendation = await this.parser.parse(cleanedContent);
       
       // Apply disambiguation rules if needed
       const disambiguatedCategory = this.applyDisambiguationRules(task, recommendation.category);
@@ -826,8 +848,11 @@ ${formatInstructions}`;
       // Get AI recommendation
       const response = await this.llm.invoke(messages);
       
+      // Clean response content (remove markdown code blocks if present)
+      const cleanedContent = this.cleanJsonResponse(response.content as string);
+      
       // Parse the structured response
-      const baseRecommendation = await this.parser.parse(response.content as string);
+      const baseRecommendation = await this.parser.parse(cleanedContent);
       
       // Apply disambiguation rules
       const category = this.applyDisambiguationRules(task, baseRecommendation.category);
@@ -1018,8 +1043,11 @@ ${formatInstructions}`;
       // Get AI recommendation
       const response = await this.llm.invoke(messages);
       
+      // Clean response content (remove markdown code blocks if present)
+      const cleanedContent = this.cleanJsonResponse(response.content as string);
+      
       // Parse the structured response
-      const recommendation = await priorityParser.parse(response.content as string) as TaskRecommendationWithPriority;
+      const recommendation = await priorityParser.parse(cleanedContent) as TaskRecommendationWithPriority;
       
       // Validate and adjust recommendation based on user preferences
       const validatedRecommendation = this.validateRecommendationWithPriority(recommendation, userPreferences);

@@ -50,3 +50,5 @@ router.get("/subscriptions/:id", adminController.getSubscriptionDetails.bind(adm
 
 export default router;
 
+
+
