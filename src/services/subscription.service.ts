@@ -253,7 +253,8 @@ export class SubscriptionService {
       // Check if subscription is canceled but still within billing period
       // In this case, user should use resume endpoint instead of creating new checkout
       // Exception: All paid plans now get 7-day trial, so allow switching
-      const isPaidPlan = planName !== "trial";
+      // Note: planName type doesn't include "trial", so this check is always true for valid plan names
+      const isPaidPlan = true; // All valid planName values are paid plans
       const hasClarityPlan = subscription && subscription.subscriptionPlan.name === "trial";
       
       if (subscription && !hasClarityPlan && subscription.status === "CANCELED" && !isPaidPlan) {
@@ -363,9 +364,8 @@ export class SubscriptionService {
       };
       
       // Set 7-day trial for all paid plans (not the "trial" plan itself)
-      if (planName !== "trial") {
-        subscriptionData.trial_period_days = 7;
-      }
+      // Note: planName type doesn't include "trial", so this is always true for valid plan names
+      subscriptionData.trial_period_days = 7;
 
       const session = await stripe.checkout.sessions.create({
         customer: stripeCustomerId,
@@ -567,7 +567,7 @@ export class SubscriptionService {
       if (hasUnlimitedTasks) {
         return {
           canCreate: true,
-          tasksRemaining: null, // null indicates unlimited
+          // tasksRemaining is optional, omit it to indicate unlimited
           subscription: updatedSubscription,
         };
       }

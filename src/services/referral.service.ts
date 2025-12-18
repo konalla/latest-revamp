@@ -268,7 +268,7 @@ export class ReferralService {
       success: true,
       referralId: referral.id,
       referrerStatusUpdated: statusUpdate.updated,
-      newReferrerStatus: statusUpdate.newStatus?.toLowerCase(),
+      ...(statusUpdate.newStatus && { newReferrerStatus: statusUpdate.newStatus.toLowerCase() }),
       message: "Referral completed successfully",
     };
   }

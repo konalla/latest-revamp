@@ -632,7 +632,7 @@ const getPastTasksWithAIRecommendations = async (req: Request, res: Response) =>
             advancesKeyResults: (task as any).advancesKeyResults || false
           },
           userPreferences,
-          req.user.userId
+          req.user!.userId
         ).then(async (recommendation) => {
           // Save the recommendation
           await (prisma as any).aIRecommendation.create({
@@ -642,7 +642,7 @@ const getPastTasksWithAIRecommendations = async (req: Request, res: Response) =>
               recommendedTime: recommendation.recommendedTime,
               confidence: recommendation.confidence,
               reasoning: recommendation.reasoning,
-              signalType: recommendation.signalType
+              signalType: (recommendation as any).signalType || null
             }
           });
         }).catch((error) => {
@@ -673,7 +673,7 @@ const getPastTasksWithAIRecommendations = async (req: Request, res: Response) =>
         category: (task as any).aiRecommendation.category,
         confidence: (task as any).aiRecommendation.confidence,
         recommendedTime: (task as any).aiRecommendation.recommendedTime,
-        signalType: (task as any).aiRecommendation.signalType
+        ...((task as any).aiRecommendation.signalType ? { signalType: (task as any).aiRecommendation.signalType } : {})
       } : null,
       duration: task.duration,
       category: task.category

@@ -1462,7 +1462,7 @@ export class TaskService {
             category: (task as any).aiRecommendation.category,
             confidence: (task as any).aiRecommendation.confidence,
             recommendedTime: (task as any).aiRecommendation.recommendedTime,
-            signalType: (task as any).aiRecommendation.signalType
+            ...((task as any).aiRecommendation.signalType ? { signalType: (task as any).aiRecommendation.signalType } : {})
           } : null,
           duration: task.duration,
           category: task.category
@@ -1635,7 +1635,7 @@ export class TaskService {
             category: (task as any).aiRecommendation.category,
             confidence: (task as any).aiRecommendation.confidence,
             recommendedTime: (task as any).aiRecommendation.recommendedTime,
-            signalType: (task as any).aiRecommendation.signalType
+            ...((task as any).aiRecommendation.signalType ? { signalType: (task as any).aiRecommendation.signalType } : {})
           } : null,
           duration: task.duration,
           category: task.category
@@ -1947,7 +1947,7 @@ export class TaskService {
           category: todayTask.aiRecommendation.category,
           confidence: todayTask.aiRecommendation.confidence,
           recommendedTime: todayTask.aiRecommendation.recommendedTime,
-          signalType: todayTask.aiRecommendation.signalType
+          ...(todayTask.aiRecommendation.signalType ? { signalType: todayTask.aiRecommendation.signalType } : {})
         } : null,
         duration: todayTask.duration,
         category: 'execution' // Default category
@@ -1968,7 +1968,7 @@ export class TaskService {
           category: overdueTask.aiRecommendation.category,
           confidence: overdueTask.aiRecommendation.confidence,
           recommendedTime: overdueTask.aiRecommendation.recommendedTime,
-          signalType: overdueTask.aiRecommendation.signalType
+          ...(overdueTask.aiRecommendation.signalType ? { signalType: overdueTask.aiRecommendation.signalType } : {})
         } : null,
         duration: overdueTask.duration,
         category: 'execution' // Default category
@@ -2066,7 +2066,7 @@ export class TaskService {
           category: task.aiRecommendation.category,
           confidence: task.aiRecommendation.confidence,
           recommendedTime: task.aiRecommendation.recommendedTime,
-          signalType: task.aiRecommendation.signalType
+          ...(task.aiRecommendation.signalType ? { signalType: task.aiRecommendation.signalType } : {})
         } : null,
         duration: task.duration,
         category: 'execution' // Default category

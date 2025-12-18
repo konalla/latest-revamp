@@ -47,6 +47,7 @@
   "exclude": [
     "scripts/**/*",
     "node_modules",
-    "dist"
+    "dist",
+    "vitest.config.ts"
   ]
 }

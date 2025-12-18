@@ -63,8 +63,12 @@ import {
   type SignalType 
 } from '../services/ai-recommendation.service.js';
 import prisma from '../config/prisma.js';
-import { __mockInvoke } from '@langchain/openai';
-import { __mockParse } from 'langchain/output_parsers';
+import * as openaiModule from '@langchain/openai';
+import * as parserModule from 'langchain/output_parsers';
+
+// Get mocked functions from vi.mock
+const mockInvoke = (openaiModule as any).__mockInvoke;
+const mockParse = (parserModule as any).__mockParse;
 
 // Mock user preferences
 const mockUserPreferences: UserWorkPreferences = {
@@ -488,7 +492,7 @@ describe('Signal Layer - generateEnhancedTaskRecommendation', () => {
     vi.clearAllMocks();
     
     // Setup default mocks
-    __mockInvoke.mockResolvedValue({
+    mockInvoke.mockResolvedValue({
       content: JSON.stringify({
         category: 'Deep Work',
         recommendedTime: '09:30',
@@ -497,7 +501,7 @@ describe('Signal Layer - generateEnhancedTaskRecommendation', () => {
       }),
     });
     
-    __mockParse.mockResolvedValue({
+    mockParse.mockResolvedValue({
       category: 'Deep Work',
       recommendedTime: '09:30',
       confidence: 0.92,
@@ -681,8 +685,8 @@ describe('Signal Layer - generateEnhancedTaskRecommendation', () => {
 
   it('should handle errors gracefully and return fallback', async () => {
     // Mock LLM to throw error
-    __mockInvoke.mockRejectedValue(new Error('API Error'));
-    __mockParse.mockRejectedValue(new Error('Parse Error'));
+    mockInvoke.mockRejectedValue(new Error('API Error'));
+    mockParse.mockRejectedValue(new Error('Parse Error'));
 
     const task: TaskAnalysis = {
       title: 'Test Task',
@@ -711,7 +715,7 @@ describe('Signal Layer - Integration Tests', () => {
     vi.clearAllMocks();
     
     // Setup mocks for integration tests
-    __mockInvoke.mockResolvedValue({
+    mockInvoke.mockResolvedValue({
       content: JSON.stringify({
         category: 'Deep Work',
         recommendedTime: '09:30',
@@ -720,7 +724,7 @@ describe('Signal Layer - Integration Tests', () => {
       }),
     });
     
-    __mockParse.mockResolvedValue({
+    mockParse.mockResolvedValue({
       category: 'Deep Work',
       recommendedTime: '09:30',
       confidence: 0.95,
@@ -764,7 +768,7 @@ describe('Signal Layer - Integration Tests', () => {
 
   it('should handle Noise task workflow with confirmation', async () => {
     // Update mocks for Noise task
-    __mockInvoke.mockResolvedValue({
+    mockInvoke.mockResolvedValue({
       content: JSON.stringify({
         category: 'Executive Work',
         recommendedTime: '18:00',
@@ -773,7 +777,7 @@ describe('Signal Layer - Integration Tests', () => {
       }),
     });
     
-    __mockParse.mockResolvedValue({
+    mockParse.mockResolvedValue({
       category: 'Executive Work',
       recommendedTime: '18:00',
       confidence: 0.75,

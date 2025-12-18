@@ -21,20 +21,17 @@ export class AdminController {
       const filters: AdminUserFilters = {
         page: req.query.page ? parseInt(req.query.page as string) : 1,
         limit: req.query.limit ? parseInt(req.query.limit as string) : 20,
-        search: req.query.search as string,
-        email: req.query.email as string,
-        username: req.query.username as string,
-        name: req.query.name as string,
-        role: req.query.role as string,
-        subscriptionStatus: req.query.subscriptionStatus as string,
-        hasSubscription:
-          req.query.hasSubscription !== undefined
-            ? req.query.hasSubscription === "true"
-            : undefined,
-        createdAtFrom: req.query.createdAtFrom as string,
-        createdAtTo: req.query.createdAtTo as string,
         sortBy: (req.query.sortBy as string) || "created_at",
         sortOrder: (req.query.sortOrder as "asc" | "desc") || "desc",
+        ...(req.query.search && { search: req.query.search as string }),
+        ...(req.query.email && { email: req.query.email as string }),
+        ...(req.query.username && { username: req.query.username as string }),
+        ...(req.query.name && { name: req.query.name as string }),
+        ...(req.query.role && { role: req.query.role as string }),
+        ...(req.query.subscriptionStatus && { subscriptionStatus: req.query.subscriptionStatus as string }),
+        ...(req.query.hasSubscription !== undefined && { hasSubscription: req.query.hasSubscription === "true" }),
+        ...(req.query.createdAtFrom && { createdAtFrom: req.query.createdAtFrom as string }),
+        ...(req.query.createdAtTo && { createdAtTo: req.query.createdAtTo as string }),
       };
 
       const result = await adminService.getAllUsers(filters);
@@ -60,7 +57,7 @@ export class AdminController {
    */
   async getUserDetails(req: Request, res: Response): Promise<void> {
     try {
-      const userId = parseInt(req.params.id);
+      const userId = parseInt(req.params.id || '');
       if (isNaN(userId)) {
         res.status(400).json({ message: "Invalid user ID" });
         return;
@@ -86,19 +83,17 @@ export class AdminController {
       const filters: AdminProjectFilters = {
         page: req.query.page ? parseInt(req.query.page as string) : 1,
         limit: req.query.limit ? parseInt(req.query.limit as string) : 20,
-        search: req.query.search as string,
-        name: req.query.name as string,
-        status: req.query.status as string,
-        visibility: req.query.visibility as string,
-        userId: req.query.userId ? parseInt(req.query.userId as string) : undefined,
-        workspaceId: req.query.workspaceId
-          ? parseInt(req.query.workspaceId as string)
-          : undefined,
-        teamId: req.query.teamId ? parseInt(req.query.teamId as string) : undefined,
-        createdAtFrom: req.query.createdAtFrom as string,
-        createdAtTo: req.query.createdAtTo as string,
         sortBy: (req.query.sortBy as string) || "createdAt",
         sortOrder: (req.query.sortOrder as "asc" | "desc") || "desc",
+        ...(req.query.search && { search: req.query.search as string }),
+        ...(req.query.name && { name: req.query.name as string }),
+        ...(req.query.status && { status: req.query.status as string }),
+        ...(req.query.visibility && { visibility: req.query.visibility as string }),
+        ...(req.query.userId && { userId: parseInt(req.query.userId as string) }),
+        ...(req.query.workspaceId && { workspaceId: parseInt(req.query.workspaceId as string) }),
+        ...(req.query.teamId && { teamId: parseInt(req.query.teamId as string) }),
+        ...(req.query.createdAtFrom && { createdAtFrom: req.query.createdAtFrom as string }),
+        ...(req.query.createdAtTo && { createdAtTo: req.query.createdAtTo as string }),
       };
 
       const result = await adminService.getAllProjects(filters);
@@ -124,7 +119,7 @@ export class AdminController {
    */
   async getProjectDetails(req: Request, res: Response): Promise<void> {
     try {
-      const projectId = parseInt(req.params.id);
+      const projectId = parseInt(req.params.id || '');
       if (isNaN(projectId)) {
         res.status(400).json({ message: "Invalid project ID" });
         return;
@@ -150,29 +145,23 @@ export class AdminController {
       const filters: AdminTaskFilters = {
         page: req.query.page ? parseInt(req.query.page as string) : 1,
         limit: req.query.limit ? parseInt(req.query.limit as string) : 20,
-        search: req.query.search as string,
-        title: req.query.title as string,
-        category: req.query.category as string,
-        priority: req.query.priority as string,
-        completed:
-          req.query.completed !== undefined ? req.query.completed === "true" : undefined,
-        userId: req.query.userId ? parseInt(req.query.userId as string) : undefined,
-        projectId: req.query.projectId ? parseInt(req.query.projectId as string) : undefined,
-        objectiveId: req.query.objectiveId
-          ? parseInt(req.query.objectiveId as string)
-          : undefined,
-        okrId: req.query.okrId ? parseInt(req.query.okrId as string) : undefined,
-        workspaceId: req.query.workspaceId
-          ? parseInt(req.query.workspaceId as string)
-          : undefined,
-        teamId: req.query.teamId ? parseInt(req.query.teamId as string) : undefined,
-        importance:
-          req.query.importance !== undefined ? req.query.importance === "true" : undefined,
-        urgency: req.query.urgency !== undefined ? req.query.urgency === "true" : undefined,
-        createdAtFrom: req.query.createdAtFrom as string,
-        createdAtTo: req.query.createdAtTo as string,
         sortBy: (req.query.sortBy as string) || "createdAt",
         sortOrder: (req.query.sortOrder as "asc" | "desc") || "desc",
+        ...(req.query.search && { search: req.query.search as string }),
+        ...(req.query.title && { title: req.query.title as string }),
+        ...(req.query.category && { category: req.query.category as string }),
+        ...(req.query.priority && { priority: req.query.priority as string }),
+        ...(req.query.completed !== undefined && { completed: req.query.completed === "true" }),
+        ...(req.query.userId && { userId: parseInt(req.query.userId as string) }),
+        ...(req.query.projectId && { projectId: parseInt(req.query.projectId as string) }),
+        ...(req.query.objectiveId && { objectiveId: parseInt(req.query.objectiveId as string) }),
+        ...(req.query.okrId && { okrId: parseInt(req.query.okrId as string) }),
+        ...(req.query.workspaceId && { workspaceId: parseInt(req.query.workspaceId as string) }),
+        ...(req.query.teamId && { teamId: parseInt(req.query.teamId as string) }),
+        ...(req.query.importance !== undefined && { importance: req.query.importance === "true" }),
+        ...(req.query.urgency !== undefined && { urgency: req.query.urgency === "true" }),
+        ...(req.query.createdAtFrom && { createdAtFrom: req.query.createdAtFrom as string }),
+        ...(req.query.createdAtTo && { createdAtTo: req.query.createdAtTo as string }),
       };
 
       const result = await adminService.getAllTasks(filters);
@@ -198,7 +187,7 @@ export class AdminController {
    */
   async getTaskDetails(req: Request, res: Response): Promise<void> {
     try {
-      const taskId = parseInt(req.params.id);
+      const taskId = parseInt(req.params.id || '');
       if (isNaN(taskId)) {
         res.status(400).json({ message: "Invalid task ID" });
         return;
@@ -224,22 +213,18 @@ export class AdminController {
       const filters: AdminOkrFilters = {
         page: req.query.page ? parseInt(req.query.page as string) : 1,
         limit: req.query.limit ? parseInt(req.query.limit as string) : 20,
-        search: req.query.search as string,
-        title: req.query.title as string,
-        status: req.query.status as string,
-        userId: req.query.userId ? parseInt(req.query.userId as string) : undefined,
-        objectiveId: req.query.objectiveId
-          ? parseInt(req.query.objectiveId as string)
-          : undefined,
-        planId: req.query.planId ? parseInt(req.query.planId as string) : undefined,
-        workspaceId: req.query.workspaceId
-          ? parseInt(req.query.workspaceId as string)
-          : undefined,
-        teamId: req.query.teamId ? parseInt(req.query.teamId as string) : undefined,
-        createdAtFrom: req.query.createdAtFrom as string,
-        createdAtTo: req.query.createdAtTo as string,
         sortBy: (req.query.sortBy as string) || "createdAt",
         sortOrder: (req.query.sortOrder as "asc" | "desc") || "desc",
+        ...(req.query.search && { search: req.query.search as string }),
+        ...(req.query.title && { title: req.query.title as string }),
+        ...(req.query.status && { status: req.query.status as string }),
+        ...(req.query.userId && { userId: parseInt(req.query.userId as string) }),
+        ...(req.query.objectiveId && { objectiveId: parseInt(req.query.objectiveId as string) }),
+        ...(req.query.planId && { planId: parseInt(req.query.planId as string) }),
+        ...(req.query.workspaceId && { workspaceId: parseInt(req.query.workspaceId as string) }),
+        ...(req.query.teamId && { teamId: parseInt(req.query.teamId as string) }),
+        ...(req.query.createdAtFrom && { createdAtFrom: req.query.createdAtFrom as string }),
+        ...(req.query.createdAtTo && { createdAtTo: req.query.createdAtTo as string }),
       };
 
       const result = await adminService.getAllOkrs(filters);
@@ -265,7 +250,7 @@ export class AdminController {
    */
   async getOkrDetails(req: Request, res: Response): Promise<void> {
     try {
-      const okrId = parseInt(req.params.id);
+      const okrId = parseInt(req.params.id || '');
       if (isNaN(okrId)) {
         res.status(400).json({ message: "Invalid OKR ID" });
         return;
@@ -291,19 +276,17 @@ export class AdminController {
       const filters: AdminObjectiveFilters = {
         page: req.query.page ? parseInt(req.query.page as string) : 1,
         limit: req.query.limit ? parseInt(req.query.limit as string) : 20,
-        search: req.query.search as string,
-        name: req.query.name as string,
-        status: req.query.status as string,
-        userId: req.query.userId ? parseInt(req.query.userId as string) : undefined,
-        projectId: req.query.projectId ? parseInt(req.query.projectId as string) : undefined,
-        workspaceId: req.query.workspaceId
-          ? parseInt(req.query.workspaceId as string)
-          : undefined,
-        teamId: req.query.teamId ? parseInt(req.query.teamId as string) : undefined,
-        createdAtFrom: req.query.createdAtFrom as string,
-        createdAtTo: req.query.createdAtTo as string,
         sortBy: (req.query.sortBy as string) || "created_at",
         sortOrder: (req.query.sortOrder as "asc" | "desc") || "desc",
+        ...(req.query.search && { search: req.query.search as string }),
+        ...(req.query.name && { name: req.query.name as string }),
+        ...(req.query.status && { status: req.query.status as string }),
+        ...(req.query.userId && { userId: parseInt(req.query.userId as string) }),
+        ...(req.query.projectId && { projectId: parseInt(req.query.projectId as string) }),
+        ...(req.query.workspaceId && { workspaceId: parseInt(req.query.workspaceId as string) }),
+        ...(req.query.teamId && { teamId: parseInt(req.query.teamId as string) }),
+        ...(req.query.createdAtFrom && { createdAtFrom: req.query.createdAtFrom as string }),
+        ...(req.query.createdAtTo && { createdAtTo: req.query.createdAtTo as string }),
       };
 
       const result = await adminService.getAllObjectives(filters);
@@ -329,7 +312,7 @@ export class AdminController {
    */
   async getObjectiveDetails(req: Request, res: Response): Promise<void> {
     try {
-      const objectiveId = parseInt(req.params.id);
+      const objectiveId = parseInt(req.params.id || '');
       if (isNaN(objectiveId)) {
         res.status(400).json({ message: "Invalid objective ID" });
         return;
@@ -355,13 +338,13 @@ export class AdminController {
       const filters: AdminWorkspaceFilters = {
         page: req.query.page ? parseInt(req.query.page as string) : 1,
         limit: req.query.limit ? parseInt(req.query.limit as string) : 20,
-        search: req.query.search as string,
-        name: req.query.name as string,
-        ownerId: req.query.ownerId ? parseInt(req.query.ownerId as string) : undefined,
-        createdAtFrom: req.query.createdAtFrom as string,
-        createdAtTo: req.query.createdAtTo as string,
         sortBy: (req.query.sortBy as string) || "createdAt",
         sortOrder: (req.query.sortOrder as "asc" | "desc") || "desc",
+        ...(req.query.search && { search: req.query.search as string }),
+        ...(req.query.name && { name: req.query.name as string }),
+        ...(req.query.ownerId && { ownerId: parseInt(req.query.ownerId as string) }),
+        ...(req.query.createdAtFrom && { createdAtFrom: req.query.createdAtFrom as string }),
+        ...(req.query.createdAtTo && { createdAtTo: req.query.createdAtTo as string }),
       };
 
       const result = await adminService.getAllWorkspaces(filters);
@@ -387,7 +370,7 @@ export class AdminController {
    */
   async getWorkspaceDetails(req: Request, res: Response): Promise<void> {
     try {
-      const workspaceId = parseInt(req.params.id);
+      const workspaceId = parseInt(req.params.id || '');
       if (isNaN(workspaceId)) {
         res.status(400).json({ message: "Invalid workspace ID" });
         return;
@@ -413,15 +396,13 @@ export class AdminController {
       const filters: AdminTeamFilters = {
         page: req.query.page ? parseInt(req.query.page as string) : 1,
         limit: req.query.limit ? parseInt(req.query.limit as string) : 20,
-        search: req.query.search as string,
-        name: req.query.name as string,
-        workspaceId: req.query.workspaceId
-          ? parseInt(req.query.workspaceId as string)
-          : undefined,
-        createdAtFrom: req.query.createdAtFrom as string,
-        createdAtTo: req.query.createdAtTo as string,
         sortBy: (req.query.sortBy as string) || "createdAt",
         sortOrder: (req.query.sortOrder as "asc" | "desc") || "desc",
+        ...(req.query.search && { search: req.query.search as string }),
+        ...(req.query.name && { name: req.query.name as string }),
+        ...(req.query.workspaceId && { workspaceId: parseInt(req.query.workspaceId as string) }),
+        ...(req.query.createdAtFrom && { createdAtFrom: req.query.createdAtFrom as string }),
+        ...(req.query.createdAtTo && { createdAtTo: req.query.createdAtTo as string }),
       };
 
       const result = await adminService.getAllTeams(filters);
@@ -447,7 +428,7 @@ export class AdminController {
    */
   async getTeamDetails(req: Request, res: Response): Promise<void> {
     try {
-      const teamId = parseInt(req.params.id);
+      const teamId = parseInt(req.params.id || '');
       if (isNaN(teamId)) {
         res.status(400).json({ message: "Invalid team ID" });
         return;
@@ -473,15 +454,13 @@ export class AdminController {
       const filters: AdminSubscriptionFilters = {
         page: req.query.page ? parseInt(req.query.page as string) : 1,
         limit: req.query.limit ? parseInt(req.query.limit as string) : 20,
-        status: req.query.status as string,
-        subscriptionPlanId: req.query.subscriptionPlanId
-          ? parseInt(req.query.subscriptionPlanId as string)
-          : undefined,
-        userId: req.query.userId ? parseInt(req.query.userId as string) : undefined,
-        createdAtFrom: req.query.createdAtFrom as string,
-        createdAtTo: req.query.createdAtTo as string,
         sortBy: (req.query.sortBy as string) || "createdAt",
         sortOrder: (req.query.sortOrder as "asc" | "desc") || "desc",
+        ...(req.query.status && { status: req.query.status as string }),
+        ...(req.query.subscriptionPlanId && { subscriptionPlanId: parseInt(req.query.subscriptionPlanId as string) }),
+        ...(req.query.userId && { userId: parseInt(req.query.userId as string) }),
+        ...(req.query.createdAtFrom && { createdAtFrom: req.query.createdAtFrom as string }),
+        ...(req.query.createdAtTo && { createdAtTo: req.query.createdAtTo as string }),
       };
 
       const result = await adminService.getAllSubscriptions(filters);
@@ -507,7 +486,7 @@ export class AdminController {
    */
   async getSubscriptionDetails(req: Request, res: Response): Promise<void> {
     try {
-      const subscriptionId = parseInt(req.params.id);
+      const subscriptionId = parseInt(req.params.id || '');
       if (isNaN(subscriptionId)) {
         res.status(400).json({ message: "Invalid subscription ID" });
         return;
