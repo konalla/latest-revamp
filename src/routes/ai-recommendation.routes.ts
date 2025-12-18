@@ -9,7 +9,8 @@ import {
   getUserWorkPreferences,
   updateUserWorkPreferences,
   getTasksWithAIRecommendations,
-  getPastTasksWithAIRecommendations
+  getPastTasksWithAIRecommendations,
+  getFutureTasksWithAIRecommendations
 } from "../controllers/ai-recommendation.controller.js";
 
 const router = Router();
@@ -79,5 +80,12 @@ router.get("/now", getNowRecommendedTask);
  * @access Private
  */
 router.get("/past-tasks", getPastTasksWithAIRecommendations);
+
+/**
+ * @route GET /api/ai-recommendations/future-tasks
+ * @desc Get future tasks (tasks without due dates) with AI recommendations, ranked by priority
+ * @access Private
+ */
+router.get("/future-tasks", getFutureTasksWithAIRecommendations);
 
 export default router;

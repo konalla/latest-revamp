@@ -210,7 +210,10 @@ export interface TodayTaskResponse {
   priority: string;
   importance: boolean;
   urgency: boolean;
-  dueDate: Date;
+  // Signal Layer fields
+  isHighLeverage?: boolean;
+  advancesKeyResults?: boolean;
+  dueDate: Date | null; // Can be null for tasks without due dates
   aiRecommendation?: AIRecommendationResponse;
   aiRecommendationStatus: 'available' | 'generating' | 'failed';
   rank: number;

@@ -1411,6 +1411,9 @@ export class TaskService {
             priority: task.priority,
             importance: task.importance,
             urgency: task.urgency,
+            // Signal Layer fields
+            isHighLeverage: (task as any).isHighLeverage || false,
+            advancesKeyResults: (task as any).advancesKeyResults || false,
             dueDate: (task as any).dueDate,
             aiRecommendationStatus,
             rank: index + 1
@@ -1441,6 +1444,7 @@ export class TaskService {
       const userPreferences = await aiRecommendationService.getUserWorkPreferences(userId);
       
       // Rank tasks using new priority service
+      // Include Signal Layer fields for proper prioritization
       const tasksForRanking = tasks.map(task => {
         const processedTask = processedTasks.find(pt => pt.id === task.id);
         return {
@@ -1448,13 +1452,17 @@ export class TaskService {
           priority: task.priority,
           importance: task.importance,
           urgency: task.urgency,
+          // Signal Layer fields - critical for prioritization
+          isHighLeverage: (task as any).isHighLeverage || false,
+          advancesKeyResults: (task as any).advancesKeyResults || false,
           dueDate: (task as any).dueDate || null,
           okrId: (task as any).okrId || null,
           okr: (task as any).okr || null,
           aiRecommendation: (task as any).aiRecommendation ? {
             category: (task as any).aiRecommendation.category,
             confidence: (task as any).aiRecommendation.confidence,
-            recommendedTime: (task as any).aiRecommendation.recommendedTime
+            recommendedTime: (task as any).aiRecommendation.recommendedTime,
+            signalType: (task as any).aiRecommendation.signalType
           } : null,
           duration: task.duration,
           category: task.category
@@ -1468,8 +1476,9 @@ export class TaskService {
         userPreferences
       );
 
-      // Map back to TodayTaskResponse format and return top 3
-      const top3Tasks = rankedTasksWithScores.slice(0, 3).map(item => {
+      // Map back to TodayTaskResponse format and return top 3 (or all if less than 3)
+      // Prioritize by Signal Layer first, then Eisenhower matrix
+      const topTasks = rankedTasksWithScores.slice(0, Math.min(3, rankedTasksWithScores.length)).map(item => {
         const originalTask = processedTasks.find(t => t.id === item.id)!;
         return {
           ...originalTask,
@@ -1478,7 +1487,7 @@ export class TaskService {
       });
 
       return {
-        tasks: top3Tasks,
+        tasks: topTasks,
         total: tasks.length,
         generatedRecommendations,
         failedRecommendations
@@ -1510,6 +1519,156 @@ export class TaskService {
   private parseTimeToMinutes(timeString: string): number {
     const [hours, minutes] = timeString.split(':').map(Number);
     return (hours || 0) * 60 + (minutes || 0);
+  }
+
+  /**
+   * Get future tasks (tasks without due dates) with AI recommendations, ranked by priority
+   */
+  async getFutureTasksWithAIRecommendations(userId: number, timezone: string = 'UTC'): Promise<TodayTasksResponse> {
+    try {
+      // Get tasks without due dates (null dueDate) - these are unscheduled/future tasks
+      const tasks = await prisma.task.findMany({
+        where: {
+          userId,
+          completed: false,
+          dueDate: null // Only tasks without due dates
+        },
+        include: {
+          aiRecommendation: true,
+          okr: {
+            select: {
+              id: true,
+              currentValue: true,
+              targetValue: true,
+              endDate: true,
+              confidenceScore: true
+            }
+          },
+          project: {
+            select: { id: true, name: true }
+          }
+        } as any
+      });
+
+      let generatedRecommendations = 0;
+      let failedRecommendations = 0;
+
+      // Process tasks and generate missing AI recommendations
+      const processedTasks = await Promise.all(
+        tasks.map(async (task, index) => {
+          let aiRecommendationStatus: 'available' | 'generating' | 'failed' = 'available';
+          let aiRecommendation = (task as any).aiRecommendation;
+
+          // If no AI recommendation exists, generate one asynchronously
+          if (!aiRecommendation) {
+            aiRecommendationStatus = 'generating';
+            try {
+              // Generate AI recommendation asynchronously
+              this.generateAIRecommendationAsync(task.id, userId).then(() => {
+                console.log(`AI recommendation generated for task ${task.id}`);
+              }).catch((error) => {
+                console.error(`Failed to generate AI recommendation for task ${task.id}:`, error);
+              });
+              generatedRecommendations++;
+            } catch (error) {
+              console.error(`Error initiating AI recommendation for task ${task.id}:`, error);
+              aiRecommendationStatus = 'failed';
+              failedRecommendations++;
+            }
+          }
+
+          const result: TodayTaskResponse = {
+            id: task.id,
+            title: task.title,
+            duration: task.duration,
+            priority: task.priority,
+            importance: task.importance,
+            urgency: task.urgency,
+            // Signal Layer fields
+            isHighLeverage: (task as any).isHighLeverage || false,
+            advancesKeyResults: (task as any).advancesKeyResults || false,
+            dueDate: null, // Future tasks don't have due dates
+            aiRecommendationStatus,
+            rank: index + 1
+          };
+          
+          if (task.description) {
+            result.description = task.description;
+          }
+          
+          if (aiRecommendation) {
+            result.aiRecommendation = {
+              id: aiRecommendation.id,
+              taskId: aiRecommendation.taskId,
+              category: aiRecommendation.category,
+              recommendedTime: aiRecommendation.recommendedTime,
+              confidence: aiRecommendation.confidence,
+              reasoning: aiRecommendation.reasoning,
+              createdAt: aiRecommendation.createdAt,
+              updatedAt: aiRecommendation.updatedAt
+            };
+          }
+          
+          return result;
+        })
+      );
+
+      // Get user work preferences for work mode alignment
+      const userPreferences = await aiRecommendationService.getUserWorkPreferences(userId);
+      
+      // Rank tasks using new priority service
+      // Include Signal Layer fields for proper prioritization
+      const tasksForRanking = tasks.map(task => {
+        const processedTask = processedTasks.find(pt => pt.id === task.id);
+        return {
+          id: task.id,
+          priority: task.priority,
+          importance: task.importance,
+          urgency: task.urgency,
+          // Signal Layer fields - critical for prioritization
+          isHighLeverage: (task as any).isHighLeverage || false,
+          advancesKeyResults: (task as any).advancesKeyResults || false,
+          dueDate: null, // Future tasks don't have due dates
+          okrId: (task as any).okrId || null,
+          okr: (task as any).okr || null,
+          aiRecommendation: (task as any).aiRecommendation ? {
+            category: (task as any).aiRecommendation.category,
+            confidence: (task as any).aiRecommendation.confidence,
+            recommendedTime: (task as any).aiRecommendation.recommendedTime,
+            signalType: (task as any).aiRecommendation.signalType
+          } : null,
+          duration: task.duration,
+          category: task.category
+        };
+      });
+
+      const rankedTasksWithScores = await taskPriorityService.rankTasksByPriority(
+        tasksForRanking,
+        userId,
+        new Date(),
+        userPreferences
+      );
+
+      // Map back to TodayTaskResponse format and return top 3
+      // Prioritize by Signal Layer first, then Eisenhower matrix
+      const topTasks = rankedTasksWithScores.slice(0, Math.min(3, rankedTasksWithScores.length)).map(item => {
+        const originalTask = processedTasks.find(t => t.id === item.id)!;
+        return {
+          ...originalTask,
+          rank: item.rank
+        };
+      });
+
+      return {
+        tasks: topTasks,
+        total: tasks.length,
+        generatedRecommendations,
+        failedRecommendations
+      };
+    } catch (error) {
+      console.error("Error fetching future tasks with AI recommendations:", error);
+      throw new Error("Failed to fetch future tasks");
+    }
   }
 
   /**
@@ -1614,12 +1773,16 @@ export class TaskService {
       } as any);
       
       // Convert overdue tasks to TodayTaskResponse format
+      // Include Signal Layer fields
       const overdueTasksFormatted: TodayTaskResponse[] = overdueTasksFromDB
         .filter(task => task.dueDate !== null) // Only include tasks with due dates
         .map(task => ({
           ...task,
           description: task.description || '', // Convert null to empty string
           dueDate: task.dueDate!, // We know it's not null due to filter above
+          // Signal Layer fields
+          isHighLeverage: (task as any).isHighLeverage || false,
+          advancesKeyResults: (task as any).advancesKeyResults || false,
           aiRecommendationStatus: 'available' as const,
           rank: 0 // Will be calculated later if needed
         }));
@@ -1768,18 +1931,23 @@ export class TaskService {
   ): Promise<boolean> {
     try {
       // Prepare tasks for priority comparison
+      // Include Signal Layer fields for proper prioritization (Signal Layer first, then Eisenhower matrix)
       const todayTaskForRanking = {
         id: todayTask.id,
         priority: todayTask.priority,
         importance: todayTask.importance,
         urgency: todayTask.urgency,
+        // Signal Layer fields - critical for prioritization
+        isHighLeverage: todayTask.isHighLeverage || false,
+        advancesKeyResults: todayTask.advancesKeyResults || false,
         dueDate: todayTask.dueDate || null,
         okrId: null,
         okr: null,
         aiRecommendation: todayTask.aiRecommendation ? {
           category: todayTask.aiRecommendation.category,
           confidence: todayTask.aiRecommendation.confidence,
-          recommendedTime: todayTask.aiRecommendation.recommendedTime
+          recommendedTime: todayTask.aiRecommendation.recommendedTime,
+          signalType: todayTask.aiRecommendation.signalType
         } : null,
         duration: todayTask.duration,
         category: 'execution' // Default category
@@ -1790,13 +1958,17 @@ export class TaskService {
         priority: overdueTask.priority,
         importance: overdueTask.importance,
         urgency: overdueTask.urgency,
+        // Signal Layer fields - critical for prioritization
+        isHighLeverage: overdueTask.isHighLeverage || false,
+        advancesKeyResults: overdueTask.advancesKeyResults || false,
         dueDate: overdueTask.dueDate || null,
         okrId: null,
         okr: null,
         aiRecommendation: overdueTask.aiRecommendation ? {
           category: overdueTask.aiRecommendation.category,
           confidence: overdueTask.aiRecommendation.confidence,
-          recommendedTime: overdueTask.aiRecommendation.recommendedTime
+          recommendedTime: overdueTask.aiRecommendation.recommendedTime,
+          signalType: overdueTask.aiRecommendation.signalType
         } : null,
         duration: overdueTask.duration,
         category: 'execution' // Default category
@@ -1878,18 +2050,23 @@ export class TaskService {
 
     try {
       // Prepare tasks for ranking
+      // Include Signal Layer fields for proper prioritization (Signal Layer first, then Eisenhower matrix)
       const tasksForRanking = tasks.map(task => ({
         id: task.id,
         priority: task.priority,
         importance: task.importance,
         urgency: task.urgency,
+        // Signal Layer fields - critical for prioritization
+        isHighLeverage: task.isHighLeverage || false,
+        advancesKeyResults: task.advancesKeyResults || false,
         dueDate: task.dueDate || null,
         okrId: null, // OKR data not available in TodayTaskResponse, would need to fetch
         okr: null,
         aiRecommendation: task.aiRecommendation ? {
           category: task.aiRecommendation.category,
           confidence: task.aiRecommendation.confidence,
-          recommendedTime: task.aiRecommendation.recommendedTime
+          recommendedTime: task.aiRecommendation.recommendedTime,
+          signalType: task.aiRecommendation.signalType
         } : null,
         duration: task.duration,
         category: 'execution' // Default category
