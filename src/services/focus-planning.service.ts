@@ -158,20 +158,110 @@ export class FocusPlanningService {
   }
 
   private prioritizeTasksInCategories(tasksByCategory: Record<string, TaskInternal[]>): CategoryPlan[] {
-    const scorePriority = (t: TaskInternal) => {
-      // Simple heuristic: map priority string and shorter duration higher
-      const priorityMap: Record<string, number> = { high: 3, medium: 2, low: 1 };
-      const p = priorityMap[t.priority?.toLowerCase?.() || "medium"] || 2;
-      const durationScore = Math.max(1, 120 - (t.duration || 60));
-      return p * 1000 + durationScore;
-    };
-
     return Object.entries(tasksByCategory).map(([category, list]) => ({
       category,
       tasks: [...list]
-        .sort((a, b) => scorePriority(b) - scorePriority(a))
+        .sort((a, b) => this.compareTasksByPriority(b, a))
         .map((task) => this.mapTaskToResponse(task)),
     }));
+  }
+
+  /**
+   * Compare two tasks for sorting: Signal Layer first, then Eisenhower matrix
+   * Returns positive if taskA should come before taskB (higher priority)
+   * Returns negative if taskB should come before taskA (higher priority)
+   */
+  private compareTasksByPriority(taskA: TaskInternal | Task, taskB: TaskInternal | Task): number {
+    // 1. Signal Layer comparison (highest priority)
+    const signalScoreA = this.calculateSignalLayerScore(taskA);
+    const signalScoreB = this.calculateSignalLayerScore(taskB);
+    
+    if (signalScoreA !== signalScoreB) {
+      return signalScoreB - signalScoreA; // Higher signal score comes first
+    }
+
+    // 2. Eisenhower Matrix comparison (second priority)
+    const eisenhowerScoreA = this.calculateEisenhowerScore(taskA);
+    const eisenhowerScoreB = this.calculateEisenhowerScore(taskB);
+    
+    if (eisenhowerScoreA !== eisenhowerScoreB) {
+      return eisenhowerScoreB - eisenhowerScoreA; // Higher eisenhower score comes first
+    }
+
+    // 3. Tie-breaker: priority string and duration
+    const priorityMap: Record<string, number> = { high: 3, medium: 2, low: 1 };
+    const priorityA = priorityMap[(taskA.priority || "").toLowerCase()] || 2;
+    const priorityB = priorityMap[(taskB.priority || "").toLowerCase()] || 2;
+    
+    if (priorityA !== priorityB) {
+      return priorityB - priorityA;
+    }
+
+    // 4. Final tie-breaker: shorter duration (more efficient tasks first)
+    const durationA = taskA.duration || 60;
+    const durationB = taskB.duration || 60;
+    return durationA - durationB;
+  }
+
+  /**
+   * Calculate Signal Layer score
+   * Signal Layer outranks all other priority calculations
+   */
+  private calculateSignalLayerScore(task: TaskInternal | Task): number {
+    const isHighLeverage = task.isHighLeverage || false;
+    const advancesKeyResults = task.advancesKeyResults || false;
+
+    // Core-Signal: Both HLA and AKR ON = Maximum priority (100000 points)
+    if (isHighLeverage && advancesKeyResults) {
+      return 100000;
+    }
+
+    // High-Signal: Only HLA ON = Very high priority (80000 points)
+    if (isHighLeverage) {
+      return 80000;
+    }
+
+    // Strategic-Signal: Only AKR ON = High priority (60000 points)
+    if (advancesKeyResults) {
+      return 60000;
+    }
+
+    // Noise: All toggles OFF = Minimum priority (1000 points)
+    const importance = task.importance || false;
+    const urgency = task.urgency || false;
+    if (!isHighLeverage && !advancesKeyResults && !importance && !urgency) {
+      return 1000;
+    }
+
+    // Neutral: Default (no Signal Layer bonus)
+    return 0;
+  }
+
+  /**
+   * Calculate Eisenhower Matrix score
+   * Based on importance and urgency boolean fields
+   */
+  private calculateEisenhowerScore(task: TaskInternal | Task): number {
+    const importance = task.importance || false;
+    const urgency = task.urgency || false;
+
+    // Quadrant I: Urgent + Important = 4000 points (highest)
+    if (urgency && importance) {
+      return 4000;
+    }
+
+    // Quadrant II: Important + Not Urgent = 3000 points
+    if (importance && !urgency) {
+      return 3000;
+    }
+
+    // Quadrant III: Urgent + Not Important = 2000 points
+    if (urgency && !importance) {
+      return 2000;
+    }
+
+    // Quadrant IV: Not Urgent + Not Important = 1000 points (lowest)
+    return 1000;
   }
 
   // Map internal task to response format (excludes userId and formats dates)
@@ -198,23 +288,24 @@ export class FocusPlanningService {
   }
 
   private generateRecommendedOrder(categoryPlans: CategoryPlan[]): string[] {
-    // Order categories by total priority score of their top task
-    const topScores = categoryPlans
-      .map((cp) => ({
-        category: cp.category,
-        score: cp.tasks.length && cp.tasks[0] ? this.computeTaskScore(cp.tasks[0]) : 0,
-      }))
+    // Order categories by priority of their top task (Signal Layer first, then Eisenhower matrix)
+    const categoryScores = categoryPlans.map((cp) => {
+      if (!cp.tasks.length || !cp.tasks[0]) {
+        return { category: cp.category, score: 0 };
+      }
+      
+      const topTask = cp.tasks[0];
+      // Calculate combined score: Signal Layer (multiplied by 1000000) + Eisenhower (multiplied by 1000)
+      const signalScore = this.calculateSignalLayerScore(topTask);
+      const eisenhowerScore = this.calculateEisenhowerScore(topTask);
+      const combinedScore = signalScore * 1000000 + eisenhowerScore * 1000;
+      
+      return { category: cp.category, score: combinedScore };
+    });
+
+    return categoryScores
       .sort((a, b) => b.score - a.score)
       .map((x) => x.category);
-    return topScores;
-  }
-
-  // Compute task score - works with both TaskInternal and Task (response) types
-  private computeTaskScore(task: TaskInternal | Task): number {
-    const priorityMap: Record<string, number> = { high: 3, medium: 2, low: 1 };
-    const p = priorityMap[task.priority?.toLowerCase?.() || "medium"] || 2;
-    const durationScore = Math.max(1, 120 - (task.duration || 60));
-    return p * 1000 + durationScore;
   }
 
   // Fetch existing AI recommendations from database in bulk (fast, single query)
