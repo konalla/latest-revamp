@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { authenticateToken } from "../middleware/auth.middleware.js";
 import { addMemberController, getMembers, searchUsersController, removeMemberController, updateMemberStatusController, getTeamByIdController, updateMemberRoleController, getUserTeamsController } from "../controllers/team.controller.js";
+import * as userStatusController from "../controllers/user-status.controller.js";
 
 const router = Router();
 
@@ -15,6 +16,9 @@ router.patch("/team/:teamId/members/:userId/role", authenticateToken, updateMemb
 
 // Get teams for a specific user (workspace owner only)
 router.get("/workspace/users/:userId/teams", authenticateToken, getUserTeamsController);
+
+// Team members status route
+router.get("/team/:teamId/members/status", authenticateToken, userStatusController.getTeamMembersStatus);
 
 export default router;
 

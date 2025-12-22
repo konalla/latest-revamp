@@ -67,8 +67,15 @@ model User {
   // Profile Visibility
   profileVisibility ProfileVisibility @default(PRIVATE)
 
+  // Active Status Tracking (based on focus sessions)
+  isOnline        Boolean   @default(false) @map("is_online")
+  statusUpdatedAt DateTime? @map("status_updated_at")
+
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
+
+  @@index([isOnline])
+  @@index([statusUpdatedAt])
 
   // Relations
   projects                 Project[]
