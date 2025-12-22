@@ -7,8 +7,8 @@ import type { CreateTaskRequest, UpdateTaskRequest, TaskQueryParams, BulkTaskReq
  * 
  * Transforms legacy field names and removes fields that no longer exist in the Prisma schema:
  * - keyResultId → okrId (field was renamed)
- * - isHighLeverage (removed from schema)
- * - willMoveKRForward (removed from schema)
+ * - willMoveKRForward (removed from schema - replaced by advancesKeyResults)
+ * Note: isHighLeverage and advancesKeyResults are now valid Signal Layer fields
  * - dueDate: converts date-only strings to proper DateTime format
  */
 const sanitizeTaskData = (body: any) => {
@@ -39,13 +39,22 @@ const sanitizeTaskData = (body: any) => {
     }
   }
   
-  // Remove legacy fields that are no longer in the schema
-  const legacyFieldsToRemove = ['isHighLeverage', 'willMoveKRForward'];
+  // Remove only truly legacy fields (willMoveKRForward was replaced by advancesKeyResults)
+  // Note: isHighLeverage and advancesKeyResults are now valid Signal Layer fields
+  const legacyFieldsToRemove = ['willMoveKRForward'];
   legacyFieldsToRemove.forEach(field => {
     if (field in requestBody) {
       delete requestBody[field];
     }
   });
+  
+  // Ensure Signal Layer fields are booleans (default to false if not provided)
+  if ('isHighLeverage' in requestBody) {
+    requestBody.isHighLeverage = Boolean(requestBody.isHighLeverage);
+  }
+  if ('advancesKeyResults' in requestBody) {
+    requestBody.advancesKeyResults = Boolean(requestBody.advancesKeyResults);
+  }
   
   return requestBody;
 };

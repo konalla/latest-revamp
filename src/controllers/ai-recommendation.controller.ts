@@ -562,18 +562,34 @@ const getPastTasksWithAIRecommendations = async (req: Request, res: Response) =>
     // Calculate start of today in user's timezone (to exclude today's tasks)
     const currentTime = new Date();
     const todayStart = new Date(currentTime.toLocaleDateString('en-CA', { timeZone: timezone }));
+    
+    // Calculate date threshold for tasks without due dates (e.g., tasks older than 7 days)
+    const sevenDaysAgo = new Date(currentTime);
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-    // Get all past tasks (due date before today) with AI recommendations and OKR data
+    // Get all past tasks - include:
+    // 1. Tasks with due date before today (overdue)
+    // 2. Tasks without due dates that are old enough (created more than 7 days ago)
+    // This ensures we capture all relevant "past" tasks
     const tasks = await prisma.task.findMany({
       where: {
         userId: req.user.userId,
         completed: false, // Only non-completed tasks
-        aiRecommendation: {
-          isNot: null // Only tasks with AI recommendations
-        },
-        dueDate: {
-          lt: todayStart // Due date before today (all past tasks)
-        }
+        OR: [
+          {
+            // Tasks with due date before today (overdue)
+            dueDate: {
+              lt: todayStart
+            }
+          },
+          {
+            // Tasks without due dates that are old enough to be considered "past"
+            dueDate: null,
+            createdAt: {
+              lt: sevenDaysAgo
+            }
+          }
+        ]
       },
       include: {
         aiRecommendation: true,
@@ -592,22 +608,72 @@ const getPastTasksWithAIRecommendations = async (req: Request, res: Response) =>
       } as any
     });
 
-    // Get user work preferences for work mode alignment
+    // Get user work preferences for work mode alignment (fetch once, reuse)
     const userPreferences = await aiRecommendationService.getUserWorkPreferences(req.user.userId);
 
+    // Generate AI recommendations for tasks that don't have them (async, non-blocking)
+    let generatedRecommendations = 0;
+    let failedRecommendations = 0;
+    
+    // Start generating recommendations for tasks without them (non-blocking, in background)
+    tasks.forEach((task) => {
+      if (!(task as any).aiRecommendation) {
+        // Generate AI recommendation asynchronously in background
+        generatedRecommendations++;
+        aiRecommendationService.generateTaskRecommendation(
+          {
+            title: task.title,
+            description: task.description || "",
+            duration: task.duration,
+            importance: task.importance,
+            urgency: task.urgency,
+            projectName: (task as any).project?.name || "",
+            isHighLeverage: (task as any).isHighLeverage || false,
+            advancesKeyResults: (task as any).advancesKeyResults || false
+          },
+          userPreferences,
+          req.user!.userId
+        ).then(async (recommendation) => {
+          // Save the recommendation
+          await (prisma as any).aIRecommendation.create({
+            data: {
+              taskId: task.id,
+              category: recommendation.category,
+              recommendedTime: recommendation.recommendedTime,
+              confidence: recommendation.confidence,
+              reasoning: recommendation.reasoning,
+              signalType: (recommendation as any).signalType || null
+            }
+          });
+        }).catch((error) => {
+          console.error(`Failed to generate AI recommendation for task ${task.id}:`, error);
+          failedRecommendations++;
+        });
+      }
+    });
+
+    // Filter to only tasks with AI recommendations for ranking (tasks without recommendations will be generated async)
+    // This ensures we only rank tasks that have recommendations available
+    const tasksWithAI = tasks.filter(task => (task as any).aiRecommendation !== null);
+
     // Prepare tasks for ranking
-    const tasksForRanking = tasks.map(task => ({
+    // Include Signal Layer fields for proper prioritization (Signal Layer first, then Eisenhower matrix)
+    const tasksForRanking = tasksWithAI.map(task => ({
       id: task.id,
       priority: task.priority,
       importance: task.importance,
       urgency: task.urgency,
+      // Signal Layer fields - critical for prioritization
+      isHighLeverage: (task as any).isHighLeverage || false,
+      advancesKeyResults: (task as any).advancesKeyResults || false,
       dueDate: (task as any).dueDate || null,
       okrId: (task as any).okrId || null,
       okr: (task as any).okr || null,
       aiRecommendation: (task as any).aiRecommendation ? {
         category: (task as any).aiRecommendation.category,
         confidence: (task as any).aiRecommendation.confidence,
-        recommendedTime: (task as any).aiRecommendation.recommendedTime
+        recommendedTime: (task as any).aiRecommendation.recommendedTime,
+        ...((task as any).aiRecommendation.signalType ? { signalType: (task as any).aiRecommendation.signalType } : {})
       } : null,
       duration: task.duration,
       category: task.category
@@ -621,17 +687,26 @@ const getPastTasksWithAIRecommendations = async (req: Request, res: Response) =>
       userPreferences
     );
 
-    // Get only top 3 tasks
-    const top3Tasks = rankedTasks.slice(0, 3).map(item => {
-      const originalTask = tasks.find(t => t.id === item.id)!;
+    // Get top 3 tasks (or all if less than 3 available)
+    // Tasks are already prioritized by Signal Layer first, then Eisenhower matrix
+    const topTasks = rankedTasks.slice(0, Math.min(3, rankedTasks.length)).map(item => {
+      const originalTask = tasksWithAI.find(t => t.id === item.id)!;
       return originalTask;
     });
+
+    // Log for debugging
+    const tasksWithDueDate = tasks.filter(t => (t as any).dueDate !== null).length;
+    const tasksWithoutDueDate = tasks.filter(t => (t as any).dueDate === null).length;
+    console.log(`Past tasks query: Found ${tasks.length} total past tasks (${tasksWithDueDate} with due dates, ${tasksWithoutDueDate} without due dates), ${tasksWithAI.length} with AI recommendations, returning ${topTasks.length} top tasks`);
 
     res.json({
       message: "Past tasks with AI recommendations retrieved successfully",
       data: {
-        tasks: top3Tasks,
-        total: tasks.length
+        tasks: topTasks,
+        total: tasks.length, // Total past tasks (including those without recommendations)
+        totalWithRecommendations: tasksWithAI.length, // Tasks that have AI recommendations (available for ranking)
+        generatedRecommendations,
+        failedRecommendations
       }
     });
   } catch (error: any) {
@@ -639,6 +714,34 @@ const getPastTasksWithAIRecommendations = async (req: Request, res: Response) =>
     res.status(500).json({ 
       message: "Failed to retrieve past tasks with AI recommendations",
       error: error.message 
+    });
+  }
+};
+
+/**
+ * Get future tasks (tasks without due dates) with AI recommendations, ranked by priority
+ */
+const getFutureTasksWithAIRecommendations = async (req: Request, res: Response) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ error: "User not authenticated" });
+    }
+
+    // Get timezone from query parameter, default to UTC
+    const timezone = (req.query.timezone as string) || 'UTC';
+
+    const result = await taskService.getFutureTasksWithAIRecommendations(userId, timezone);
+
+    res.json({
+      success: true,
+      data: result
+    });
+  } catch (error) {
+    console.error("Error fetching future tasks with AI recommendations:", error);
+    res.status(500).json({ 
+      error: "Failed to fetch future tasks",
+      details: error instanceof Error ? error.message : "Unknown error"
     });
   }
 };
@@ -652,5 +755,6 @@ export {
   getUserWorkPreferences,
   updateUserWorkPreferences,
   getTasksWithAIRecommendations,
-  getPastTasksWithAIRecommendations
+  getPastTasksWithAIRecommendations,
+  getFutureTasksWithAIRecommendations
 };

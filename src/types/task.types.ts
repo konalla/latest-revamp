@@ -1,3 +1,13 @@
+// Signal Layer Types
+export type CognitiveCategory = "Deep" | "Creative" | "Reflective" | "Executive";
+export type SignalType =
+  | "Core-Signal"
+  | "High-Signal"
+  | "Strategic-Signal"
+  | "Neutral"
+  | "Noise";
+export type PriorityLevel = "High" | "Medium" | "Low" | "Noise";
+
 export interface CreateTaskRequest {
   title: string;
   description?: string;
@@ -8,6 +18,9 @@ export interface CreateTaskRequest {
   completed?: boolean;
   importance?: boolean;
   urgency?: boolean;
+  // Signal Layer fields (user-controlled toggles from frontend)
+  isHighLeverage?: boolean; // HLA toggle
+  advancesKeyResults?: boolean; // AKR toggle
   dueDate?: Date;
   projectId?: number;
   objectiveId?: number;
@@ -25,6 +38,9 @@ export interface UpdateTaskRequest {
   completed?: boolean;
   importance?: boolean;
   urgency?: boolean;
+  // Signal Layer fields (user-controlled toggles from frontend)
+  isHighLeverage?: boolean; // HLA toggle
+  advancesKeyResults?: boolean; // AKR toggle
   dueDate?: Date;
   projectId?: number;
   objectiveId?: number;
@@ -44,6 +60,9 @@ export interface TaskResponse {
   completed: boolean;
   importance: boolean;
   urgency: boolean;
+  // Signal Layer fields
+  isHighLeverage: boolean;
+  advancesKeyResults: boolean;
   dueDate?: Date;
   userId: number;
   projectId?: number;
@@ -131,6 +150,13 @@ export interface AIRecommendationResponse {
   recommendedTime: string;
   confidence: number;
   reasoning?: string;
+  // Enhanced Signal Layer fields
+  signalType?: SignalType;
+  recommendedDuration?: number;
+  breakRecommendation?: string;
+  loadWarning?: string;
+  importanceFlag?: boolean;
+  urgencyFlag?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -184,7 +210,10 @@ export interface TodayTaskResponse {
   priority: string;
   importance: boolean;
   urgency: boolean;
-  dueDate: Date;
+  // Signal Layer fields
+  isHighLeverage?: boolean;
+  advancesKeyResults?: boolean;
+  dueDate: Date | null; // Can be null for tasks without due dates
   aiRecommendation?: AIRecommendationResponse;
   aiRecommendationStatus: 'available' | 'generating' | 'failed';
   rank: number;
@@ -230,6 +259,9 @@ export interface BatchUpdateTaskItem {
   completed?: boolean;
   importance?: boolean;
   urgency?: boolean;
+  // Signal Layer fields
+  isHighLeverage?: boolean;
+  advancesKeyResults?: boolean;
   dueDate?: Date;
   projectId?: number;
   objectiveId?: number;

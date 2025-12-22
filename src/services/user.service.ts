@@ -27,12 +27,37 @@ const createUser = async (data: CreateUserRequest) => {
   }
 
   // Extract language from data and remove it from user data
-  const { language, ...userData } = data;
+  const { language, ...userDataRaw } = data;
 
   // Hash password if provided
-  if (userData.password) {
-    userData.password = await bcrypt.hash(userData.password, SALT_ROUNDS);
+  let hashedPassword: string | undefined;
+  if (userDataRaw.password) {
+    hashedPassword = await bcrypt.hash(userDataRaw.password, SALT_ROUNDS);
   }
+
+  // Build user data object, only including defined values
+  const userData: any = {
+    username: userDataRaw.username,
+    name: userDataRaw.name,
+    email: userDataRaw.email,
+    ...(hashedPassword && { password: hashedPassword }),
+    ...(userDataRaw.role && { role: userDataRaw.role as any }),
+    ...(userDataRaw.phone_number && { phone_number: userDataRaw.phone_number }),
+    ...(userDataRaw.company_name && { company_name: userDataRaw.company_name }),
+    ...(userDataRaw.website && { website: userDataRaw.website }),
+    ...(userDataRaw.profile_photo_url && { profile_photo_url: userDataRaw.profile_photo_url }),
+    ...(userDataRaw.job_title && { job_title: userDataRaw.job_title }),
+    ...(userDataRaw.industry && { industry: userDataRaw.industry }),
+    ...(userDataRaw.bio && { bio: userDataRaw.bio }),
+    ...(userDataRaw.timezone && { timezone: userDataRaw.timezone }),
+    ...(userDataRaw.linkedin_url && { linkedin_url: userDataRaw.linkedin_url }),
+    ...(userDataRaw.website_url && { website_url: userDataRaw.website_url }),
+    ...(userDataRaw.secondary_social_url && { secondary_social_url: userDataRaw.secondary_social_url }),
+    ...(userDataRaw.secondary_social_type && { secondary_social_type: userDataRaw.secondary_social_type }),
+    ...(userDataRaw.preferred_working_hours && { preferred_working_hours: userDataRaw.preferred_working_hours }),
+    ...(userDataRaw.communication_preference && { communication_preference: userDataRaw.communication_preference }),
+    ...(userDataRaw.primary_work_focus && { primary_work_focus: userDataRaw.primary_work_focus }),
+  };
 
   // Create user and user settings in a transaction
   return prisma.$transaction(async (tx) => {
