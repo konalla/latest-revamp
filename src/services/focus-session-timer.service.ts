@@ -22,6 +22,11 @@ interface SessionTimerState {
   lastDbSync: number; // timestamp of last DB sync
 }
 
+// Type guard to check if status is paused
+function isPausedStatus(status: string): status is "paused" {
+  return status === "paused";
+}
+
 export class FocusSessionTimerService {
   private io: SocketIOServer;
   private timers: Map<number, NodeJS.Timeout> = new Map();
@@ -158,7 +163,7 @@ export class FocusSessionTimerService {
     
     // CRITICAL: Check paused status FIRST before any DB operations
     // If paused, stop the timer interval and return immediately
-    if (state.status === "paused") {
+    if (isPausedStatus(state.status)) {
       const hasInterval = this.timers.has(sessionId);
       if (hasInterval) {
         console.error(`[Timer] ❌ CRITICAL BUG: updateTimer called for PAUSED session ${sessionId} but interval still exists!`, {
@@ -185,7 +190,7 @@ export class FocusSessionTimerService {
     }
     
     // Double-check status before proceeding (race condition protection)
-    if (state.status === "paused") {
+    if (isPausedStatus(state.status)) {
       console.error(`[Timer] ❌ Race condition detected: Status changed to paused during updateTimer for session ${sessionId}`);
       this.stopTimer(sessionId);
       return;
@@ -208,7 +213,7 @@ export class FocusSessionTimerService {
       });
       
       // Check status again after async DB call (in case it changed)
-      if (state.status === "paused") {
+      if (isPausedStatus(state.status)) {
         console.warn(`[Timer] Status changed to paused during DB read for session ${sessionId}, stopping timer`);
         this.stopTimer(sessionId);
         return;
@@ -262,7 +267,7 @@ export class FocusSessionTimerService {
       // Check if session was paused via REST API (DB shows paused but state doesn't)
       if (session.pausedAt && !session.resumedAt) {
         // Session is currently paused in DB
-        if (state.status !== "paused") {
+        if (!isPausedStatus(state.status)) {
           console.log(`[Timer] ⚠️ Session ${sessionId} paused via REST API, stopping timer`, {
             sessionId,
             dbStatus: session.status,
@@ -300,7 +305,7 @@ export class FocusSessionTimerService {
         // Check current database status - if it's still paused, don't resume
         if (session.status === "paused") {
           // Database says paused, so keep it paused
-          if (state.status !== "paused") {
+          if (!isPausedStatus(state.status)) {
             console.log(`[Timer] DB shows paused for session ${sessionId}, updating state to paused`);
             state.status = "paused";
             state.pausedAt = session.pausedAt;
@@ -311,8 +316,8 @@ export class FocusSessionTimerService {
         
         // Database says active, and we have pause/resume timestamps
         // This means session was paused and resumed, so it should be active
-        // Only restart timer if state is actually paused (don't restart if already active)
-        if (state.status === "paused") {
+          // Only restart timer if state is actually paused (don't restart if already active)
+          if (isPausedStatus(state.status)) {
           console.log(`[Timer] Session ${sessionId} was paused, now resumed (DB shows active), restarting timer`);
           state.status = "active";
           state.pausedAt = null;
@@ -335,7 +340,7 @@ export class FocusSessionTimerService {
       } else if (!session.pausedAt && !session.resumedAt) {
         // Session is active, no pause/resume timestamps
         // Only update if state was paused (resume scenario)
-        if (state.status === "paused") {
+        if (isPausedStatus(state.status)) {
           console.log(`[Timer] Session ${sessionId} status changed from paused to active (no pause/resume timestamps in DB)`);
           state.status = "active";
         }
@@ -344,14 +349,14 @@ export class FocusSessionTimerService {
       }
       
       // CRITICAL: Check status again after DB sync - if paused, stop immediately
-      if (state.status === "paused") {
+      if (isPausedStatus(state.status)) {
         console.log(`[Timer] Status is paused after DB sync for session ${sessionId}, stopping timer`);
         this.stopTimer(sessionId);
         return;
       }
 
-      // Final check: Skip update if paused (shouldn't reach here if paused, but safety check)
-      if (state.status !== "active") {
+      // Final check: Skip update if not active (shouldn't reach here if paused, but safety check)
+      if (state.status !== "active" && state.status !== "completed") {
         console.warn(`[Timer] Session ${sessionId} status is ${state.status} but reached timer update logic, stopping timer`);
         this.stopTimer(sessionId);
         return;
@@ -359,7 +364,7 @@ export class FocusSessionTimerService {
       
       // CRITICAL: Final safety check before emitting - status must be active
       // Check status again after all async operations
-      if (state.status !== "active") {
+      if (state.status !== "active" && state.status !== "completed") {
         console.error(`[Timer] ❌ CRITICAL BUG: About to emit timer update but status is ${state.status} for session ${sessionId}`, {
           sessionId,
           status: state.status,
@@ -489,10 +494,12 @@ export class FocusSessionTimerService {
           );
 
           // Calculate remaining time for current task
-          currentTaskRemaining = calculateCurrentTaskRemaining(
-            currentTask.duration,
-            currentTaskElapsed
-          );
+          if (currentTask) {
+            currentTaskRemaining = calculateCurrentTaskRemaining(
+              currentTask.duration,
+              currentTaskElapsed
+            );
+          }
         }
       }
 
@@ -501,7 +508,7 @@ export class FocusSessionTimerService {
       const roomName = `user-${state.userId}`;
       
       // CRITICAL: Final check before emitting - if paused, abort immediately
-      if (state.status === "paused") {
+      if (isPausedStatus(state.status)) {
         console.error(`[Timer] ❌ CRITICAL BUG: About to emit timer_update for PAUSED session ${sessionId}!`, {
           sessionId,
           status: state.status,

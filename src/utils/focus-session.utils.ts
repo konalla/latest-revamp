@@ -104,7 +104,9 @@ export function getCurrentTaskIndex(
   let cumulativeDuration = 0;
   
   for (let i = 0; i < tasks.length; i++) {
-    const taskDurationSeconds = tasks[i].duration * 60;
+    const task = tasks[i];
+    if (!task) continue;
+    const taskDurationSeconds = task.duration * 60;
     cumulativeDuration += taskDurationSeconds;
     
     if (totalElapsed < cumulativeDuration) {

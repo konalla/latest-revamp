@@ -42,7 +42,7 @@ export const createRoom = async (req: Request, res: Response): Promise<void> => 
         allowObservers: room.allowObservers,
         requiresPassword: room.requiresPassword,
         createdAt: room.createdAt,
-        creator: room.creator,
+        creatorId: room.creatorId,
       },
     });
   } catch (error: any) {
@@ -143,7 +143,12 @@ export const getMyRooms = async (req: Request, res: Response): Promise<void> => 
 
 export const getRoomById = async (req: Request, res: Response): Promise<void> => {
   try {
-    const roomId = parseInt(req.params.roomId);
+    const roomIdParam = req.params.roomId;
+    if (!roomIdParam) {
+      res.status(400).json({ success: false, error: "Room ID is required" });
+      return;
+    }
+    const roomId = parseInt(roomIdParam);
     const userId = req.user?.id ?? req.user?.userId;
 
     if (isNaN(roomId)) {
@@ -164,6 +169,11 @@ export const getRoomById = async (req: Request, res: Response): Promise<void> =>
         error: "You do not have permission to view this room",
         requiresInvitation: result.requiresInvitation,
       });
+      return;
+    }
+
+    if (!result.room) {
+      res.status(404).json({ success: false, error: "Room not found" });
       return;
     }
 
@@ -211,7 +221,12 @@ export const updateRoom = async (req: Request, res: Response): Promise<void> => 
       return;
     }
 
-    const roomId = parseInt(req.params.roomId);
+    const roomIdParam = req.params.roomId;
+    if (!roomIdParam) {
+      res.status(400).json({ success: false, error: "Room ID is required" });
+      return;
+    }
+    const roomId = parseInt(roomIdParam);
     if (isNaN(roomId)) {
       res.status(400).json({ success: false, error: "Invalid room ID" });
       return;
@@ -259,7 +274,12 @@ export const deleteRoom = async (req: Request, res: Response): Promise<void> => 
       return;
     }
 
-    const roomId = parseInt(req.params.roomId);
+    const roomIdParam = req.params.roomId;
+    if (!roomIdParam) {
+      res.status(400).json({ success: false, error: "Room ID is required" });
+      return;
+    }
+    const roomId = parseInt(roomIdParam);
     if (isNaN(roomId)) {
       res.status(400).json({ success: false, error: "Invalid room ID" });
       return;
@@ -289,7 +309,12 @@ export const startSession = async (req: Request, res: Response): Promise<void> =
       return;
     }
 
-    const roomId = parseInt(req.params.roomId);
+    const roomIdParam = req.params.roomId;
+    if (!roomIdParam) {
+      res.status(400).json({ success: false, error: "Room ID is required" });
+      return;
+    }
+    const roomId = parseInt(roomIdParam);
     if (isNaN(roomId)) {
       res.status(400).json({ success: false, error: "Invalid room ID" });
       return;
@@ -344,8 +369,14 @@ export const pauseSession = async (req: Request, res: Response): Promise<void> =
       return;
     }
 
-    const roomId = parseInt(req.params.roomId);
-    const sessionId = parseInt(req.params.sessionId);
+    const roomIdParam = req.params.roomId;
+    const sessionIdParam = req.params.sessionId;
+    if (!roomIdParam || !sessionIdParam) {
+      res.status(400).json({ success: false, error: "Room ID and Session ID are required" });
+      return;
+    }
+    const roomId = parseInt(roomIdParam);
+    const sessionId = parseInt(sessionIdParam);
 
     if (isNaN(roomId) || isNaN(sessionId)) {
       res.status(400).json({ success: false, error: "Invalid room or session ID" });
@@ -432,8 +463,14 @@ export const endSession = async (req: Request, res: Response): Promise<void> => 
       return;
     }
 
-    const roomId = parseInt(req.params.roomId);
-    const sessionId = parseInt(req.params.sessionId);
+    const roomIdParam = req.params.roomId;
+    const sessionIdParam = req.params.sessionId;
+    if (!roomIdParam || !sessionIdParam) {
+      res.status(400).json({ success: false, error: "Room ID and Session ID are required" });
+      return;
+    }
+    const roomId = parseInt(roomIdParam);
+    const sessionId = parseInt(sessionIdParam);
 
     if (isNaN(roomId) || isNaN(sessionId)) {
       res.status(400).json({ success: false, error: "Invalid room or session ID" });
@@ -469,7 +506,12 @@ export const endSession = async (req: Request, res: Response): Promise<void> => 
 
 export const getSessionTimer = async (req: Request, res: Response): Promise<void> => {
   try {
-    const sessionId = parseInt(req.params.sessionId);
+    const sessionIdParam = req.params.sessionId;
+    if (!sessionIdParam) {
+      res.status(400).json({ success: false, error: "Session ID is required" });
+      return;
+    }
+    const sessionId = parseInt(sessionIdParam);
     if (isNaN(sessionId)) {
       res.status(400).json({ success: false, error: "Invalid session ID" });
       return;
@@ -504,7 +546,12 @@ export const joinRoom = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    const roomId = parseInt(req.params.roomId);
+    const roomIdParam = req.params.roomId;
+    if (!roomIdParam) {
+      res.status(400).json({ success: false, error: "Room ID is required" });
+      return;
+    }
+    const roomId = parseInt(roomIdParam);
     if (isNaN(roomId)) {
       res.status(400).json({ success: false, error: "Invalid room ID" });
       return;
@@ -512,6 +559,11 @@ export const joinRoom = async (req: Request, res: Response): Promise<void> => {
 
     const validatedData = joinRoomSchema.parse(req.body);
     const participant = await focusRoomParticipantService.joinRoom(roomId, userId, validatedData);
+
+    if (!participant) {
+      res.status(404).json({ success: false, error: "Participant not found" });
+      return;
+    }
 
     res.json({
       success: true,
@@ -553,7 +605,12 @@ export const leaveRoom = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    const roomId = parseInt(req.params.roomId);
+    const roomIdParam = req.params.roomId;
+    if (!roomIdParam) {
+      res.status(400).json({ success: false, error: "Room ID is required" });
+      return;
+    }
+    const roomId = parseInt(roomIdParam);
     if (isNaN(roomId)) {
       res.status(400).json({ success: false, error: "Invalid room ID" });
       return;
@@ -576,7 +633,12 @@ export const leaveRoom = async (req: Request, res: Response): Promise<void> => {
 
 export const getRoomParticipants = async (req: Request, res: Response): Promise<void> => {
   try {
-    const roomId = parseInt(req.params.roomId);
+    const roomIdParam = req.params.roomId;
+    if (!roomIdParam) {
+      res.status(400).json({ success: false, error: "Room ID is required" });
+      return;
+    }
+    const roomId = parseInt(roomIdParam);
     if (isNaN(roomId)) {
       res.status(400).json({ success: false, error: "Invalid room ID" });
       return;
@@ -662,7 +724,12 @@ export const updateCompletion = async (req: Request, res: Response): Promise<voi
       return;
     }
 
-    const roomId = parseInt(req.params.roomId);
+    const roomIdParam = req.params.roomId;
+    if (!roomIdParam) {
+      res.status(400).json({ success: false, error: "Room ID is required" });
+      return;
+    }
+    const roomId = parseInt(roomIdParam);
     if (isNaN(roomId)) {
       res.status(400).json({ success: false, error: "Invalid room ID" });
       return;
@@ -711,7 +778,12 @@ export const updateParticipantStatus = async (req: Request, res: Response): Prom
       return;
     }
 
-    const roomId = parseInt(req.params.roomId);
+    const roomIdParam = req.params.roomId;
+    if (!roomIdParam) {
+      res.status(400).json({ success: false, error: "Room ID is required" });
+      return;
+    }
+    const roomId = parseInt(roomIdParam);
     if (isNaN(roomId)) {
       res.status(400).json({ success: false, error: "Invalid room ID" });
       return;
@@ -759,8 +831,14 @@ export const removeParticipant = async (req: Request, res: Response): Promise<vo
       return;
     }
 
-    const roomId = parseInt(req.params.roomId);
-    const participantId = parseInt(req.params.participantId);
+    const roomIdParam = req.params.roomId;
+    const participantIdParam = req.params.participantId;
+    if (!roomIdParam || !participantIdParam) {
+      res.status(400).json({ success: false, error: "Room ID and Participant ID are required" });
+      return;
+    }
+    const roomId = parseInt(roomIdParam);
+    const participantId = parseInt(participantIdParam);
 
     if (isNaN(roomId) || isNaN(participantId)) {
       res.status(400).json({ success: false, error: "Invalid room or participant ID" });
@@ -791,7 +869,12 @@ export const createInvitation = async (req: Request, res: Response): Promise<voi
       return;
     }
 
-    const roomId = parseInt(req.params.roomId);
+    const roomIdParam = req.params.roomId;
+    if (!roomIdParam) {
+      res.status(400).json({ success: false, error: "Room ID is required" });
+      return;
+    }
+    const roomId = parseInt(roomIdParam);
     if (isNaN(roomId)) {
       res.status(400).json({ success: false, error: "Invalid room ID" });
       return;
@@ -839,6 +922,10 @@ export const createInvitation = async (req: Request, res: Response): Promise<voi
 export const getInvitationByToken = async (req: Request, res: Response): Promise<void> => {
   try {
     const token = req.params.token;
+    if (!token) {
+      res.status(400).json({ success: false, error: "Token is required" });
+      return;
+    }
     const invitation = await focusRoomInvitationService.getInvitationByToken(token);
 
     if (!invitation) {
@@ -881,6 +968,10 @@ export const acceptInvitation = async (req: Request, res: Response): Promise<voi
     }
 
     const token = req.params.token;
+    if (!token) {
+      res.status(400).json({ success: false, error: "Token is required" });
+      return;
+    }
     const result = await focusRoomInvitationService.acceptInvitation(token, userId);
 
     res.json({
@@ -906,6 +997,10 @@ export const declineInvitation = async (req: Request, res: Response): Promise<vo
     }
 
     const token = req.params.token;
+    if (!token) {
+      res.status(400).json({ success: false, error: "Token is required" });
+      return;
+    }
     await focusRoomInvitationService.declineInvitation(token, userId);
 
     res.json({
@@ -929,7 +1024,12 @@ export const getRoomInvitations = async (req: Request, res: Response): Promise<v
       return;
     }
 
-    const roomId = parseInt(req.params.roomId);
+    const roomIdParam = req.params.roomId;
+    if (!roomIdParam) {
+      res.status(400).json({ success: false, error: "Room ID is required" });
+      return;
+    }
+    const roomId = parseInt(roomIdParam);
     if (isNaN(roomId)) {
       res.status(400).json({ success: false, error: "Invalid room ID" });
       return;
@@ -1001,7 +1101,12 @@ export const cancelInvitation = async (req: Request, res: Response): Promise<voi
       return;
     }
 
-    const invitationId = parseInt(req.params.invitationId);
+    const invitationIdParam = req.params.invitationId;
+    if (!invitationIdParam) {
+      res.status(400).json({ success: false, error: "Invitation ID is required" });
+      return;
+    }
+    const invitationId = parseInt(invitationIdParam);
     if (isNaN(invitationId)) {
       res.status(400).json({ success: false, error: "Invalid invitation ID" });
       return;
@@ -1096,7 +1201,12 @@ export const getAllTemplates = async (req: Request, res: Response): Promise<void
 
 export const getTemplateById = async (req: Request, res: Response): Promise<void> => {
   try {
-    const templateId = parseInt(req.params.templateId);
+    const templateIdParam = req.params.templateId;
+    if (!templateIdParam) {
+      res.status(400).json({ success: false, error: "Template ID is required" });
+      return;
+    }
+    const templateId = parseInt(templateIdParam);
     if (isNaN(templateId)) {
       res.status(400).json({ success: false, error: "Invalid template ID" });
       return;
@@ -1182,7 +1292,12 @@ export const createRoomFromTemplate = async (req: Request, res: Response): Promi
       return;
     }
 
-    const templateId = parseInt(req.params.templateId);
+    const templateIdParam = req.params.templateId;
+    if (!templateIdParam) {
+      res.status(400).json({ success: false, error: "Template ID is required" });
+      return;
+    }
+    const templateId = parseInt(templateIdParam);
     if (isNaN(templateId)) {
       res.status(400).json({ success: false, error: "Invalid template ID" });
       return;

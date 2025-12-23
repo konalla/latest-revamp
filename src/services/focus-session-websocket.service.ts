@@ -208,23 +208,26 @@ export class FocusSessionWebSocketService {
                 (id) => !completedTasks.includes(id)
               );
               if (incompleteTaskIds.length > 0) {
-                const nextTask = await prisma.task.findUnique({
-                  where: { id: incompleteTaskIds[0] },
-                  select: { id: true, title: true, category: true, duration: true },
-                });
-
-                if (nextTask) {
-                  this.namespace.to(userRoom).emit("task_completed", {
-                    sessionId,
-                    taskId,
-                    completedTasks,
-                    nextTask: {
-                      id: nextTask.id,
-                      title: nextTask.title,
-                      category: nextTask.category,
-                      duration: nextTask.duration,
-                    },
+                const firstIncompleteTaskId = incompleteTaskIds[0];
+                if (firstIncompleteTaskId !== undefined) {
+                  const nextTask = await prisma.task.findUnique({
+                    where: { id: firstIncompleteTaskId },
+                    select: { id: true, title: true, category: true, duration: true },
                   });
+
+                  if (nextTask) {
+                    this.namespace.to(userRoom).emit("task_completed", {
+                      sessionId,
+                      taskId,
+                      completedTasks,
+                      nextTask: {
+                        id: nextTask.id,
+                        title: nextTask.title,
+                        category: nextTask.category,
+                        duration: nextTask.duration,
+                      },
+                    });
+                  }
                 }
               }
             }
