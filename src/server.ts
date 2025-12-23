@@ -5,6 +5,7 @@ import { createServer } from "http";
 import { Server as SocketIOServer } from "socket.io";
 import app from "./app.js";
 import { FocusRoomWebSocketService } from "./services/focus-room-websocket.service.js";
+import { FocusSessionWebSocketService } from "./services/focus-session-websocket.service.js";
 
 const port = process.env.PORT || 3000;
 
@@ -34,8 +35,17 @@ const io = new SocketIOServer(httpServer, {
 // Initialize Focus Room WebSocket service
 const focusRoomWebSocketService = new FocusRoomWebSocketService(io);
 
-// Make WebSocket service available globally (for use in controllers)
+// Initialize Focus Session WebSocket service
+const focusSessionWebSocketService = new FocusSessionWebSocketService(io);
+
+// Make WebSocket services available globally (for use in controllers)
 (global as any).focusRoomWebSocketService = focusRoomWebSocketService;
+(global as any).focusSessionWebSocketService = focusSessionWebSocketService;
+
+// Restore active sessions on startup
+focusSessionWebSocketService.restoreActiveSessions().catch((error) => {
+  console.error("Error restoring active focus sessions:", error);
+});
 
 httpServer.listen(port, () => {
   console.log(`🚀 Server running on http://localhost:${port}`);

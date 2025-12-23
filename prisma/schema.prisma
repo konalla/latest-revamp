@@ -292,6 +292,8 @@ model FocusSession {
   intention      Json      @default("{}")
   startedAt      DateTime  @default(now()) @map("started_at")
   endedAt        DateTime? @map("ended_at")
+  pausedAt       DateTime? @map("paused_at")
+  resumedAt      DateTime? @map("resumed_at")
   duration       Int       @default(0)
   completed      Boolean   @default(false)
   notes          String?
