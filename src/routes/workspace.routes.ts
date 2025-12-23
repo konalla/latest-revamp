@@ -21,6 +21,7 @@ import {
   getWorkspaceManagersController,
   searchWorkspaceManagersController
 } from "../controllers/workspace.controller.js";
+import * as userStatusController from "../controllers/user-status.controller.js";
 import { requireWriteAccess } from "../middleware/subscription.middleware.js";
 
 const router = Router();
@@ -51,6 +52,9 @@ router.get("/workspaces/:workspaceId/managers/search", authenticateToken, search
 router.post("/workspaces/:workspaceId/managers", authenticateToken, requireWriteAccess, assignWorkspaceManagerController);
 router.delete("/workspaces/:workspaceId/managers", authenticateToken, requireWriteAccess, removeWorkspaceManagerController);
 router.get("/workspaces/:workspaceId/managers", authenticateToken, getWorkspaceManagersController);
+
+// Workspace members status route
+router.get("/workspaces/:workspaceId/members/status", authenticateToken, userStatusController.getWorkspaceMembersStatus);
 
 export default router;
 

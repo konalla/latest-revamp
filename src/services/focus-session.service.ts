@@ -1,5 +1,6 @@
 import prisma from "../config/prisma.js";
 import { CognitiveLoadService } from "./cognitive-load.service.js";
+import userStatusService from "./user-status.service.js";
 
 export interface FocusSessionResponse {
   id: number;
@@ -245,6 +246,15 @@ export class FocusSessionService {
       ` as any[];
 
       const session = result[0];
+      
+      // Update user status to online when focus session is created
+      try {
+        await userStatusService.updateUserStatus(userId, true);
+      } catch (error) {
+        console.error("Error updating user status after creating focus session:", error);
+        // Don't throw error - session creation should still succeed
+      }
+      
       return this.mapDatabaseSessionToResponse(session, {
         elapsedTime: 0,
         completedTasks: [],
@@ -444,6 +454,15 @@ export class FocusSessionService {
         console.error('Error updating productivity patterns after focus session completion:', error);
         // Don't throw error - session completion should still succeed
       }
+
+      // Update user status to offline when focus session ends
+      // User can only have 1 active session at a time, so ending session means user is offline
+      try {
+        await userStatusService.updateUserStatus(userId, false);
+      } catch (error) {
+        console.error('Error updating user status after ending focus session:', error);
+        // Don't throw error - session completion should still succeed
+      }
       
       return this.mapDatabaseSessionToResponse(updatedSession, {
         elapsedTime: data.elapsedTime,
@@ -492,6 +511,16 @@ export class FocusSessionService {
       }
 
       const updatedSession = result[0];
+      
+      // User remains online when session is paused (session is still active)
+      // Update statusUpdatedAt to reflect the pause action
+      try {
+        await userStatusService.updateUserStatus(userId, true);
+      } catch (error) {
+        console.error("Error updating user status after pausing session:", error);
+        // Don't throw error - session pause should still succeed
+      }
+      
       return this.mapDatabaseSessionToResponse(updatedSession, {
         elapsedTime: data.elapsedTime,
         completedTasks: [],
@@ -518,6 +547,16 @@ export class FocusSessionService {
       }
 
       const updatedSession = result[0];
+      
+      // User remains online when session is resumed
+      // Update statusUpdatedAt to reflect the resume action
+      try {
+        await userStatusService.updateUserStatus(userId, true);
+      } catch (error) {
+        console.error("Error updating user status after resuming session:", error);
+        // Don't throw error - session resume should still succeed
+      }
+      
       return this.mapDatabaseSessionToResponse(updatedSession, {
         elapsedTime: data.elapsedTime,
         completedTasks: [],
