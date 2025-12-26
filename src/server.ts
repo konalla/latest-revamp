@@ -6,6 +6,7 @@ import { Server as SocketIOServer } from "socket.io";
 import app from "./app.js";
 import { FocusRoomWebSocketService } from "./services/focus-room-websocket.service.js";
 import { FocusSessionWebSocketService } from "./services/focus-session-websocket.service.js";
+import { FocusRoomSchedulerService } from "./services/focus-room-scheduler.service.js";
 
 const port = process.env.PORT || 3000;
 
@@ -41,6 +42,15 @@ const focusSessionWebSocketService = new FocusSessionWebSocketService(io);
 // Make WebSocket services available globally (for use in controllers)
 (global as any).focusRoomWebSocketService = focusRoomWebSocketService;
 (global as any).focusSessionWebSocketService = focusSessionWebSocketService;
+
+// Initialize Focus Room Scheduler service
+const focusRoomSchedulerService = new FocusRoomSchedulerService(focusRoomWebSocketService);
+
+// Start scheduler and reschedule missed sessions on startup
+focusRoomSchedulerService.start();
+focusRoomSchedulerService.rescheduleMissedSessions().catch((error) => {
+  console.error("Error rescheduling missed sessions:", error);
+});
 
 // Restore active sessions on startup
 focusSessionWebSocketService.restoreActiveSessions().catch((error) => {

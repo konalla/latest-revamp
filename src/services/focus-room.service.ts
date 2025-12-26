@@ -4,6 +4,61 @@ import type { CreateRoomInput, UpdateRoomInput } from "../types/focus-room.types
 
 export class FocusRoomService {
   /**
+   * Validate scheduled time doesn't overlap with existing scheduled sessions in the same room
+   * Note: We allow multiple scheduled sessions per room, but they must not overlap
+   */
+  private async validateScheduledTime(roomId: number, scheduledTime: Date, excludeRoomId?: number) {
+    if (!scheduledTime) return;
+
+    // Get the room to know its focus duration
+    const room = await prisma.focusRoom.findUnique({
+      where: { id: roomId },
+      select: { focusDuration: true },
+    });
+
+    if (!room) {
+      throw new Error("Room not found");
+    }
+
+    // Calculate session end time based on room's focus duration
+    const sessionEndTime = new Date(scheduledTime.getTime() + room.focusDuration * 60 * 1000);
+
+    // Check if this room already has a scheduled session that would overlap
+    // Since each room can only have one scheduledStartTime, we check the current room's scheduled session
+    const currentRoom = await prisma.focusRoom.findUnique({
+      where: { id: roomId },
+      select: {
+        id: true,
+        scheduledStartTime: true,
+        focusDuration: true,
+        status: true,
+      },
+    });
+
+    if (!currentRoom) {
+      throw new Error("Room not found");
+    }
+
+    // If room already has a scheduled session, check for overlap
+    if (currentRoom.scheduledStartTime && currentRoom.status === "scheduled") {
+      const existingStart = new Date(currentRoom.scheduledStartTime);
+      const existingEnd = new Date(existingStart.getTime() + currentRoom.focusDuration * 60 * 1000);
+
+      // Check if new scheduled time overlaps with existing scheduled session
+      const overlaps =
+        (scheduledTime >= existingStart && scheduledTime < existingEnd) ||
+        (sessionEndTime > existingStart && sessionEndTime <= existingEnd) ||
+        (scheduledTime <= existingStart && sessionEndTime >= existingEnd);
+
+      if (overlaps) {
+        throw new Error(
+          `Scheduled session overlaps with existing scheduled session at ${existingStart.toISOString()}`
+        );
+      }
+    }
+  }
+
+  /**
    * Create a new focus room
    */
   async createRoom(userId: number, data: CreateRoomInput) {
@@ -12,6 +67,24 @@ export class FocusRoomService {
     // Hash password if provided
     if (data.password) {
       passwordHash = await bcrypt.hash(data.password, 10);
+    }
+
+    // Validate scheduled time if provided
+    let scheduledStartTime: Date | null = null;
+    let roomStatus = "active";
+
+    if (data.scheduledStartTime) {
+      scheduledStartTime = new Date(data.scheduledStartTime);
+
+      // Validate scheduled time is in the future
+      if (scheduledStartTime <= new Date()) {
+        throw new Error("Scheduled start time must be in the future");
+      }
+
+      // Note: Overlap validation for new rooms will be handled when scheduling additional sessions
+      // For now, a new room can have one scheduled session
+
+      roomStatus = "scheduled";
     }
 
     const room = await prisma.focusRoom.create({
@@ -25,7 +98,8 @@ export class FocusRoomService {
         allowObservers: data.allowObservers,
         passwordHash,
         requiresPassword: !!data.password,
-        scheduledStartTime: data.scheduledStartTime ? new Date(data.scheduledStartTime) : null,
+        scheduledStartTime,
+        status: roomStatus,
         settings: {},
       },
       include: {
@@ -150,7 +224,7 @@ export class FocusRoomService {
     const rooms = await prisma.focusRoom.findMany({
       where: {
         visibility: "PUBLIC",
-        status: "active",
+        status: { in: ["active", "scheduled"] }, // Include both active and scheduled rooms
       },
       include: {
         creator: {
@@ -283,8 +357,28 @@ export class FocusRoomService {
     if (data.focusDuration !== undefined) updateData.focusDuration = data.focusDuration;
     if (data.breakDuration !== undefined) updateData.breakDuration = data.breakDuration;
     if (data.allowObservers !== undefined) updateData.allowObservers = data.allowObservers;
+    
+    // Handle scheduled time update
     if (data.scheduledStartTime !== undefined) {
-      updateData.scheduledStartTime = data.scheduledStartTime ? new Date(data.scheduledStartTime) : null;
+      if (data.scheduledStartTime === null || data.scheduledStartTime === "") {
+        // Cancel scheduled session
+        updateData.scheduledStartTime = null;
+        updateData.status = "active";
+      } else {
+        const scheduledTime = new Date(data.scheduledStartTime);
+
+        // Validate scheduled time is in the future
+        if (scheduledTime <= new Date()) {
+          throw new Error("Scheduled start time must be in the future");
+        }
+
+        // Validate no overlapping scheduled sessions in the same room
+        // Check if there are other scheduled sessions in this room that would overlap
+        await this.validateScheduledTime(roomId, scheduledTime);
+
+        updateData.scheduledStartTime = scheduledTime;
+        updateData.status = "scheduled";
+      }
     }
 
     // Handle password update

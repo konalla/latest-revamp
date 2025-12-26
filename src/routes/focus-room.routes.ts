@@ -36,6 +36,8 @@ import {
   getTemplateById,
   createTemplate,
   createRoomFromTemplate,
+  scheduleSession,
+  cancelScheduledSession,
 } from "../controllers/focus-room.controller.js";
 
 const router = Router();
@@ -114,6 +116,12 @@ router.put("/:roomId", authenticateToken, updateRoom);
 
 // DELETE /api/focus-rooms/:roomId - Delete room (creator only)
 router.delete("/:roomId", authenticateToken, deleteRoom);
+
+// POST /api/focus-rooms/:roomId/schedule - Schedule a session (creator only)
+router.post("/:roomId/schedule", authenticateToken, scheduleSession);
+
+// DELETE /api/focus-rooms/:roomId/schedule - Cancel scheduled session (creator only)
+router.delete("/:roomId/schedule", authenticateToken, cancelScheduledSession);
 
 // POST /api/focus-rooms/:roomId/sessions - Start a session (creator only)
 router.post("/:roomId/sessions", authenticateToken, startSession);

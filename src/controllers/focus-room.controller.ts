@@ -77,6 +77,8 @@ export const getPublicRooms = async (req: Request, res: Response): Promise<void>
         focusDuration: room.focusDuration,
         breakDuration: room.breakDuration,
         requiresPassword: room.requiresPassword,
+        status: room.status,
+        scheduledStartTime: room.scheduledStartTime,
         participantCount: room._count.participants,
         createdAt: room.createdAt,
         creator: room.creator,
@@ -184,6 +186,22 @@ export const getRoomById = async (req: Request, res: Response): Promise<void> =>
       sessionTimer = await focusRoomSessionService.getSessionTimer(activeSession.id);
     }
 
+    // Calculate time until scheduled session if scheduled
+    let scheduledSessionInfo = null;
+    if (result.room.scheduledStartTime && result.room.status === "scheduled") {
+      const now = new Date();
+      const scheduledTime = new Date(result.room.scheduledStartTime);
+      const timeUntilStart = scheduledTime.getTime() - now.getTime();
+
+      if (timeUntilStart > 0) {
+        scheduledSessionInfo = {
+          scheduledStartTime: result.room.scheduledStartTime,
+          timeUntilStart: Math.floor(timeUntilStart / 1000), // in seconds
+          isScheduled: true,
+        };
+      }
+    }
+
     res.json({
       success: true,
       room: {
@@ -195,6 +213,7 @@ export const getRoomById = async (req: Request, res: Response): Promise<void> =>
         breakDuration: result.room.breakDuration,
         allowObservers: result.room.allowObservers,
         requiresPassword: result.room.requiresPassword,
+        status: result.room.status,
         createdAt: result.room.createdAt,
         creator: result.room.creator,
         participants: result.room.participants,
@@ -202,6 +221,7 @@ export const getRoomById = async (req: Request, res: Response): Promise<void> =>
         isCreator: result.isCreator,
         isParticipant: result.isParticipant,
         activeSession: sessionTimer,
+        scheduledSession: scheduledSessionInfo,
       },
     });
   } catch (error: any) {
@@ -1337,6 +1357,105 @@ export const createRoomFromTemplate = async (req: Request, res: Response): Promi
     res.status(500).json({
       success: false,
       error: error.message || "Failed to create room from template",
+    });
+  }
+};
+
+// Scheduled Session Management
+export const scheduleSession = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id ?? req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ success: false, error: "Unauthorized" });
+      return;
+    }
+
+    const roomIdParam = req.params.roomId;
+    if (!roomIdParam) {
+      res.status(400).json({ success: false, error: "Room ID is required" });
+      return;
+    }
+    const roomId = parseInt(roomIdParam);
+    if (isNaN(roomId)) {
+      res.status(400).json({ success: false, error: "Invalid room ID" });
+      return;
+    }
+
+    const { scheduledStartTime } = req.body;
+
+    if (!scheduledStartTime) {
+      res.status(400).json({ success: false, error: "Scheduled start time is required" });
+      return;
+    }
+
+    // Validate date format
+    const scheduledTime = new Date(scheduledStartTime);
+    if (isNaN(scheduledTime.getTime())) {
+      res.status(400).json({ success: false, error: "Invalid date format" });
+      return;
+    }
+
+    // Update room with scheduled time
+    const room = await focusRoomService.updateRoom(roomId, userId, {
+      scheduledStartTime: scheduledStartTime,
+    });
+
+    res.json({
+      success: true,
+      message: "Session scheduled successfully",
+      room: {
+        id: room.id,
+        scheduledStartTime: room.scheduledStartTime,
+        status: room.status,
+      },
+    });
+  } catch (error: any) {
+    console.error("Error scheduling session:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message || "Failed to schedule session",
+    });
+  }
+};
+
+export const cancelScheduledSession = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id ?? req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ success: false, error: "Unauthorized" });
+      return;
+    }
+
+    const roomIdParam = req.params.roomId;
+    if (!roomIdParam) {
+      res.status(400).json({ success: false, error: "Room ID is required" });
+      return;
+    }
+    const roomId = parseInt(roomIdParam);
+    if (isNaN(roomId)) {
+      res.status(400).json({ success: false, error: "Invalid room ID" });
+      return;
+    }
+
+    // Cancel scheduled session by setting scheduledStartTime to null
+    const room = await focusRoomService.updateRoom(roomId, userId, {
+      scheduledStartTime: null,
+    });
+
+    res.json({
+      success: true,
+      message: "Scheduled session cancelled successfully",
+      room: {
+        id: room.id,
+        scheduledStartTime: null,
+        status: room.status,
+      },
+    });
+  } catch (error: any) {
+    console.error("Error cancelling scheduled session:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message || "Failed to cancel scheduled session",
     });
   }
 };

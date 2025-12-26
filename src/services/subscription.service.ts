@@ -212,6 +212,79 @@ export class SubscriptionService {
   }
 
   /**
+   * Subscribe to free plan (no Stripe required)
+   */
+  async subscribeToFreePlan(userId: number): Promise<any> {
+    try {
+      // Check if user already has a subscription
+      const existingSubscription = await prisma.subscription.findUnique({
+        where: { userId },
+        include: {
+          subscriptionPlan: true,
+        },
+      });
+
+      if (existingSubscription) {
+        // If user already has free plan, return it
+        if (existingSubscription.subscriptionPlan.name === "free") {
+          return existingSubscription;
+        }
+        // If user has another plan, throw error
+        throw new Error("You already have an active subscription. Please cancel it first before subscribing to the free plan.");
+      }
+
+      // Get free plan
+      const freePlan = await prisma.subscriptionPlan.findUnique({
+        where: { name: "free" },
+      });
+
+      if (!freePlan) {
+        throw new Error("Free plan not found");
+      }
+
+      // Set up monthly billing period
+      const now = new Date();
+      const periodEnd = new Date(now);
+      periodEnd.setMonth(periodEnd.getMonth() + 1); // Next month
+
+      // Create subscription without payment provider
+      const subscription = await prisma.subscription.create({
+        data: {
+          userId,
+          subscriptionPlanId: freePlan.id,
+          paymentProviderId: null, // No payment provider for free plan
+          status: "ACTIVE",
+          currentPeriodStart: now,
+          currentPeriodEnd: periodEnd,
+          tasksCreatedThisPeriod: 0,
+          projectsCreatedThisPeriod: 0,
+          objectivesCreatedThisPeriod: 0,
+          keyResultsCreatedThisPeriod: 0,
+          workspacesCreatedThisPeriod: 0,
+          teamsCreatedThisPeriod: 0,
+          lastTaskCountReset: now,
+          lastCountReset: now,
+        },
+        include: {
+          subscriptionPlan: true,
+          user: {
+            select: {
+              id: true,
+              email: true,
+              name: true,
+            },
+          },
+        },
+      });
+
+      return subscription;
+    } catch (error: any) {
+      console.error("Error subscribing to free plan:", error);
+      throw new Error(`Failed to subscribe to free plan: ${error.message}`);
+    }
+  }
+
+  /**
    * Create Stripe checkout session for subscription
    */
   async createCheckoutSession(
@@ -708,6 +781,14 @@ export class SubscriptionService {
         if (now >= nextReset) {
           shouldReset = true;
         }
+      } else if (subscription.subscriptionPlan.billingInterval === "free") {
+        // For free plan, reset monthly based on subscription start date
+        const lastCountReset = subscription.lastCountReset || subscription.currentPeriodStart;
+        const nextReset = new Date(lastCountReset);
+        nextReset.setMonth(nextReset.getMonth() + 1);
+        if (now >= nextReset) {
+          shouldReset = true;
+        }
       }
 
       if (shouldReset) {
@@ -721,6 +802,367 @@ export class SubscriptionService {
       }
     } catch (error: any) {
       console.error("Error resetting task count:", error);
+    }
+  }
+
+  /**
+   * Reset all counters if billing period changed (for free plan monthly renewal)
+   */
+  async resetAllCountersIfNeeded(subscriptionId: number): Promise<void> {
+    try {
+      const subscription = await prisma.subscription.findUnique({
+        where: { id: subscriptionId },
+        include: { subscriptionPlan: true },
+      });
+
+      if (!subscription || !subscription.currentPeriodStart) {
+        return;
+      }
+
+      const now = new Date();
+      const lastReset = subscription.lastCountReset || subscription.currentPeriodStart;
+
+      // Check if we need to reset based on billing interval
+      let shouldReset = false;
+      let newPeriodEnd: Date | null = null;
+
+      if (subscription.subscriptionPlan.billingInterval === "free" || 
+          subscription.subscriptionPlan.billingInterval === "monthly") {
+        // Reset if a month has passed since last reset
+        const nextReset = new Date(lastReset);
+        nextReset.setMonth(nextReset.getMonth() + 1);
+        if (now >= nextReset) {
+          shouldReset = true;
+          // Set new period end (one month from now)
+          newPeriodEnd = new Date(now);
+          newPeriodEnd.setMonth(newPeriodEnd.getMonth() + 1);
+        }
+      } else if (subscription.subscriptionPlan.billingInterval === "yearly") {
+        // Reset if a year has passed since last reset
+        const nextReset = new Date(lastReset);
+        nextReset.setFullYear(nextReset.getFullYear() + 1);
+        if (now >= nextReset) {
+          shouldReset = true;
+          // Set new period end (one year from now)
+          newPeriodEnd = new Date(now);
+          newPeriodEnd.setFullYear(newPeriodEnd.getFullYear() + 1);
+        }
+      }
+
+      if (shouldReset) {
+        await prisma.subscription.update({
+          where: { id: subscriptionId },
+          data: {
+            tasksCreatedThisPeriod: 0,
+            projectsCreatedThisPeriod: 0,
+            objectivesCreatedThisPeriod: 0,
+            keyResultsCreatedThisPeriod: 0,
+            workspacesCreatedThisPeriod: 0,
+            teamsCreatedThisPeriod: 0,
+            lastTaskCountReset: now,
+            lastCountReset: now,
+            currentPeriodStart: now,
+            currentPeriodEnd: newPeriodEnd,
+          },
+        });
+      }
+    } catch (error: any) {
+      console.error("Error resetting all counters:", error);
+    }
+  }
+
+  /**
+   * Check if user can create projects
+   */
+  async canCreateProject(userId: number): Promise<{
+    canCreate: boolean;
+    reason?: string;
+    projectsRemaining?: number;
+    subscription?: any;
+  }> {
+    try {
+      const subscription = await this.getUserSubscription(userId);
+      const updatedSubscription = await this.updateSubscriptionStatus(subscription.id);
+      
+      // Reset counters if needed
+      await this.resetAllCountersIfNeeded(updatedSubscription.id);
+      const sub = await prisma.subscription.findUnique({
+        where: { id: updatedSubscription.id },
+      });
+
+      if (!sub || !updatedSubscription.subscriptionPlan) {
+        return { canCreate: false, reason: "No active subscription found" };
+      }
+
+      const maxProjects = updatedSubscription.subscriptionPlan.maxProjects;
+      
+      // If maxProjects is null, unlimited
+      if (maxProjects === null) {
+        return {
+          canCreate: true,
+          subscription: updatedSubscription,
+        };
+      }
+
+      const projectsRemaining = maxProjects - (sub.projectsCreatedThisPeriod || 0);
+
+      if (projectsRemaining <= 0) {
+        return {
+          canCreate: false,
+          reason: "Project limit reached for this billing period.",
+          projectsRemaining: 0,
+          subscription: updatedSubscription,
+        };
+      }
+
+      return {
+        canCreate: true,
+        projectsRemaining,
+        subscription: updatedSubscription,
+      };
+    } catch (error: any) {
+      console.error("Error checking project creation permission:", error);
+      return { canCreate: false, reason: "Error checking subscription status" };
+    }
+  }
+
+  /**
+   * Check if user can create objectives
+   */
+  async canCreateObjective(userId: number): Promise<{
+    canCreate: boolean;
+    reason?: string;
+    objectivesRemaining?: number;
+    subscription?: any;
+  }> {
+    try {
+      const subscription = await this.getUserSubscription(userId);
+      const updatedSubscription = await this.updateSubscriptionStatus(subscription.id);
+      
+      // Reset counters if needed
+      await this.resetAllCountersIfNeeded(updatedSubscription.id);
+      const sub = await prisma.subscription.findUnique({
+        where: { id: updatedSubscription.id },
+      });
+
+      if (!sub || !updatedSubscription.subscriptionPlan) {
+        return { canCreate: false, reason: "No active subscription found" };
+      }
+
+      const maxObjectives = updatedSubscription.subscriptionPlan.maxObjectives;
+      
+      // If maxObjectives is null, unlimited
+      if (maxObjectives === null) {
+        return {
+          canCreate: true,
+          subscription: updatedSubscription,
+        };
+      }
+
+      const objectivesRemaining = maxObjectives - (sub.objectivesCreatedThisPeriod || 0);
+
+      if (objectivesRemaining <= 0) {
+        return {
+          canCreate: false,
+          reason: "Objective limit reached for this billing period.",
+          objectivesRemaining: 0,
+          subscription: updatedSubscription,
+        };
+      }
+
+      return {
+        canCreate: true,
+        objectivesRemaining,
+        subscription: updatedSubscription,
+      };
+    } catch (error: any) {
+      console.error("Error checking objective creation permission:", error);
+      return { canCreate: false, reason: "Error checking subscription status" };
+    }
+  }
+
+  /**
+   * Check if user can create key results
+   */
+  async canCreateKeyResult(userId: number): Promise<{
+    canCreate: boolean;
+    reason?: string;
+    keyResultsRemaining?: number;
+    subscription?: any;
+  }> {
+    try {
+      const subscription = await this.getUserSubscription(userId);
+      const updatedSubscription = await this.updateSubscriptionStatus(subscription.id);
+      
+      // Reset counters if needed
+      await this.resetAllCountersIfNeeded(updatedSubscription.id);
+      const sub = await prisma.subscription.findUnique({
+        where: { id: updatedSubscription.id },
+      });
+
+      if (!sub || !updatedSubscription.subscriptionPlan) {
+        return { canCreate: false, reason: "No active subscription found" };
+      }
+
+      const maxKeyResults = updatedSubscription.subscriptionPlan.maxKeyResults;
+      
+      // If maxKeyResults is null, unlimited
+      if (maxKeyResults === null) {
+        return {
+          canCreate: true,
+          subscription: updatedSubscription,
+        };
+      }
+
+      const keyResultsRemaining = maxKeyResults - (sub.keyResultsCreatedThisPeriod || 0);
+
+      if (keyResultsRemaining <= 0) {
+        return {
+          canCreate: false,
+          reason: "Key result limit reached for this billing period.",
+          keyResultsRemaining: 0,
+          subscription: updatedSubscription,
+        };
+      }
+
+      return {
+        canCreate: true,
+        keyResultsRemaining,
+        subscription: updatedSubscription,
+      };
+    } catch (error: any) {
+      console.error("Error checking key result creation permission:", error);
+      return { canCreate: false, reason: "Error checking subscription status" };
+    }
+  }
+
+  /**
+   * Increment project count when project is created
+   */
+  async incrementProjectCount(userId: number): Promise<void> {
+    try {
+      const subscription = await prisma.subscription.findUnique({
+        where: { userId },
+      });
+
+      if (!subscription) {
+        return;
+      }
+
+      await prisma.subscription.update({
+        where: { id: subscription.id },
+        data: {
+          projectsCreatedThisPeriod: {
+            increment: 1,
+          },
+        },
+      });
+    } catch (error: any) {
+      console.error("Error incrementing project count:", error);
+    }
+  }
+
+  /**
+   * Increment objective count when objective is created
+   */
+  async incrementObjectiveCount(userId: number): Promise<void> {
+    try {
+      const subscription = await prisma.subscription.findUnique({
+        where: { userId },
+      });
+
+      if (!subscription) {
+        return;
+      }
+
+      await prisma.subscription.update({
+        where: { id: subscription.id },
+        data: {
+          objectivesCreatedThisPeriod: {
+            increment: 1,
+          },
+        },
+      });
+    } catch (error: any) {
+      console.error("Error incrementing objective count:", error);
+    }
+  }
+
+  /**
+   * Increment key result count when key result is created
+   */
+  async incrementKeyResultCount(userId: number): Promise<void> {
+    try {
+      const subscription = await prisma.subscription.findUnique({
+        where: { userId },
+      });
+
+      if (!subscription) {
+        return;
+      }
+
+      await prisma.subscription.update({
+        where: { id: subscription.id },
+        data: {
+          keyResultsCreatedThisPeriod: {
+            increment: 1,
+          },
+        },
+      });
+    } catch (error: any) {
+      console.error("Error incrementing key result count:", error);
+    }
+  }
+
+  /**
+   * Increment workspace count when workspace is created
+   */
+  async incrementWorkspaceCount(userId: number): Promise<void> {
+    try {
+      const subscription = await prisma.subscription.findUnique({
+        where: { userId },
+      });
+
+      if (!subscription) {
+        return;
+      }
+
+      await prisma.subscription.update({
+        where: { id: subscription.id },
+        data: {
+          workspacesCreatedThisPeriod: {
+            increment: 1,
+          },
+        },
+      });
+    } catch (error: any) {
+      console.error("Error incrementing workspace count:", error);
+    }
+  }
+
+  /**
+   * Increment team count when team is created
+   */
+  async incrementTeamCount(userId: number): Promise<void> {
+    try {
+      const subscription = await prisma.subscription.findUnique({
+        where: { userId },
+      });
+
+      if (!subscription) {
+        return;
+      }
+
+      await prisma.subscription.update({
+        where: { id: subscription.id },
+        data: {
+          teamsCreatedThisPeriod: {
+            increment: 1,
+          },
+        },
+      });
+    } catch (error: any) {
+      console.error("Error incrementing team count:", error);
     }
   }
 
@@ -1002,6 +1444,11 @@ export class SubscriptionService {
    */
   private getPlanLimits(planName: string): { maxWorkspaces: number; maxTeamsPerWorkspace: number } {
     switch (planName) {
+      case "free":
+        return {
+          maxWorkspaces: 1, // Only default workspace
+          maxTeamsPerWorkspace: 5
+        };
       case "essential_twenty":
         return {
           maxWorkspaces: 3, // 1 default + 2 additional
@@ -1040,7 +1487,7 @@ export class SubscriptionService {
         where: {
           isActive: true,
           name: {
-            in: ["focus_master", "performance_founder"],
+            in: ["free", "focus_master", "performance_founder"],
           },
         },
         orderBy: {

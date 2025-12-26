@@ -568,13 +568,19 @@ export const createWorkspace = async (userId: number, name: string) => {
     throw new Error("A workspace with this name already exists");
   }
 
-  return prisma.workspace.create({
+  const workspace = await prisma.workspace.create({
     data: {
       name: name.trim(),
       ownerId: userId
     },
     include: { teams: true }
   });
+
+  // Increment workspace counter for tracking
+  const { subscriptionService } = await import("./subscription.service.js");
+  await subscriptionService.incrementWorkspaceCount(userId);
+
+  return workspace;
 };
 
 // Update workspace (rename)

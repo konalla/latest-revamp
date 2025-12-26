@@ -47,6 +47,46 @@ async function main() {
 
   console.log("Created Clarity Plan (trial plan)");
 
+  // Create Free Plan
+  const freePlan = await prisma.subscriptionPlan.upsert({
+    where: { name: "free" },
+    update: {
+      displayName: "Free Plan",
+      description: "Free plan with monthly limits: 1 project, 5 objectives, 10 key results, 50 tasks, 1 workspace, 5 teams",
+      price: 0,
+      currency: "USD",
+      billingInterval: "free",
+      trialDays: null,
+      maxProjects: 1,
+      maxObjectives: 5,
+      maxKeyResults: 10,
+      maxTasks: 50,
+      maxWorkspaces: 1,
+      maxTeams: 5,
+      features: {},
+      isActive: true,
+    },
+    create: {
+      name: "free",
+      displayName: "Free Plan",
+      description: "Free plan with monthly limits: 1 project, 5 objectives, 10 key results, 50 tasks, 1 workspace, 5 teams",
+      price: 0,
+      currency: "USD",
+      billingInterval: "free",
+      trialDays: null,
+      maxProjects: 1,
+      maxObjectives: 5,
+      maxKeyResults: 10,
+      maxTasks: 50,
+      maxWorkspaces: 1,
+      maxTeams: 5,
+      features: {},
+      isActive: true,
+    },
+  });
+
+  console.log("Created Free Plan");
+
   const monthlyPlan = await prisma.subscriptionPlan.upsert({
     where: { name: "monthly" },
     update: {
@@ -229,6 +269,7 @@ async function main() {
 
   console.log("Seeding completed!");
   console.log("\nIMPORTANT: After creating products in Stripe Dashboard, update the stripePriceId and stripeProductId fields:");
+  console.log("- Free Plan ID:", freePlan.id);
   console.log("- Clarity Plan ID:", trialPlan.id);
   console.log("- Pro Plan - Monthly ID:", monthlyPlan.id);
   console.log("- Pro Plan - Yearly ID:", yearlyPlan.id);

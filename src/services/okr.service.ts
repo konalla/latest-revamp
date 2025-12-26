@@ -1,4 +1,5 @@
 import prisma from "../config/prisma.js";
+import { subscriptionService } from "./subscription.service.js";
 
 import type { 
   CreateOkrRequest, 
@@ -33,6 +34,21 @@ const verifyPlanOwnership = async (planId: number, userId: number) => {
 };
 
 const createOkr = async (data: CreateOkrRequest, userId: number) => {
+  // Check subscription limits for key results
+  const keyResultsCount = Array.isArray(data.keyResults) ? data.keyResults.length : 0;
+  if (keyResultsCount > 0) {
+    const canCreate = await subscriptionService.canCreateKeyResult(userId);
+    if (!canCreate.canCreate) {
+      throw new Error(canCreate.reason || "Cannot create key result");
+    }
+    
+    // Check if we have enough remaining key results
+    const remaining = canCreate.keyResultsRemaining || 0;
+    if (keyResultsCount > remaining) {
+      throw new Error(`Cannot create ${keyResultsCount} key results. Only ${remaining} remaining in this billing period.`);
+    }
+  }
+
   // Verify ownership based on what's provided
   if (data.objectiveId) {
     const ownsObjective = await verifyObjectiveOwnership(data.objectiveId, userId);
@@ -83,7 +99,7 @@ const createOkr = async (data: CreateOkrRequest, userId: number) => {
     };
   }
 
-  return prisma.okr.create({
+  const okr = await prisma.okr.create({
     data: {
       ...data,
       userId,
@@ -92,6 +108,15 @@ const createOkr = async (data: CreateOkrRequest, userId: number) => {
     },
     include: includeConfig,
   });
+
+  // Increment key result counter for each key result created
+  if (keyResultsCount > 0) {
+    for (let i = 0; i < keyResultsCount; i++) {
+      await subscriptionService.incrementKeyResultCount(userId);
+    }
+  }
+
+  return okr;
 };
 
 const getOkrsByObjective = async (objectiveId: number, userId: number, queryParams: OkrQueryParams = {}) => {

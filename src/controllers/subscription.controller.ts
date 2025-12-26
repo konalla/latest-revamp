@@ -183,6 +183,29 @@ export class SubscriptionController {
   }
 
   /**
+   * Subscribe to free plan (no payment required)
+   */
+  async subscribeToFreePlan(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = (req as any).user?.id;
+      if (!userId) {
+        res.status(401).json({ error: "Unauthorized" });
+        return;
+      }
+
+      const subscription = await subscriptionService.subscribeToFreePlan(userId);
+
+      res.status(200).json({
+        message: "Successfully subscribed to free plan",
+        subscription,
+      });
+    } catch (error: any) {
+      console.error("Error subscribing to free plan:", error);
+      res.status(500).json({ error: error.message || "Failed to subscribe to free plan" });
+    }
+  }
+
+  /**
    * Setup Clarity Plan - Create Stripe customer and collect payment method
    */
   async setupClarityPlan(req: Request, res: Response): Promise<void> {

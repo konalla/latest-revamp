@@ -489,14 +489,19 @@ model PaymentProvider {
 
 model SubscriptionPlan {
   id              Int      @id @default(autoincrement())
-  name            String   @unique // "trial", "monthly", "yearly"
+  name            String   @unique // "trial", "monthly", "yearly", "free"
   displayName     String // "Free Trial", "Monthly Plan", "Yearly Plan"
   description     String?
   price           Float // Price in USD (0 for trial)
   currency        String   @default("USD")
-  billingInterval String // "trial", "monthly", "yearly"
+  billingInterval String // "trial", "monthly", "yearly", "free"
   trialDays       Int? // 3 for trial plan
   maxTasks        Int? // 50 for trial, 1000 for monthly, 10000 for yearly
+  maxProjects     Int? // Limit for projects per billing period
+  maxObjectives   Int? // Limit for objectives per billing period
+  maxKeyResults   Int? // Limit for key results per billing period
+  maxWorkspaces   Int? // Limit for workspaces
+  maxTeams        Int? // Limit for teams per workspace
   features        Json     @default("{}") // Feature flags as JSON
   isActive        Boolean  @default(true)
   stripePriceId   String? // Stripe Price ID (set manually in Stripe Dashboard)
@@ -521,7 +526,7 @@ model Subscription {
   id                     Int                @id @default(autoincrement())
   userId                 Int                @unique
   subscriptionPlanId     Int
-  paymentProviderId      Int
+  paymentProviderId      Int? // Nullable for free plans that don't use payment providers
   status                 SubscriptionStatus @default(TRIAL)
   stripeSubscriptionId   String?            @unique // Stripe Subscription ID
   stripeCustomerId       String? // Stripe Customer ID
@@ -533,7 +538,13 @@ model Subscription {
   cancelAtPeriodEnd      Boolean            @default(false)
   canceledAt             DateTime?
   tasksCreatedThisPeriod Int                @default(0) // Track tasks created in current billing period
+  projectsCreatedThisPeriod Int             @default(0) // Track projects created in current billing period
+  objectivesCreatedThisPeriod Int           @default(0) // Track objectives created in current billing period
+  keyResultsCreatedThisPeriod Int           @default(0) // Track key results created in current billing period
+  workspacesCreatedThisPeriod Int           @default(0) // Track workspaces created in current billing period
+  teamsCreatedThisPeriod Int                @default(0) // Track teams created in current billing period
   lastTaskCountReset     DateTime? // When task count was last reset
+  lastCountReset          DateTime? // When all counts were last reset (for monthly renewal)
   paymentRetryCount      Int                @default(0) // Track payment retry attempts (max 3)
   lastPaymentRetryAt     DateTime? // Timestamp of last payment retry
   paymentFailureReason   String? // Reason for payment failure
@@ -542,7 +553,7 @@ model Subscription {
 
   user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   subscriptionPlan SubscriptionPlan @relation(fields: [subscriptionPlanId], references: [id])
-  paymentProvider  PaymentProvider  @relation(fields: [paymentProviderId], references: [id])
+  paymentProvider  PaymentProvider? @relation(fields: [paymentProviderId], references: [id])
   payments         Payment[]
 
   @@index([userId, status])
