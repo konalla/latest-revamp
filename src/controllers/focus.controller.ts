@@ -115,6 +115,12 @@ export const createFocusSession = async (req: Request, res: Response) => {
 
     const session = await focusSessionService.createFocusSession(userId, data);
     
+    // Broadcast WebSocket event
+    const wsService = (global as any).focusSessionWebSocketService;
+    if (wsService) {
+      await wsService.broadcastSessionStarted(session.id, userId);
+    }
+    
     return res.status(201).json({
       success: true,
       sessionId: session.id,
@@ -176,6 +182,12 @@ export const endFocusSession = async (req: Request, res: Response) => {
       return res.status(404).json({ message: "Session not found" });
     }
 
+    // Broadcast WebSocket event
+    const wsService = (global as any).focusSessionWebSocketService;
+    if (wsService) {
+      await wsService.broadcastSessionEnded(sessionId, userId);
+    }
+
     return res.json({
       success: true,
       session: session
@@ -207,6 +219,12 @@ export const pauseSession = async (req: Request, res: Response) => {
     
     if (!session) {
       return res.status(404).json({ message: "Session not found" });
+    }
+
+    // Broadcast WebSocket event
+    const wsService = (global as any).focusSessionWebSocketService;
+    if (wsService) {
+      await wsService.broadcastSessionPaused(sessionId, userId);
     }
 
     return res.json({
@@ -245,6 +263,12 @@ export const resumeSession = async (req: Request, res: Response) => {
     
     if (!session) {
       return res.status(404).json({ message: "Session not found" });
+    }
+
+    // Broadcast WebSocket event (pass elapsedTime for accurate resume)
+    const wsService = (global as any).focusSessionWebSocketService;
+    if (wsService) {
+      await wsService.broadcastSessionResumed(sessionId, userId, data.elapsedTime);
     }
 
     return res.json({

@@ -13,6 +13,9 @@ router.get("/plans", subscriptionController.getAvailablePlans.bind(subscriptionC
 // Create checkout session
 router.post("/checkout", authenticateToken, subscriptionController.createCheckoutSession.bind(subscriptionController));
 
+// Subscribe to free plan (no payment required)
+router.post("/subscribe-free", authenticateToken, subscriptionController.subscribeToFreePlan.bind(subscriptionController));
+
 // Cancel subscription
 router.post("/cancel", authenticateToken, subscriptionController.cancelSubscription.bind(subscriptionController));
 

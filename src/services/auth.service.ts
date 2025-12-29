@@ -71,12 +71,12 @@ const register = async (data: RegisterRequest): Promise<AuthResponse> => {
     }
   }
 
-  // Note: Trial subscription will be created when user sets up payment method
-  // via POST /api/subscriptions/setup-clarity-plan endpoint
-  // This allows us to collect payment method upfront for seamless upgrades
+  // Note: Users need to select a subscription plan after registration
+  // They can choose the free plan (POST /api/subscriptions/subscribe-free) or a paid plan (POST /api/subscriptions/checkout)
+  // The free plan does not require payment, while paid plans require Stripe checkout
 
-  // Check if user needs to set up payment method
-  const needsPaymentSetup = true; // New users always need to set up payment
+  // Check if user needs to select a plan
+  const needsPaymentSetup = true; // New users always need to select a plan (free or paid)
 
   // Generate JWT token
   const token = generateToken({

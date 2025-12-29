@@ -233,15 +233,46 @@ export class FocusSessionService {
 
   async createFocusSession(userId: number, data: CreateFocusSessionRequest): Promise<FocusSessionResponse> {
     try {
+      const taskIds = data.taskIds || [];
+      let calculatedDuration = data.duration || 0;
+
+      // Calculate duration from tasks if category is provided and tasks exist
+      if (taskIds.length > 0 && data.category) {
+        const tasks = await prisma.task.findMany({
+          where: { 
+            id: { in: taskIds },
+            userId: userId
+          },
+          select: { duration: true, category: true },
+        });
+
+        // Sum durations of tasks matching the category
+        calculatedDuration = tasks
+          .filter((t) => t.category === data.category)
+          .reduce((sum, t) => sum + t.duration, 0);
+      } else if (taskIds.length > 0 && !data.category) {
+        // If no category specified, sum all task durations
+        const tasks = await prisma.task.findMany({
+          where: { 
+            id: { in: taskIds },
+            userId: userId
+          },
+          select: { duration: true },
+        });
+
+        calculatedDuration = tasks.reduce((sum, t) => sum + t.duration, 0);
+      }
+
       const intentionData = {
-        taskIds: data.taskIds || [],
+        taskIds,
         settings: data.settings || {},
-        category: data.category
+        category: data.category,
+        scheduledDuration: calculatedDuration
       };
 
       const result = await prisma.$queryRaw`
         INSERT INTO focus_sessions (user_id, session_type, status, intention, duration)
-        VALUES (${userId}, ${data.sessionType}, 'active', ${JSON.stringify(intentionData)}::jsonb, ${data.duration || 0})
+        VALUES (${userId}, ${data.sessionType}, 'active', ${JSON.stringify(intentionData)}::jsonb, ${calculatedDuration})
         RETURNING *
       ` as any[];
 
@@ -499,9 +530,13 @@ export class FocusSessionService {
       // Add elapsedTime to intention data
       intentionData.elapsedTime = data.elapsedTime;
 
+      const pausedAt = new Date();
+
       const result = await prisma.$queryRaw`
         UPDATE focus_sessions 
-        SET status = 'paused', intention = ${JSON.stringify(intentionData)}::jsonb
+        SET status = 'paused', 
+            paused_at = ${pausedAt},
+            intention = ${JSON.stringify(intentionData)}::jsonb
         WHERE id = ${sessionId} AND user_id = ${userId}
         RETURNING *
       ` as any[];
@@ -535,9 +570,12 @@ export class FocusSessionService {
 
   async resumeSession(sessionId: number, userId: number, data: ResumeSessionRequest): Promise<FocusSessionResponse | null> {
     try {
+      const resumedAt = new Date();
+
       const result = await prisma.$queryRaw`
         UPDATE focus_sessions 
-        SET status = 'active'
+        SET status = 'active',
+            resumed_at = ${resumedAt}
         WHERE id = ${sessionId} AND user_id = ${userId}
         RETURNING *
       ` as any[];

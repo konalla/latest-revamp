@@ -1,15 +1,27 @@
 import prisma from "../config/prisma.js";
+import { subscriptionService } from "./subscription.service.js";
 
 import type { CreateProjectRequest, UpdateProjectRequest, ProjectQueryParams } from "../types/project.types.js";
 import type { OkrQueryParams } from "../types/okr.types.js";
 
 const createProject = async (data: CreateProjectRequest, userId: number) => {
-  return prisma.project.create({
+  // Check subscription limits
+  const canCreate = await subscriptionService.canCreateProject(userId);
+  if (!canCreate.canCreate) {
+    throw new Error(canCreate.reason || "Cannot create project");
+  }
+
+  const project = await prisma.project.create({
     data: {
       ...data,
       userId,
     },
   });
+
+  // Increment project counter
+  await subscriptionService.incrementProjectCount(userId);
+
+  return project;
 };
 
 const getAllProjectsByUser = async (userId: number, queryParams: ProjectQueryParams = {}) => {

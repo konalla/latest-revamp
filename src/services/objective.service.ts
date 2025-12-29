@@ -1,4 +1,5 @@
 import prisma from "../config/prisma.js";
+import { subscriptionService } from "./subscription.service.js";
 
 import type { CreateObjectiveRequest, UpdateObjectiveRequest, ObjectiveQueryParams } from "../types/objective.types.js";
 
@@ -11,6 +12,12 @@ const verifyProjectOwnership = async (projectId: number, userId: number) => {
 };
 
 const createObjective = async (data: CreateObjectiveRequest, userId: number) => {
+  // Check subscription limits
+  const canCreate = await subscriptionService.canCreateObjective(userId);
+  if (!canCreate.canCreate) {
+    throw new Error(canCreate.reason || "Cannot create objective");
+  }
+
   // If projectId is provided, verify that the user owns the project
   if (data.projectId) {
     const ownsProject = await verifyProjectOwnership(data.projectId, userId);
@@ -32,7 +39,7 @@ const createObjective = async (data: CreateObjectiveRequest, userId: number) => 
     delete mappedData.endDate;
   }
 
-  return prisma.objective.create({
+  const objective = await prisma.objective.create({
     data: mappedData,
     include: {
       user: {
@@ -55,6 +62,11 @@ const createObjective = async (data: CreateObjectiveRequest, userId: number) => 
       },
     },
   });
+
+  // Increment objective counter
+  await subscriptionService.incrementObjectiveCount(userId);
+
+  return objective;
 };
 
 const getObjectivesByProject = async (projectId: number, userId: number, queryParams: ObjectiveQueryParams = {}) => {

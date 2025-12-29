@@ -18,38 +18,9 @@ class AnalyticsController {
         return;
       }
       
-      // Parse the timeframe - if not provided, calculate for all time
-      let days: number | undefined = undefined;
-      const timeframe = req.query.timeframe as string;
-      const daysParam = req.query.days as string;
-      
-      // Only apply filter if explicitly provided
-      if (daysParam) {
-        try {
-          days = parseInt(daysParam, 10);
-        } catch (parseError) {
-          console.warn("Invalid days format, calculating for all time:", parseError);
-        }
-      } else if (timeframe) {
-        try {
-          // Convert to days if it's a number
-          if (/^\d+$/.test(timeframe)) {
-            days = parseInt(timeframe, 10);
-          } else if (timeframe.endsWith('days')) {
-            // Parse '30days' format
-            days = parseInt(timeframe.replace('days', ''), 10);
-          }
-        } catch (parseError) {
-          console.warn("Invalid timeframe format, calculating for all time:", parseError);
-        }
-      }
-      
-      if (days !== undefined) {
-        console.log(`Fetching productivity analytics for user ${userId} with ${days} days timeframe`);
-      } else {
-        console.log(`Fetching productivity analytics for user ${userId} for all time`);
-      }
-      const data = await analyticsService.getProductivityAnalytics(userId, days);
+      // Always calculate for all time - days filter removed
+      console.log(`Fetching productivity analytics for user ${userId} for all time`);
+      const data = await analyticsService.getProductivityAnalytics(userId, undefined);
       
       // Set JSON content type to ensure client processes response as JSON
       res.setHeader('Content-Type', 'application/json');

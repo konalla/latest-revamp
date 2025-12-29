@@ -74,9 +74,6 @@ model User {
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
-  @@index([isOnline])
-  @@index([statusUpdatedAt])
-
   // Relations
   projects                 Project[]
   objectives               Objective[]
@@ -100,6 +97,16 @@ model User {
   referralStatus    UserReferralStatus?
   referralsMade     Referral[]          @relation("Referrer")
   referralsReceived Referral[]          @relation("ReferredUser")
+
+  // Focus Room relations
+  createdFocusRooms            FocusRoom[]            @relation("FocusRoomCreator")
+  focusRoomParticipations      FocusRoomParticipant[] @relation("FocusRoomParticipant")
+  focusRoomInvitationsSent     FocusRoomInvitation[]  @relation("FocusRoomInviter")
+  focusRoomInvitationsReceived FocusRoomInvitation[]  @relation("FocusRoomInvitee")
+  focusRoomTemplates           FocusRoomTemplate[]    @relation("FocusRoomTemplateCreator")
+
+  @@index([isOnline])
+  @@index([statusUpdatedAt])
 }
 
 model Project {
@@ -285,6 +292,8 @@ model FocusSession {
   intention      Json      @default("{}")
   startedAt      DateTime  @default(now()) @map("started_at")
   endedAt        DateTime? @map("ended_at")
+  pausedAt       DateTime? @map("paused_at")
+  resumedAt      DateTime? @map("resumed_at")
   duration       Int       @default(0)
   completed      Boolean   @default(false)
   notes          String?
@@ -480,14 +489,19 @@ model PaymentProvider {
 
 model SubscriptionPlan {
   id              Int      @id @default(autoincrement())
-  name            String   @unique // "trial", "monthly", "yearly"
+  name            String   @unique // "trial", "monthly", "yearly", "free"
   displayName     String // "Free Trial", "Monthly Plan", "Yearly Plan"
   description     String?
   price           Float // Price in USD (0 for trial)
   currency        String   @default("USD")
-  billingInterval String // "trial", "monthly", "yearly"
+  billingInterval String // "trial", "monthly", "yearly", "free"
   trialDays       Int? // 3 for trial plan
   maxTasks        Int? // 50 for trial, 1000 for monthly, 10000 for yearly
+  maxProjects     Int? // Limit for projects per billing period
+  maxObjectives   Int? // Limit for objectives per billing period
+  maxKeyResults   Int? // Limit for key results per billing period
+  maxWorkspaces   Int? // Limit for workspaces
+  maxTeams        Int? // Limit for teams per workspace
   features        Json     @default("{}") // Feature flags as JSON
   isActive        Boolean  @default(true)
   stripePriceId   String? // Stripe Price ID (set manually in Stripe Dashboard)
@@ -512,7 +526,7 @@ model Subscription {
   id                     Int                @id @default(autoincrement())
   userId                 Int                @unique
   subscriptionPlanId     Int
-  paymentProviderId      Int
+  paymentProviderId      Int? // Nullable for free plans that don't use payment providers
   status                 SubscriptionStatus @default(TRIAL)
   stripeSubscriptionId   String?            @unique // Stripe Subscription ID
   stripeCustomerId       String? // Stripe Customer ID
@@ -524,7 +538,13 @@ model Subscription {
   cancelAtPeriodEnd      Boolean            @default(false)
   canceledAt             DateTime?
   tasksCreatedThisPeriod Int                @default(0) // Track tasks created in current billing period
+  projectsCreatedThisPeriod Int             @default(0) // Track projects created in current billing period
+  objectivesCreatedThisPeriod Int           @default(0) // Track objectives created in current billing period
+  keyResultsCreatedThisPeriod Int           @default(0) // Track key results created in current billing period
+  workspacesCreatedThisPeriod Int           @default(0) // Track workspaces created in current billing period
+  teamsCreatedThisPeriod Int                @default(0) // Track teams created in current billing period
   lastTaskCountReset     DateTime? // When task count was last reset
+  lastCountReset          DateTime? // When all counts were last reset (for monthly renewal)
   paymentRetryCount      Int                @default(0) // Track payment retry attempts (max 3)
   lastPaymentRetryAt     DateTime? // Timestamp of last payment retry
   paymentFailureReason   String? // Reason for payment failure
@@ -533,7 +553,7 @@ model Subscription {
 
   user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   subscriptionPlan SubscriptionPlan @relation(fields: [subscriptionPlanId], references: [id])
-  paymentProvider  PaymentProvider  @relation(fields: [paymentProviderId], references: [id])
+  paymentProvider  PaymentProvider? @relation(fields: [paymentProviderId], references: [id])
   payments         Payment[]
 
   @@index([userId, status])
@@ -648,4 +668,162 @@ model ReferralClick {
   @@index([referralCode])
   @@index([createdAt])
   @@map("referral_clicks")
+}
+
+// ============================================
+// Focus Rooms Models
+// ============================================
+
+model FocusRoom {
+  id                 Int                 @id @default(autoincrement())
+  name               String              @db.VarChar(50)
+  description        String?             @db.VarChar(500)
+  creatorId          Int                 @map("creator_id")
+  status             String              @default("active") @db.VarChar(20) // draft, active, scheduled, completed, archived
+  visibility         FocusRoomVisibility @default(PUBLIC)
+  focusDuration      Int                 @default(25) @map("focus_duration") // in minutes
+  breakDuration      Int                 @default(5) @map("break_duration") // in minutes
+  allowObservers     Boolean             @default(true) @map("allow_observers")
+  passwordHash       String?             @map("password_hash") @db.VarChar(100)
+  requiresPassword   Boolean             @default(false) @map("requires_password")
+  settings           Json?               @default("{}")
+  scheduledStartTime DateTime?           @map("scheduled_start_time")
+  createdAt          DateTime            @default(now()) @map("created_at")
+  updatedAt          DateTime            @updatedAt @map("updated_at")
+
+  creator      User                   @relation("FocusRoomCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+  sessions     FocusRoomSession[]
+  participants FocusRoomParticipant[]
+  invitations  FocusRoomInvitation[]
+
+  @@index([status, visibility])
+  @@index([creatorId])
+  @@map("focus_rooms")
+}
+
+model FocusRoomSession {
+  id                Int                @id @default(autoincrement())
+  roomId            Int                @map("room_id")
+  startedAt         DateTime           @map("started_at")
+  endedAt           DateTime?          @map("ended_at")
+  pausedAt          DateTime?          @map("paused_at")
+  resumedAt         DateTime?          @map("resumed_at")
+  scheduledDuration Int                @map("scheduled_duration") // in seconds
+  actualDuration    Int?               @map("actual_duration") // in seconds
+  status            FocusSessionStatus @default(ACTIVE)
+  createdAt         DateTime           @default(now()) @map("created_at")
+  updatedAt         DateTime           @updatedAt @map("updated_at")
+
+  room FocusRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([roomId, status])
+  @@index([startedAt])
+  @@map("focus_room_sessions")
+}
+
+model FocusRoomParticipant {
+  id              Int                    @id @default(autoincrement())
+  roomId          Int                    @map("room_id")
+  userId          Int                    @map("user_id")
+  role            FocusParticipantRole   @default(PARTICIPANT)
+  status          FocusParticipantStatus @default(JOINED)
+  joinedAt        DateTime               @default(now()) @map("joined_at")
+  leftAt          DateTime?              @map("left_at")
+  intention       String?                @db.Text
+  completion      String?                @db.Text
+  shareCompletion Boolean                @default(false) @map("share_completion")
+  createdAt       DateTime               @default(now()) @map("created_at")
+  updatedAt       DateTime               @updatedAt @map("updated_at")
+
+  room FocusRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user User      @relation("FocusRoomParticipant", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, userId], name: "room_user_idx")
+  @@index([roomId, status])
+  @@map("focus_room_participants")
+}
+
+model FocusRoomInvitation {
+  id           Int              @id @default(autoincrement())
+  roomId       Int              @map("room_id")
+  inviterId    Int              @map("inviter_id")
+  inviteeId    Int?             @map("invitee_id")
+  inviteeEmail String           @map("invitee_email") @db.VarChar(255)
+  token        String           @unique @db.VarChar(255)
+  status       InvitationStatus @default(PENDING)
+  expiresAt    DateTime         @map("expires_at")
+  respondedAt  DateTime?        @map("responded_at")
+  createdAt    DateTime         @default(now()) @map("created_at")
+  updatedAt    DateTime         @updatedAt @map("updated_at")
+
+  room    FocusRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  inviter User      @relation("FocusRoomInviter", fields: [inviterId], references: [id], onDelete: Cascade)
+  invitee User?     @relation("FocusRoomInvitee", fields: [inviteeId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@index([roomId, status])
+  @@index([inviteeEmail, status])
+  @@map("focus_room_invitations")
+}
+
+model FocusRoomTemplate {
+  id             Int                  @id @default(autoincrement())
+  name           String               @db.VarChar(100)
+  description    String?              @db.Text
+  creatorId      Int                  @map("creator_id")
+  isSystem       Boolean              @default(false) @map("is_system")
+  category       RoomTemplateCategory @default(CUSTOM)
+  focusDuration  Int                  @default(25) @map("focus_duration")
+  breakDuration  Int                  @default(5) @map("break_duration")
+  allowObservers Boolean              @default(true) @map("allow_observers")
+  visibility     FocusRoomVisibility  @default(PUBLIC)
+  settings       Json?                @default("{}")
+  usageCount     Int                  @default(0) @map("usage_count")
+  createdAt      DateTime             @default(now()) @map("created_at")
+  updatedAt      DateTime             @updatedAt @map("updated_at")
+
+  creator User @relation("FocusRoomTemplateCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+
+  @@index([category, isSystem])
+  @@map("focus_room_templates")
+}
+
+enum FocusRoomVisibility {
+  PUBLIC
+  PRIVATE
+}
+
+enum FocusSessionStatus {
+  PENDING
+  ACTIVE
+  PAUSED
+  COMPLETED
+}
+
+enum FocusParticipantRole {
+  CREATOR
+  PARTICIPANT
+}
+
+enum FocusParticipantStatus {
+  JOINED
+  FOCUSING
+  BREAK
+  IDLE
+  LEFT
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  EXPIRED
+}
+
+enum RoomTemplateCategory {
+  DEEP_WORK
+  CREATIVE
+  PLANNING
+  LEARNING
+  CUSTOM
 }

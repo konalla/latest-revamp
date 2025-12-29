@@ -323,8 +323,8 @@ export const createTeam = async (userId: number, name: string, workspaceId?: num
   }
 
   // Create team and add creator as ADMIN
-  return await prisma.$transaction(async (tx) => {
-    const team = await tx.team.create({
+  const team = await prisma.$transaction(async (tx) => {
+    const newTeam = await tx.team.create({
       data: {
         name: name.trim(),
         workspaceId: workspace.id
@@ -335,14 +335,20 @@ export const createTeam = async (userId: number, name: string, workspaceId?: num
     await tx.teamMembership.create({
       data: {
         userId,
-        teamId: team.id,
+        teamId: newTeam.id,
         role: "ADMIN",
         status: "ACTIVE"
       }
     });
 
-    return team;
+    return newTeam;
   });
+
+  // Increment team counter for tracking
+  const { subscriptionService } = await import("./subscription.service.js");
+  await subscriptionService.incrementTeamCount(userId);
+
+  return team;
 };
 
 export const updateTeam = async (userId: number, teamId: number, name: string) => {
