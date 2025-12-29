@@ -1110,3 +1110,4 @@ export class FocusSessionTimerService {
     this.sessionStates.clear();
   }
 }
+

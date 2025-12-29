@@ -87,3 +87,4 @@ export type CreateInvitationInput = z.infer<typeof createInvitationSchema>;
 export type AcceptInvitationInput = z.infer<typeof acceptInvitationSchema>;
 export type CreateTemplateInput = z.infer<typeof createTemplateSchema>;
 export type CreateRoomFromTemplateInput = z.infer<typeof createRoomFromTemplateSchema>;
+

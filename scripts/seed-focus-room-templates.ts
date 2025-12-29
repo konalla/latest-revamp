@@ -98,3 +98,4 @@ seedFocusRoomTemplates()
   .finally(async () => {
     await prisma.$disconnect();
   });
+

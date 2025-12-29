@@ -131,3 +131,4 @@ export function calculateTotalDurationFromTasks(
   
   return filteredTasks.reduce((sum, task) => sum + task.duration, 0);
 }
+

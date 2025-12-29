@@ -151,3 +151,4 @@ const generateHtmlEmail = (
 </html>
   `;
 };
+

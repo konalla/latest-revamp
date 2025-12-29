@@ -163,3 +163,4 @@ router.post("/:roomId/invite", authenticateToken, createInvitation);
 router.get("/:roomId/invitations", authenticateToken, getRoomInvitations);
 
 export default router;
+
