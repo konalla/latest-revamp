@@ -8,6 +8,28 @@ import {
 
 export class ReferralService {
   /**
+   * Check if user has completed their first billing cycle
+   * A user has completed first billing cycle if they have at least 2 successful payments
+   * (first payment after trial + first renewal payment)
+   */
+  async hasCompletedFirstBillingCycle(userId: number): Promise<boolean> {
+    const paymentCount = await prisma.payment.count({
+      where: {
+        subscription: {
+          userId,
+        },
+        status: "succeeded",
+        amount: {
+          gt: 0,
+        },
+      },
+    });
+
+    // User needs at least 2 successful payments to have completed first billing cycle
+    return paymentCount >= 2;
+  }
+
+  /**
    * Generate a unique referral code for a user
    * Format: {userId padded to 4 digits}{6 random hex chars}
    */
@@ -77,6 +99,16 @@ export class ReferralService {
     // Get stats regardless of whether userStatus exists
     const stats = await this.getReferralStats(userId);
 
+    // Get free months information from subscription
+    const subscription = await prisma.subscription.findUnique({
+      where: { userId },
+      select: {
+        freeMonthsRemaining: true,
+      },
+    });
+
+    const freeMonthsRemaining = subscription?.freeMonthsRemaining || 0;
+
     if (!userStatus) {
       return {
         userId,
@@ -87,6 +119,10 @@ export class ReferralService {
         originId: null,
         vanguardId: null,
         stats,
+        freeMonthsRemaining,
+        freeMonthsMessage: freeMonthsRemaining > 0 
+          ? `You have ${freeMonthsRemaining} free month${freeMonthsRemaining > 1 ? 's' : ''} that will be applied at your next billing cycle!`
+          : null,
       };
     }
 
@@ -102,6 +138,10 @@ export class ReferralService {
       originId: userStatus.originId,
       vanguardId: userStatus.vanguardId,
       stats,
+      freeMonthsRemaining,
+      freeMonthsMessage: freeMonthsRemaining > 0 
+        ? `You have ${freeMonthsRemaining} free month${freeMonthsRemaining > 1 ? 's' : ''} that will be applied at your next billing cycle!`
+        : null,
     };
   }
 
@@ -180,6 +220,19 @@ export class ReferralService {
       return {
         success: false,
         message: "You cannot refer yourself",
+      };
+    }
+
+    // Check if referrer is on free plan - free plan users cannot refer
+    const referrerSubscription = await prisma.subscription.findUnique({
+      where: { userId: referrerId },
+      include: { subscriptionPlan: true },
+    });
+
+    if (referrerSubscription?.subscriptionPlan?.name === "free") {
+      return {
+        success: false,
+        message: "Free plan users cannot refer others",
       };
     }
 
@@ -263,6 +316,47 @@ export class ReferralService {
 
     // Check and update referrer's status
     const statusUpdate = await statusAssignmentService.checkAndUpdateUserStatus(referral.referrerId);
+
+    // Award free month to referrer if eligible
+    // Requirements:
+    // 1. Referrer must have completed first billing cycle (at least 2 payments)
+    // 2. Only first 3 referrals count (max 3 free months)
+    // 3. Referrer must be a paid customer (not on free plan)
+    const hasCompletedBillingCycle = await this.hasCompletedFirstBillingCycle(referral.referrerId);
+    
+    if (hasCompletedBillingCycle) {
+      // Count only first 3 completed referrals
+      const completedReferralsCount = await prisma.referral.count({
+        where: {
+          referrerId: referral.referrerId,
+          status: "COMPLETED",
+        },
+      });
+
+      // Only award if this is within the first 3 referrals
+      if (completedReferralsCount <= 3) {
+        // Check if referrer is on free plan - don't award if on free plan
+        const referrerSubscription = await prisma.subscription.findUnique({
+          where: { userId: referral.referrerId },
+          include: { subscriptionPlan: true },
+        });
+
+        if (referrerSubscription && referrerSubscription.subscriptionPlan.name !== "free") {
+          // Award 1 free month (max 3 total)
+          const currentFreeMonths = referrerSubscription.freeMonthsRemaining || 0;
+          const newFreeMonths = Math.min(3, currentFreeMonths + 1);
+
+          await prisma.subscription.update({
+            where: { userId: referral.referrerId },
+            data: {
+              freeMonthsRemaining: newFreeMonths,
+            },
+          });
+
+          console.log(`[Referral] Awarded 1 free month to referrer ${referral.referrerId}. Total free months: ${newFreeMonths}`);
+        }
+      }
+    }
 
     return {
       success: true,

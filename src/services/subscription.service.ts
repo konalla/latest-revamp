@@ -47,7 +47,7 @@ export class SubscriptionService {
 
       const now = new Date();
       const trialEnd = new Date(now);
-      trialEnd.setDate(trialEnd.getDate() + 7); // 7 days trial
+      trialEnd.setDate(trialEnd.getDate() + 14); // 14 days trial
 
       // Use upsert to handle race conditions gracefully
       const subscription = await prisma.subscription.upsert({
@@ -325,7 +325,7 @@ export class SubscriptionService {
 
       // Check if subscription is canceled but still within billing period
       // In this case, user should use resume endpoint instead of creating new checkout
-      // Exception: All paid plans now get 7-day trial, so allow switching
+      // Exception: All paid plans now get 14-day trial, so allow switching
       // Note: planName type doesn't include "trial", so this check is always true for valid plan names
       const isPaidPlan = true; // All valid planName values are paid plans
       const hasClarityPlan = subscription && subscription.subscriptionPlan.name === "trial";
@@ -340,7 +340,7 @@ export class SubscriptionService {
       }
 
       // If user has an existing active paid subscription and is switching to a new paid plan,
-      // cancel the old subscription immediately (all paid plans get 7-day trial)
+      // cancel the old subscription immediately (all paid plans get 14-day trial)
       if (subscription && !hasClarityPlan && isPaidPlan && subscription.status === "ACTIVE" && subscription.stripeSubscriptionId) {
         try {
           // Cancel the old Stripe subscription immediately
@@ -427,7 +427,7 @@ export class SubscriptionService {
       }
 
       // Create checkout session
-      // All paid plans now get 7-day trial in Stripe
+      // All paid plans now get 14-day trial in Stripe
       const subscriptionData: any = {
         metadata: {
           userId: userId.toString(),
@@ -436,9 +436,9 @@ export class SubscriptionService {
         },
       };
       
-      // Set 7-day trial for all paid plans (not the "trial" plan itself)
+      // Set 14-day trial for all paid plans (not the "trial" plan itself)
       // Note: planName type doesn't include "trial", so this is always true for valid plan names
-      subscriptionData.trial_period_days = 7;
+      subscriptionData.trial_period_days = 14;
 
       const session = await stripe.checkout.sessions.create({
         customer: stripeCustomerId,
@@ -1334,7 +1334,7 @@ export class SubscriptionService {
         throw new Error("Clarity Plan subscriptions cannot be canceled. Please choose a paid subscription plan.");
       }
 
-      // Check if we're in 7-day trial period (all paid plans now have 7-day trial)
+      // Check if we're in 14-day trial period (all paid plans now have 14-day trial)
       const isInTrialPeriod = subscription.trialEnd && new Date() < subscription.trialEnd;
       const isPaidPlan = subscription.subscriptionPlan.name !== "trial";
 
@@ -1696,32 +1696,32 @@ export class SubscriptionService {
       const validPeriodStart = periodStart && !isNaN(periodStart.getTime()) ? periodStart : now;
       const validPeriodEnd = periodEnd && !isNaN(periodEnd.getTime()) ? periodEnd : null;
 
-      // All paid plans now get 7-day trial
+      // All paid plans now get 14-day trial
       const isPaidPlan = targetPlan.name !== "trial";
-      const has7DayTrial = isPaidPlan && targetPlan.trialDays === 7;
+      const has14DayTrial = isPaidPlan && targetPlan.trialDays === 14;
       
-      // Set trial dates for all paid plans with 7-day trial
-      const trialStartDate = has7DayTrial ? now : (subscription.status === "TRIAL" ? subscription.trialStart : null);
-      const trialEndDate = has7DayTrial ? (() => {
+      // Set trial dates for all paid plans with 14-day trial
+      const trialStartDate = has14DayTrial ? now : (subscription.status === "TRIAL" ? subscription.trialStart : null);
+      const trialEndDate = has14DayTrial ? (() => {
         const endDate = new Date(now);
-        endDate.setDate(endDate.getDate() + 7);
+        endDate.setDate(endDate.getDate() + 14);
         return endDate;
       })() : null;
 
-      // Status is TRIAL during 7-day trial period, will be updated to ACTIVE after first payment
-      const subscriptionStatus = has7DayTrial ? "TRIAL" : "ACTIVE";
+      // Status is TRIAL during 14-day trial period, will be updated to ACTIVE after first payment
+      const subscriptionStatus = has14DayTrial ? "TRIAL" : "ACTIVE";
 
       await prisma.subscription.update({
         where: { id: subscription.id },
         data: {
           subscriptionPlanId: targetPlan.id,
-          status: subscriptionStatus, // TRIAL during 7-day trial, ACTIVE after payment
+          status: subscriptionStatus, // TRIAL during 14-day trial, ACTIVE after payment
           stripeSubscriptionId: stripeSubscriptionId,
           stripeCustomerId: stripeSubscription.customer as string,
           currentPeriodStart: validPeriodStart,
           currentPeriodEnd: validPeriodEnd,
           trialStart: trialStartDate,
-          trialEnd: trialEndDate, // 7 days from now for all paid plans
+          trialEnd: trialEndDate, // 14 days from now for all paid plans
           tasksCreatedThisPeriod: 0, // Reset task count
           lastTaskCountReset: validPeriodStart,
           cancelAtPeriodEnd: false,
@@ -1752,7 +1752,7 @@ export class SubscriptionService {
         },
       });
 
-      // Check if we're in the 7-day trial period - if so, don't create payment record yet
+      // Check if we're in the 14-day trial period - if so, don't create payment record yet
       // The first charge will happen after the trial ends
       const updatedSubscription = await prisma.subscription.findUnique({
         where: { id: subscription.id },
@@ -1905,6 +1905,7 @@ export class SubscriptionService {
 
       const subscription = await prisma.subscription.findUnique({
         where: { stripeSubscriptionId: subscriptionId },
+        include: { subscriptionPlan: true },
       });
 
       if (!subscription) {
@@ -1915,26 +1916,69 @@ export class SubscriptionService {
       const periodStart = (invoice as any).period_start
         ? new Date((invoice as any).period_start * 1000)
         : null;
-      const periodEnd = (invoice as any).period_end
+      let periodEnd = (invoice as any).period_end
         ? new Date((invoice as any).period_end * 1000)
         : null;
 
       // Validate dates before using
       const validPeriodStart = periodStart && !isNaN(periodStart.getTime()) ? periodStart : null;
-      const validPeriodEnd = periodEnd && !isNaN(periodEnd.getTime()) ? periodEnd : null;
+      let validPeriodEnd = periodEnd && !isNaN(periodEnd.getTime()) ? periodEnd : null;
+
+      // Apply free months if available (at next billing cycle)
+      let freeMonthsRemaining = subscription.freeMonthsRemaining || 0;
+      if (freeMonthsRemaining > 0 && validPeriodEnd) {
+        // Extend period end by 1 month (or appropriate period based on billing interval)
+        const extendedPeriodEnd = new Date(validPeriodEnd);
+        
+        if (subscription.subscriptionPlan.billingInterval === "yearly") {
+          // For yearly plans, extend by 1 month (pro-rated)
+          extendedPeriodEnd.setMonth(extendedPeriodEnd.getMonth() + 1);
+        } else {
+          // For monthly plans, extend by 1 month
+          extendedPeriodEnd.setMonth(extendedPeriodEnd.getMonth() + 1);
+        }
+        
+        validPeriodEnd = extendedPeriodEnd;
+        freeMonthsRemaining = freeMonthsRemaining - 1;
+        
+        console.log(`[Referral] Applied 1 free month to subscription ${subscription.id}. Remaining free months: ${freeMonthsRemaining}`);
+      }
+
+      // Check if this is a new billing period (auto-renewal)
+      // If period start has changed, reset all counters for the new period
+      const isNewBillingPeriod = validPeriodStart && subscription.currentPeriodStart && 
+        validPeriodStart.getTime() !== subscription.currentPeriodStart.getTime();
+      
+      const now = new Date();
+      const updateData: any = {
+        status: "ACTIVE",
+        currentPeriodStart: validPeriodStart,
+        currentPeriodEnd: validPeriodEnd,
+        freeMonthsRemaining: freeMonthsRemaining,
+        // Reset payment retry tracking on successful payment
+        paymentRetryCount: 0,
+        lastPaymentRetryAt: null,
+        paymentFailureReason: null,
+      };
+
+      // Reset all counters if this is a new billing period (auto-renewal)
+      if (isNewBillingPeriod) {
+        updateData.tasksCreatedThisPeriod = 0;
+        updateData.projectsCreatedThisPeriod = 0;
+        updateData.objectivesCreatedThisPeriod = 0;
+        updateData.keyResultsCreatedThisPeriod = 0;
+        updateData.workspacesCreatedThisPeriod = 0;
+        updateData.teamsCreatedThisPeriod = 0;
+        updateData.lastTaskCountReset = validPeriodStart || now;
+        updateData.lastCountReset = validPeriodStart || now;
+        
+        console.log(`[Auto-Renewal] Reset all counters for subscription ${subscription.id} - new billing period started`);
+      }
 
       // Update subscription status to active and reset retry tracking
       await prisma.subscription.update({
         where: { id: subscription.id },
-        data: {
-          status: "ACTIVE",
-          currentPeriodStart: validPeriodStart,
-          currentPeriodEnd: validPeriodEnd,
-          // Reset payment retry tracking on successful payment
-          paymentRetryCount: 0,
-          lastPaymentRetryAt: null,
-          paymentFailureReason: null,
-        },
+        data: updateData,
       });
 
       // Create payment record

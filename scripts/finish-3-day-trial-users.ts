@@ -75,7 +75,7 @@ async function finish3DayTrialUsers() {
 
     if (updated > 0) {
       console.log("\n💡 Note: These users will need to subscribe to a paid plan to continue using the service.");
-      console.log("   All paid plans now have a 7-day trial period.");
+      console.log("   All paid plans now have a 14-day trial period.");
     }
   } catch (error) {
     console.error("❌ Error finishing 3-day trial users:", error);

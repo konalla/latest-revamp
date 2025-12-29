@@ -41,7 +41,9 @@ export class StatusAssignmentService {
     const seats = await this.calculateSeatsRemaining();
 
     // Check Vanguard eligibility first (can upgrade from ORIGIN to VANGUARD)
-    if (completedReferrals >= 3 && seats.vanguardRemaining > 0) {
+    // User must have: 3+ referrals, seats available, AND paid at least once after trial
+    const hasPaidAfterTrial = await this.hasPaidAfterTrial(userId);
+    if (completedReferrals >= 3 && seats.vanguardRemaining > 0 && hasPaidAfterTrial) {
       // If already VANGUARD, no update needed
       if (currentStatus === "VANGUARD") {
         return {
@@ -211,6 +213,50 @@ export class StatusAssignmentService {
         };
       }
 
+      // Check if user has paid at least once after trial period
+      const subscription = await tx.subscription.findUnique({
+        where: { userId },
+        include: {
+          payments: {
+            where: {
+              status: "succeeded",
+              amount: {
+                gt: 0,
+              },
+            },
+            orderBy: {
+              createdAt: "asc",
+            },
+          },
+        },
+      });
+
+      if (!subscription) {
+        return {
+          success: false,
+          message: "User does not have a subscription",
+        };
+      }
+
+      // Check if user has paid after trial period
+      let hasPaidAfterTrial = false;
+      if (!subscription.trialEnd) {
+        // No trial period - any successful payment counts
+        hasPaidAfterTrial = subscription.payments.length > 0;
+      } else {
+        // Has trial period - check if there's at least one payment after trialEnd
+        hasPaidAfterTrial = subscription.payments.some(
+          (payment) => payment.createdAt > subscription.trialEnd!
+        );
+      }
+
+      if (!hasPaidAfterTrial) {
+        return {
+          success: false,
+          message: "User must have paid at least once after their trial period to earn Vanguard badge",
+        };
+      }
+
       // Check current Vanguard seat count with lock
       const vanguardCount = await tx.userReferralStatus.count({
         where: {
@@ -341,6 +387,46 @@ export class StatusAssignmentService {
     });
 
     return !!payment;
+  }
+
+  /**
+   * Check if user has paid at least once after their trial period
+   * A user can only earn Vanguard badge if they have paid at least once after trial
+   */
+  async hasPaidAfterTrial(userId: number): Promise<boolean> {
+    // Get user's subscription
+    const subscription = await prisma.subscription.findUnique({
+      where: { userId },
+      include: {
+        payments: {
+          where: {
+            status: "succeeded",
+            amount: {
+              gt: 0,
+            },
+          },
+          orderBy: {
+            createdAt: "asc",
+          },
+        },
+      },
+    });
+
+    if (!subscription) {
+      return false;
+    }
+
+    // If user has no trial period (trialEnd is null), any successful payment counts
+    if (!subscription.trialEnd) {
+      return subscription.payments.length > 0;
+    }
+
+    // If user has a trial period, check if there's at least one payment after trialEnd
+    const paymentAfterTrial = subscription.payments.find(
+      (payment) => payment.createdAt > subscription.trialEnd!
+    );
+
+    return !!paymentAfterTrial;
   }
 }
 
