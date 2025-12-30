@@ -12,7 +12,10 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "seed:focus-templates": "tsx scripts/seed-focus-room-templates.ts"
+    "seed:focus-templates": "tsx scripts/seed-focus-room-templates.ts",
+    "seed:referral-programs": "tsx scripts/seed-referral-programs.ts",
+    "seed:subscriptions": "tsx scripts/seed-subscriptions.ts",
+    "seed:all": "npm run seed:subscriptions && npm run seed:referral-programs && npm run seed:focus-templates"
   },
   "keywords": [],
   "author": "",
@@ -42,6 +45,8 @@
     "@types/socket.io": "^3.0.1",
     "bcrypt": "^6.0.0",
     "cors": "^2.8.5",
+    "date-fns": "^4.1.0",
+    "date-fns-tz": "^3.2.0",
     "dotenv": "^17.2.2",
     "express": "^5.1.0",
     "jsonwebtoken": "^9.0.2",

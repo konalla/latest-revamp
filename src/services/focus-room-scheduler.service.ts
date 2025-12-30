@@ -2,6 +2,8 @@ import * as cron from "node-cron";
 import prisma from "../config/prisma.js";
 import { focusRoomSessionService } from "./focus-room-session.service.js";
 import { FocusRoomWebSocketService } from "./focus-room-websocket.service.js";
+import userStatusService from "./user-status.service.js";
+import { recurringScheduleService } from "./recurring-schedule.service.js";
 
 export class FocusRoomSchedulerService {
   private cronJob: cron.ScheduledTask | null = null;
@@ -52,7 +54,7 @@ export class FocusRoomSchedulerService {
     try {
       const now = new Date();
 
-      // Find rooms with scheduled sessions that should start now
+      // 1. Check one-time scheduled sessions (existing logic)
       const scheduledRooms = await prisma.focusRoom.findMany({
         where: {
           status: "scheduled",
@@ -70,24 +72,61 @@ export class FocusRoomSchedulerService {
         },
       });
 
-      if (scheduledRooms.length === 0) {
-        return;
+      if (scheduledRooms.length > 0) {
+        console.log(`[Scheduler] Found ${scheduledRooms.length} one-time scheduled session(s) to start`);
+
+        for (const room of scheduledRooms) {
+          // Skip if room already has an active session
+          if (room.sessions.length > 0) {
+            console.log(`[Scheduler] Room ${room.id} already has an active session, skipping scheduled start`);
+            continue;
+          }
+
+          try {
+            await this.startScheduledSession(room.id);
+          } catch (error: any) {
+            console.error(`[Scheduler] Error starting scheduled session for room ${room.id}:`, error.message);
+            // Continue with other rooms even if one fails
+          }
+        }
       }
 
-      console.log(`[Scheduler] Found ${scheduledRooms.length} scheduled session(s) to start`);
+      // 2. Check recurring schedules
+      const recurringSchedules = await recurringScheduleService.getSchedulesToProcess(now);
 
-      for (const room of scheduledRooms) {
-        // Skip if room already has an active session
-        if (room.sessions.length > 0) {
-          console.log(`[Scheduler] Room ${room.id} already has an active session, skipping scheduled start`);
-          continue;
-        }
+      if (recurringSchedules.length > 0) {
+        console.log(`[Scheduler] Found ${recurringSchedules.length} recurring schedule(s) to process`);
 
-        try {
-          await this.startScheduledSession(room.id);
-        } catch (error: any) {
-          console.error(`[Scheduler] Error starting scheduled session for room ${room.id}:`, error.message);
-          // Continue with other rooms even if one fails
+        for (const schedule of recurringSchedules) {
+          try {
+            // Check if room has active session
+            const activeSession = await prisma.focusRoomSession.findFirst({
+              where: {
+                roomId: schedule.roomId,
+                status: { in: ["ACTIVE", "PAUSED"] },
+              },
+            });
+
+            if (activeSession) {
+              // Skip this occurrence - log it
+              console.log(
+                `[Scheduler] Skipping recurring session for room ${schedule.roomId} - active session exists`
+              );
+
+              // Mark occurrence as skipped
+              await this.markOccurrenceSkipped(schedule.id, schedule.scheduledTime, "ACTIVE_SESSION_EXISTS");
+              continue;
+            }
+
+            // Create session for this occurrence
+            await this.startRecurringSession(schedule.roomId, schedule.id, schedule.scheduledTime);
+          } catch (error: any) {
+            console.error(
+              `[Scheduler] Error processing recurring schedule ${schedule.id} for room ${schedule.roomId}:`,
+              error.message
+            );
+            // Continue with other schedules even if one fails
+          }
         }
       }
     } catch (error) {
@@ -150,6 +189,35 @@ export class FocusRoomSchedulerService {
       return newSession;
     });
 
+    // Update all participants' user status to online
+    try {
+      const participants = await prisma.focusRoomParticipant.findMany({
+        where: {
+          roomId,
+          status: { not: "LEFT" },
+        },
+        select: {
+          userId: true,
+        },
+      });
+
+      // Update each participant's user status to online
+      await Promise.all(
+        participants.map((participant) =>
+          userStatusService.updateUserStatus(participant.userId, true).catch((error) => {
+            console.error(
+              `[Scheduler] Error updating user status for participant ${participant.userId}:`,
+              error
+            );
+            // Don't throw - continue with other participants
+          })
+        )
+      );
+    } catch (error) {
+      console.error("[Scheduler] Error updating participants' user status after starting session:", error);
+      // Don't throw error - session creation should still succeed
+    }
+
     // Get timer for WebSocket broadcast
     const timer = await focusRoomSessionService.getSessionTimer(session.id);
 
@@ -161,6 +229,157 @@ export class FocusRoomSchedulerService {
     console.log(`[Scheduler] ✅ Successfully started scheduled session ${session.id} for room ${roomId}`);
 
     return session;
+  }
+
+  /**
+   * Start a recurring session for a room
+   */
+  private async startRecurringSession(roomId: number, scheduleId: number, scheduledTime: Date) {
+    console.log(`[Scheduler] Starting recurring session for room ${roomId} at ${scheduledTime.toISOString()}`);
+
+    // Get room details
+    const room = await prisma.focusRoom.findUnique({
+      where: { id: roomId },
+    });
+
+    if (!room) {
+      throw new Error(`Room ${roomId} not found`);
+    }
+
+    // Use room's focusDuration for the session
+    const durationMinutes = room.focusDuration;
+    const scheduledDuration = durationMinutes * 60; // Convert to seconds
+
+    // Start the session and create occurrence record in transaction
+    const session = await prisma.$transaction(async (tx) => {
+      // Create session
+      const newSession = await tx.focusRoomSession.create({
+        data: {
+          roomId,
+          startedAt: new Date(),
+          scheduledDuration,
+          status: "ACTIVE",
+        },
+      });
+
+      // Create or update occurrence record
+      const occurrence = await tx.recurringSessionOccurrence.upsert({
+        where: {
+          recurringScheduleId_scheduledTime: {
+            recurringScheduleId: scheduleId,
+            scheduledTime,
+          },
+        },
+        create: {
+          recurringScheduleId: scheduleId,
+          scheduledTime,
+          sessionId: newSession.id,
+          status: "CREATED",
+        },
+        update: {
+          sessionId: newSession.id,
+          status: "CREATED",
+          skipReason: null,
+        },
+      });
+
+      // Update all participants to "FOCUSING" status
+      await tx.focusRoomParticipant.updateMany({
+        where: {
+          roomId,
+          status: { not: "LEFT" },
+        },
+        data: {
+          status: "FOCUSING",
+        },
+      });
+
+      // Update room status to "active" (don't clear scheduledStartTime for recurring)
+      // Room stays active for next recurring session
+      await tx.focusRoom.update({
+        where: { id: roomId },
+        data: {
+          status: "active",
+          // Keep scheduledStartTime as null (recurring schedules don't use it)
+        },
+      });
+
+      return newSession;
+    });
+
+    // Update all participants' user status to online
+    try {
+      const participants = await prisma.focusRoomParticipant.findMany({
+        where: {
+          roomId,
+          status: { not: "LEFT" },
+        },
+        select: {
+          userId: true,
+        },
+      });
+
+      // Update each participant's user status to online
+      await Promise.all(
+        participants.map((participant) =>
+          userStatusService.updateUserStatus(participant.userId, true).catch((error) => {
+            console.error(
+              `[Scheduler] Error updating user status for participant ${participant.userId}:`,
+              error
+            );
+            // Don't throw - continue with other participants
+          })
+        )
+      );
+    } catch (error) {
+      console.error("[Scheduler] Error updating participants' user status after starting session:", error);
+      // Don't throw error - session creation should still succeed
+    }
+
+    // Get timer for WebSocket broadcast
+    const timer = await focusRoomSessionService.getSessionTimer(session.id);
+
+    // Broadcast session started event via WebSocket
+    if (this.wsService) {
+      this.wsService.broadcastSessionStarted(roomId, session, timer);
+    }
+
+    console.log(`[Scheduler] ✅ Successfully started recurring session ${session.id} for room ${roomId}`);
+
+    return session;
+  }
+
+  /**
+   * Mark an occurrence as skipped
+   */
+  private async markOccurrenceSkipped(
+    scheduleId: number,
+    scheduledTime: Date,
+    reason: string
+  ) {
+    try {
+      await prisma.recurringSessionOccurrence.upsert({
+        where: {
+          recurringScheduleId_scheduledTime: {
+            recurringScheduleId: scheduleId,
+            scheduledTime,
+          },
+        },
+        create: {
+          recurringScheduleId: scheduleId,
+          scheduledTime,
+          status: "SKIPPED",
+          skipReason: reason,
+        },
+        update: {
+          status: "SKIPPED",
+          skipReason: reason,
+        },
+      });
+    } catch (error) {
+      console.error(`[Scheduler] Error marking occurrence as skipped:`, error);
+      // Don't throw - this is not critical
+    }
   }
 
   /**
@@ -215,4 +434,5 @@ export class FocusRoomSchedulerService {
 
 // Export singleton instance
 export const focusRoomSchedulerService = new FocusRoomSchedulerService();
+
 

@@ -16,7 +16,11 @@ import {
   acceptInvitationSchema,
   createTemplateSchema,
   createRoomFromTemplateSchema,
+  scheduleSessionSchema,
+  updateRecurringScheduleSchema,
+  cancelRecurringScheduleSchema,
 } from "../types/focus-room.types.js";
+import { recurringScheduleService } from "../services/recurring-schedule.service.js";
 
 // Room Management
 export const createRoom = async (req: Request, res: Response): Promise<void> => {
@@ -143,6 +147,60 @@ export const getMyRooms = async (req: Request, res: Response): Promise<void> => 
   }
 };
 
+export const getCompletedSessionRooms = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ success: false, error: "Unauthorized" });
+      return;
+    }
+
+    const rooms = await focusRoomService.getCompletedSessionRooms(userId);
+
+    res.json({
+      success: true,
+      rooms: rooms.map((room) => ({
+        id: room.id,
+        name: room.name,
+        description: room.description,
+        visibility: room.visibility,
+        focusDuration: room.focusDuration,
+        breakDuration: room.breakDuration,
+        status: room.status,
+        createdAt: room.createdAt,
+        updatedAt: room.updatedAt,
+        creator: room.creator,
+        session: room.sessions[0] ? {
+          id: room.sessions[0].id,
+          startedAt: room.sessions[0].startedAt,
+          endedAt: room.sessions[0].endedAt,
+          scheduledDuration: room.sessions[0].scheduledDuration,
+          actualDuration: room.sessions[0].actualDuration,
+          status: room.sessions[0].status,
+        } : null,
+        participants: room.participants.map((participant) => ({
+          id: participant.id,
+          userId: participant.userId,
+          role: participant.role,
+          status: participant.status,
+          intention: participant.intention,
+          completion: participant.completion,
+          shareCompletion: participant.shareCompletion,
+          joinedAt: participant.joinedAt,
+          leftAt: participant.leftAt,
+          user: participant.user,
+        })),
+      })),
+    });
+  } catch (error: any) {
+    console.error("Error fetching completed session rooms:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to fetch completed session rooms",
+    });
+  }
+};
+
 export const getRoomById = async (req: Request, res: Response): Promise<void> => {
   try {
     const roomIdParam = req.params.roomId;
@@ -186,7 +244,7 @@ export const getRoomById = async (req: Request, res: Response): Promise<void> =>
       sessionTimer = await focusRoomSessionService.getSessionTimer(activeSession.id);
     }
 
-    // Calculate time until scheduled session if scheduled
+    // Calculate time until scheduled session if scheduled (one-time)
     let scheduledSessionInfo = null;
     if (result.room.scheduledStartTime && result.room.status === "scheduled") {
       const now = new Date();
@@ -200,6 +258,27 @@ export const getRoomById = async (req: Request, res: Response): Promise<void> =>
           isScheduled: true,
         };
       }
+    }
+
+    // Get recurring schedule if exists
+    let recurringScheduleInfo = null;
+    const recurringSchedule = await recurringScheduleService.getRecurringSchedule(roomId);
+    if (recurringSchedule && recurringSchedule.isActive) {
+      const nextOccurrences = await recurringScheduleService.getNextOccurrences(
+        recurringSchedule.id,
+        1
+      );
+
+      recurringScheduleInfo = {
+        id: recurringSchedule.id,
+        type: recurringSchedule.recurrenceType,
+        daysOfWeek: recurringSchedule.daysOfWeek,
+        time: recurringSchedule.time,
+        timezone: recurringSchedule.timezone,
+        startDate: recurringSchedule.startDate,
+        isActive: recurringSchedule.isActive,
+        nextOccurrence: nextOccurrences[0]?.scheduledTime || null,
+      };
     }
 
     res.json({
@@ -222,6 +301,7 @@ export const getRoomById = async (req: Request, res: Response): Promise<void> =>
         isParticipant: result.isParticipant,
         activeSession: sessionTimer,
         scheduledSession: scheduledSessionInfo,
+        recurringSchedule: recurringScheduleInfo,
       },
     });
   } catch (error: any) {
@@ -439,8 +519,14 @@ export const resumeSession = async (req: Request, res: Response): Promise<void> 
       return;
     }
 
-    const roomId = parseInt(req.params.roomId);
-    const sessionId = parseInt(req.params.sessionId);
+    const roomIdParam = req.params.roomId;
+    const sessionIdParam = req.params.sessionId;
+    if (!roomIdParam || !sessionIdParam) {
+      res.status(400).json({ success: false, error: "Room ID and Session ID are required" });
+      return;
+    }
+    const roomId = parseInt(roomIdParam);
+    const sessionId = parseInt(sessionIdParam);
 
     if (isNaN(roomId) || isNaN(sessionId)) {
       res.status(400).json({ success: false, error: "Invalid room or session ID" });
@@ -696,7 +782,12 @@ export const updateIntention = async (req: Request, res: Response): Promise<void
       return;
     }
 
-    const roomId = parseInt(req.params.roomId);
+    const roomIdParam = req.params.roomId;
+    if (!roomIdParam) {
+      res.status(400).json({ success: false, error: "Room ID is required" });
+      return;
+    }
+    const roomId = parseInt(roomIdParam);
     if (isNaN(roomId)) {
       res.status(400).json({ success: false, error: "Invalid room ID" });
       return;
@@ -1381,8 +1472,58 @@ export const scheduleSession = async (req: Request, res: Response): Promise<void
       return;
     }
 
-    const { scheduledStartTime } = req.body;
+    // Validate request body
+    const validatedData = scheduleSessionSchema.parse(req.body);
+    const { scheduledStartTime, recurring } = validatedData;
 
+    // Handle recurring schedule
+    if (recurring) {
+      // If there's an existing one-time schedule, clear it
+      await focusRoomService.updateRoom(roomId, userId, {
+        scheduledStartTime: null,
+      });
+
+      // Create or update recurring schedule
+      const schedule = await recurringScheduleService.createOrUpdateRecurringSchedule(
+        roomId,
+        userId,
+        recurring
+      );
+
+      // Update room status to "scheduled"
+      const room = await focusRoomService.updateRoom(roomId, userId, {
+        status: "scheduled",
+      });
+
+      // Calculate next occurrence
+      const nextOccurrences = await recurringScheduleService.getNextOccurrences(
+        schedule.id,
+        1
+      );
+
+      res.json({
+        success: true,
+        message: "Recurring session scheduled successfully",
+        room: {
+          id: room.id,
+          scheduledStartTime: null,
+          recurringSchedule: {
+            id: schedule.id,
+            type: schedule.recurrenceType,
+            daysOfWeek: schedule.daysOfWeek,
+            time: schedule.time,
+            timezone: schedule.timezone,
+            startDate: schedule.startDate,
+            isActive: schedule.isActive,
+            nextOccurrence: nextOccurrences[0]?.scheduledTime || null,
+          },
+          status: room.status,
+        },
+      });
+      return;
+    }
+
+    // Handle one-time schedule (existing logic)
     if (!scheduledStartTime) {
       res.status(400).json({ success: false, error: "Scheduled start time is required" });
       return;
@@ -1393,6 +1534,12 @@ export const scheduleSession = async (req: Request, res: Response): Promise<void
     if (isNaN(scheduledTime.getTime())) {
       res.status(400).json({ success: false, error: "Invalid date format" });
       return;
+    }
+
+    // If there's an existing recurring schedule, deactivate it
+    const existingRecurring = await recurringScheduleService.getRecurringSchedule(roomId);
+    if (existingRecurring) {
+      await recurringScheduleService.deactivateRecurringSchedule(roomId, userId);
     }
 
     // Update room with scheduled time
@@ -1406,10 +1553,19 @@ export const scheduleSession = async (req: Request, res: Response): Promise<void
       room: {
         id: room.id,
         scheduledStartTime: room.scheduledStartTime,
+        recurringSchedule: null,
         status: room.status,
       },
     });
   } catch (error: any) {
+    if (error.name === "ZodError") {
+      res.status(400).json({
+        success: false,
+        error: "Validation error",
+        details: error.errors,
+      });
+      return;
+    }
     console.error("Error scheduling session:", error);
     res.status(500).json({
       success: false,
@@ -1437,18 +1593,30 @@ export const cancelScheduledSession = async (req: Request, res: Response): Promi
       return;
     }
 
-    // Cancel scheduled session by setting scheduledStartTime to null
-    const room = await focusRoomService.updateRoom(roomId, userId, {
-      scheduledStartTime: null,
-    });
+    // Check if room has recurring schedule
+    const recurringSchedule = await recurringScheduleService.getRecurringSchedule(roomId);
+
+    if (recurringSchedule) {
+      // Deactivate recurring schedule
+      await recurringScheduleService.deactivateRecurringSchedule(roomId, userId);
+    } else {
+      // Cancel one-time scheduled session by setting scheduledStartTime to null
+      await focusRoomService.updateRoom(roomId, userId, {
+        scheduledStartTime: null,
+      });
+    }
+
+    const room = await focusRoomService.getRoomById(roomId, userId);
 
     res.json({
       success: true,
-      message: "Scheduled session cancelled successfully",
+      message: recurringSchedule
+        ? "Recurring schedule cancelled successfully"
+        : "Scheduled session cancelled successfully",
       room: {
-        id: room.id,
-        scheduledStartTime: null,
-        status: room.status,
+        id: room?.room?.id,
+        scheduledStartTime: room?.room?.scheduledStartTime || null,
+        status: room?.room?.status,
       },
     });
   } catch (error: any) {
@@ -1459,4 +1627,240 @@ export const cancelScheduledSession = async (req: Request, res: Response): Promi
     });
   }
 };
+
+// Recurring Schedule Management
+export const updateRecurringSchedule = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id ?? req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ success: false, error: "Unauthorized" });
+      return;
+    }
+
+    const roomIdParam = req.params.roomId;
+    if (!roomIdParam) {
+      res.status(400).json({ success: false, error: "Room ID is required" });
+      return;
+    }
+    const roomId = parseInt(roomIdParam);
+    if (isNaN(roomId)) {
+      res.status(400).json({ success: false, error: "Invalid room ID" });
+      return;
+    }
+
+    const validatedData = updateRecurringScheduleSchema.parse(req.body);
+
+    const schedule = await recurringScheduleService.updateRecurringSchedule(
+      roomId,
+      userId,
+      validatedData
+    );
+
+    // Calculate next occurrence
+    const nextOccurrences = await recurringScheduleService.getNextOccurrences(
+      schedule.id,
+      1
+    );
+
+    res.json({
+      success: true,
+      message: "Recurring schedule updated successfully",
+      recurringSchedule: {
+        id: schedule.id,
+        type: schedule.recurrenceType,
+        daysOfWeek: schedule.daysOfWeek,
+        time: schedule.time,
+        timezone: schedule.timezone,
+        startDate: schedule.startDate,
+        isActive: schedule.isActive,
+        nextOccurrence: nextOccurrences[0]?.scheduledTime || null,
+      },
+    });
+  } catch (error: any) {
+    if (error.name === "ZodError") {
+      res.status(400).json({
+        success: false,
+        error: "Validation error",
+        details: error.errors,
+      });
+      return;
+    }
+    console.error("Error updating recurring schedule:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message || "Failed to update recurring schedule",
+    });
+  }
+};
+
+export const cancelRecurringSchedule = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id ?? req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ success: false, error: "Unauthorized" });
+      return;
+    }
+
+    const roomIdParam = req.params.roomId;
+    if (!roomIdParam) {
+      res.status(400).json({ success: false, error: "Room ID is required" });
+      return;
+    }
+    const roomId = parseInt(roomIdParam);
+    if (isNaN(roomId)) {
+      res.status(400).json({ success: false, error: "Invalid room ID" });
+      return;
+    }
+
+    const validatedData = cancelRecurringScheduleSchema.parse(req.body);
+    const { cancelOccurrence } = validatedData;
+
+    if (cancelOccurrence) {
+      // Cancel specific occurrence
+      const scheduledTime = new Date(cancelOccurrence);
+      if (isNaN(scheduledTime.getTime())) {
+        res.status(400).json({ success: false, error: "Invalid cancelOccurrence date format" });
+        return;
+      }
+
+      await recurringScheduleService.cancelOccurrence(roomId, scheduledTime, userId);
+
+      res.json({
+        success: true,
+        message: "Occurrence cancelled successfully",
+      });
+    } else {
+      // Deactivate entire recurring schedule
+      await recurringScheduleService.deactivateRecurringSchedule(roomId, userId);
+
+      res.json({
+        success: true,
+        message: "Recurring schedule cancelled successfully",
+      });
+    }
+  } catch (error: any) {
+    if (error.name === "ZodError") {
+      res.status(400).json({
+        success: false,
+        error: "Validation error",
+        details: error.errors,
+      });
+      return;
+    }
+    console.error("Error cancelling recurring schedule:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message || "Failed to cancel recurring schedule",
+    });
+  }
+};
+
+export const getUpcomingOccurrences = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id ?? req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ success: false, error: "Unauthorized" });
+      return;
+    }
+
+    const roomIdParam = req.params.roomId;
+    if (!roomIdParam) {
+      res.status(400).json({ success: false, error: "Room ID is required" });
+      return;
+    }
+    const roomId = parseInt(roomIdParam);
+    if (isNaN(roomId)) {
+      res.status(400).json({ success: false, error: "Invalid room ID" });
+      return;
+    }
+
+    const limit = parseInt(req.query.limit as string) || 10;
+    const maxLimit = 50;
+    const safeLimit = Math.min(limit, maxLimit);
+
+    const schedule = await recurringScheduleService.getRecurringSchedule(roomId);
+
+    if (!schedule) {
+      res.status(404).json({ success: false, error: "Recurring schedule not found" });
+      return;
+    }
+
+    const occurrences = await recurringScheduleService.getNextOccurrences(
+      schedule.id,
+      safeLimit
+    );
+
+    res.json({
+      success: true,
+      occurrences: occurrences.map((occ) => ({
+        scheduledTime: occ.scheduledTime.toISOString(),
+        status: occ.status,
+        sessionId: occ.sessionId,
+      })),
+    });
+  } catch (error: any) {
+    console.error("Error getting upcoming occurrences:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message || "Failed to get upcoming occurrences",
+    });
+  }
+};
+
+export const getRoomSessionHistory = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id ?? req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ success: false, error: "Unauthorized" });
+      return;
+    }
+
+    const roomIdParam = req.params.roomId;
+    if (!roomIdParam) {
+      res.status(400).json({ success: false, error: "Room ID is required" });
+      return;
+    }
+    const roomId = parseInt(roomIdParam);
+    if (isNaN(roomId)) {
+      res.status(400).json({ success: false, error: "Invalid room ID" });
+      return;
+    }
+
+    // Verify user has access to room
+    const roomAccess = await focusRoomService.getRoomById(roomId, userId);
+    if (!roomAccess || !roomAccess.hasAccess) {
+      res.status(403).json({
+        success: false,
+        error: "You do not have permission to view this room's history",
+      });
+      return;
+    }
+
+    const limit = parseInt(req.query.limit as string) || 20;
+    const maxLimit = 100;
+    const safeLimit = Math.min(limit, maxLimit);
+
+    const sessions = await focusRoomSessionService.getSessionHistory(roomId, safeLimit);
+
+    res.json({
+      success: true,
+      sessions: sessions.map((session) => ({
+        id: session.id,
+        startedAt: session.startedAt,
+        endedAt: session.endedAt,
+        scheduledDuration: session.scheduledDuration,
+        actualDuration: session.actualDuration,
+        status: session.status,
+        participants: session.participants,
+      })),
+    });
+  } catch (error: any) {
+    console.error("Error getting room session history:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message || "Failed to get room session history",
+    });
+  }
+};
+
 
