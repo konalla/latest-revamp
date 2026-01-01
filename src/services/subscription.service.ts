@@ -496,6 +496,52 @@ export class SubscriptionService {
         return null;
       }
 
+      // Sync billing period with Stripe if subscription has a Stripe subscription ID
+      // This ensures the billing period is always up-to-date
+      if (subscription.stripeSubscriptionId) {
+        try {
+          const stripeSubscription = await stripe.subscriptions.retrieve(subscription.stripeSubscriptionId);
+          
+          // Safely handle period dates - check if they exist and are valid
+          const periodStart = (stripeSubscription as any).current_period_start
+            ? new Date((stripeSubscription as any).current_period_start * 1000)
+            : null;
+          const periodEnd = (stripeSubscription as any).current_period_end
+            ? new Date((stripeSubscription as any).current_period_end * 1000)
+            : null;
+
+          // Validate dates before using
+          const validPeriodStart = periodStart && !isNaN(periodStart.getTime()) ? periodStart : null;
+          const validPeriodEnd = periodEnd && !isNaN(periodEnd.getTime()) ? periodEnd : null;
+
+          // Update subscription if billing period has changed
+          if (validPeriodStart && validPeriodEnd) {
+            const periodChanged = 
+              subscription.currentPeriodStart?.getTime() !== validPeriodStart.getTime() ||
+              subscription.currentPeriodEnd?.getTime() !== validPeriodEnd.getTime();
+
+            if (periodChanged) {
+              subscription = await prisma.subscription.update({
+                where: { id: subscription.id },
+                data: {
+                  currentPeriodStart: validPeriodStart,
+                  currentPeriodEnd: validPeriodEnd,
+                  cancelAtPeriodEnd: (stripeSubscription as any).cancel_at_period_end || false,
+                },
+                include: {
+                  subscriptionPlan: true,
+                  paymentProvider: true,
+                },
+              });
+            }
+          }
+        } catch (stripeError: any) {
+          // Log error but don't fail - continue with database values
+          // This handles cases where Stripe subscription might be deleted or inaccessible
+          console.warn(`Failed to sync billing period from Stripe for subscription ${subscription.stripeSubscriptionId}:`, stripeError.message);
+        }
+      }
+
       // Update subscription status based on current state
       const updatedSubscription = await this.updateSubscriptionStatus(subscription.id);
 
@@ -1923,27 +1969,7 @@ export class SubscriptionService {
 
       // Validate dates before using
       const validPeriodStart = periodStart && !isNaN(periodStart.getTime()) ? periodStart : null;
-      let validPeriodEnd = periodEnd && !isNaN(periodEnd.getTime()) ? periodEnd : null;
-
-      // Apply free months if available (at next billing cycle)
-      let freeMonthsRemaining = subscription.freeMonthsRemaining || 0;
-      if (freeMonthsRemaining > 0 && validPeriodEnd) {
-        // Extend period end by 1 month (or appropriate period based on billing interval)
-        const extendedPeriodEnd = new Date(validPeriodEnd);
-        
-        if (subscription.subscriptionPlan.billingInterval === "yearly") {
-          // For yearly plans, extend by 1 month (pro-rated)
-          extendedPeriodEnd.setMonth(extendedPeriodEnd.getMonth() + 1);
-        } else {
-          // For monthly plans, extend by 1 month
-          extendedPeriodEnd.setMonth(extendedPeriodEnd.getMonth() + 1);
-        }
-        
-        validPeriodEnd = extendedPeriodEnd;
-        freeMonthsRemaining = freeMonthsRemaining - 1;
-        
-        console.log(`[Referral] Applied 1 free month to subscription ${subscription.id}. Remaining free months: ${freeMonthsRemaining}`);
-      }
+      const validPeriodEnd = periodEnd && !isNaN(periodEnd.getTime()) ? periodEnd : null;
 
       // Check if this is a new billing period (auto-renewal)
       // If period start has changed, reset all counters for the new period
@@ -1955,7 +1981,6 @@ export class SubscriptionService {
         status: "ACTIVE",
         currentPeriodStart: validPeriodStart,
         currentPeriodEnd: validPeriodEnd,
-        freeMonthsRemaining: freeMonthsRemaining,
         // Reset payment retry tracking on successful payment
         paymentRetryCount: 0,
         lastPaymentRetryAt: null,
