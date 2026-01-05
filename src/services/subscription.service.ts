@@ -314,13 +314,17 @@ export class SubscriptionService {
       // 1. No subscription exists (new user choosing first plan)
       // 2. User has Clarity Plan (trial plan) - they're switching to paid plan
       // 3. User has canceled subscription - they're resubscribing
+      // 4. User has active subscription - allow switching plans (old subscription will be cancelled below)
       const canProceed = !subscription || 
                          (subscription && subscription.subscriptionPlan.name === "trial") ||
                          (subscription && subscription.status === "CANCELED") ||
-                         (subscription && subscription.status === "EXPIRED");
+                         (subscription && subscription.status === "EXPIRED") ||
+                         (subscription && subscription.status === "ACTIVE"); // Allow switching from active subscription
 
-      if (subscription && !canProceed && subscription.status === "ACTIVE") {
-        throw new Error("You already have an active subscription. Please cancel it first before subscribing to a new plan.");
+      // Note: We allow switching from active subscriptions - the old subscription will be cancelled below
+      // Only block if subscription exists and we can't proceed (shouldn't happen with the above logic)
+      if (subscription && !canProceed) {
+        throw new Error("Cannot proceed with checkout. Please contact support.");
       }
 
       // Check if subscription is canceled but still within billing period
@@ -341,6 +345,7 @@ export class SubscriptionService {
 
       // If user has an existing active paid subscription and is switching to a new paid plan,
       // cancel the old subscription immediately (all paid plans get 14-day trial)
+      // This handles cases like: monthly -> yearly, yearly -> monthly, or any plan -> different plan
       if (subscription && !hasClarityPlan && isPaidPlan && subscription.status === "ACTIVE" && subscription.stripeSubscriptionId) {
         try {
           // Cancel the old Stripe subscription immediately
@@ -1870,16 +1875,33 @@ export class SubscriptionService {
    */
   private async handleSubscriptionUpdated(stripeSubscription: Stripe.Subscription): Promise<void> {
     try {
-      const userId = parseInt(stripeSubscription.metadata?.userId || "0");
-      if (!userId) {
+      // First, try to find subscription by stripeSubscriptionId (most accurate)
+      // This is important when switching plans - we need to match the correct subscription
+      let subscription = await prisma.subscription.findUnique({
+        where: { stripeSubscriptionId: stripeSubscription.id },
+      });
+
+      // Fallback to userId lookup if not found (for backward compatibility)
+      if (!subscription) {
+        const userId = parseInt(stripeSubscription.metadata?.userId || "0");
+        if (!userId) {
+          return;
+        }
+
+        subscription = await prisma.subscription.findUnique({
+          where: { userId },
+        });
+      }
+
+      if (!subscription) {
+        console.warn(`Subscription not found for Stripe subscription ${stripeSubscription.id}`);
         return;
       }
 
-      const subscription = await prisma.subscription.findUnique({
-        where: { userId },
-      });
-
-      if (!subscription) {
+      // Verify this is the correct subscription (double-check stripeSubscriptionId matches)
+      // This prevents updating the wrong subscription when switching plans
+      if (subscription.stripeSubscriptionId && subscription.stripeSubscriptionId !== stripeSubscription.id) {
+        console.warn(`Stripe subscription ID mismatch: DB has ${subscription.stripeSubscriptionId}, webhook has ${stripeSubscription.id}. Skipping update.`);
         return;
       }
 
@@ -1913,27 +1935,50 @@ export class SubscriptionService {
    */
   private async handleSubscriptionDeleted(stripeSubscription: Stripe.Subscription): Promise<void> {
     try {
-      const userId = parseInt(stripeSubscription.metadata?.userId || "0");
-      if (!userId) {
-        return;
-      }
-
-      const subscription = await prisma.subscription.findUnique({
-        where: { userId },
+      // First, try to find subscription by stripeSubscriptionId (most accurate)
+      // This is critical when switching plans - we must match the OLD subscription being deleted,
+      // not the NEW one that was just created
+      let subscription = await prisma.subscription.findUnique({
+        where: { stripeSubscriptionId: stripeSubscription.id },
       });
+
+      // Fallback to userId lookup if not found (for backward compatibility)
+      if (!subscription) {
+        const userId = parseInt(stripeSubscription.metadata?.userId || "0");
+        if (!userId) {
+          return;
+        }
+
+        subscription = await prisma.subscription.findUnique({
+          where: { userId },
+        });
+      }
 
       if (!subscription) {
+        console.warn(`Subscription not found for deleted Stripe subscription ${stripeSubscription.id}`);
         return;
       }
 
-      // Update to expired status
-      await prisma.subscription.update({
-        where: { id: subscription.id },
-        data: {
-          status: "EXPIRED",
-          stripeSubscriptionId: null,
-        },
-      });
+      // CRITICAL: Only update if this is the subscription that was actually deleted
+      // When switching plans, the old subscription is deleted but the new one is active
+      // We must NOT mark the new subscription as expired!
+      if (subscription.stripeSubscriptionId && subscription.stripeSubscriptionId !== stripeSubscription.id) {
+        console.log(`Ignoring deletion event for ${stripeSubscription.id} - subscription ${subscription.id} has different stripeSubscriptionId ${subscription.stripeSubscriptionId} (likely a plan switch)`);
+        return;
+      }
+
+      // Only mark as expired if subscription is currently canceled or inactive
+      // If it's already been replaced by a new subscription, don't update it
+      if (subscription.status === "CANCELED" || subscription.status === "ACTIVE") {
+        // Update to expired status only if this is the subscription that was deleted
+        await prisma.subscription.update({
+          where: { id: subscription.id },
+          data: {
+            status: "EXPIRED",
+            stripeSubscriptionId: null,
+          },
+        });
+      }
     } catch (error: any) {
       console.error("Error handling subscription deleted:", error);
     }
