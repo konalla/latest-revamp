@@ -5,6 +5,7 @@ import {
   createRoom,
   getPublicRooms,
   getMyRooms,
+  getCompletedSessionRooms,
   getRoomById,
   updateRoom,
   deleteRoom,
@@ -38,6 +39,10 @@ import {
   createRoomFromTemplate,
   scheduleSession,
   cancelScheduledSession,
+  updateRecurringSchedule,
+  cancelRecurringSchedule,
+  getUpcomingOccurrences,
+  getRoomSessionHistory,
 } from "../controllers/focus-room.controller.js";
 
 const router = Router();
@@ -54,6 +59,9 @@ router.get("/public", getPublicRooms);
 
 // GET /api/focus-rooms/my-rooms - Get user's rooms (created + joined)
 router.get("/my-rooms", authenticateToken, getMyRooms);
+
+// GET /api/focus-rooms/completed-sessions - Get completed session rooms
+router.get("/completed-sessions", authenticateToken, getCompletedSessionRooms);
 
 // ============================================
 // Session Management Routes
@@ -123,6 +131,18 @@ router.post("/:roomId/schedule", authenticateToken, scheduleSession);
 // DELETE /api/focus-rooms/:roomId/schedule - Cancel scheduled session (creator only)
 router.delete("/:roomId/schedule", authenticateToken, cancelScheduledSession);
 
+// PUT /api/focus-rooms/:roomId/recurring-schedule - Update recurring schedule (creator only)
+router.put("/:roomId/recurring-schedule", authenticateToken, updateRecurringSchedule);
+
+// DELETE /api/focus-rooms/:roomId/recurring-schedule - Cancel recurring schedule or occurrence (creator only)
+router.delete("/:roomId/recurring-schedule", authenticateToken, cancelRecurringSchedule);
+
+// GET /api/focus-rooms/:roomId/recurring-schedule/occurrences - Get upcoming occurrences
+router.get("/:roomId/recurring-schedule/occurrences", authenticateToken, getUpcomingOccurrences);
+
+// GET /api/focus-rooms/:roomId/sessions/history - Get room session history
+router.get("/:roomId/sessions/history", authenticateToken, getRoomSessionHistory);
+
 // POST /api/focus-rooms/:roomId/sessions - Start a session (creator only)
 router.post("/:roomId/sessions", authenticateToken, startSession);
 
@@ -163,4 +183,5 @@ router.post("/:roomId/invite", authenticateToken, createInvitation);
 router.get("/:roomId/invitations", authenticateToken, getRoomInvitations);
 
 export default router;
+
 

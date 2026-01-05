@@ -692,10 +692,11 @@ model FocusRoom {
   createdAt          DateTime            @default(now()) @map("created_at")
   updatedAt          DateTime            @updatedAt @map("updated_at")
 
-  creator      User                   @relation("FocusRoomCreator", fields: [creatorId], references: [id], onDelete: Cascade)
-  sessions     FocusRoomSession[]
-  participants FocusRoomParticipant[]
-  invitations  FocusRoomInvitation[]
+  creator            User                      @relation("FocusRoomCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+  sessions           FocusRoomSession[]
+  participants       FocusRoomParticipant[]
+  invitations        FocusRoomInvitation[]
+  recurringSchedule  RecurringSchedule?
 
   @@index([status, visibility])
   @@index([creatorId])
@@ -703,19 +704,20 @@ model FocusRoom {
 }
 
 model FocusRoomSession {
-  id                Int                @id @default(autoincrement())
-  roomId            Int                @map("room_id")
-  startedAt         DateTime           @map("started_at")
-  endedAt           DateTime?          @map("ended_at")
-  pausedAt          DateTime?          @map("paused_at")
-  resumedAt         DateTime?          @map("resumed_at")
-  scheduledDuration Int                @map("scheduled_duration") // in seconds
-  actualDuration    Int?               @map("actual_duration") // in seconds
-  status            FocusSessionStatus @default(ACTIVE)
-  createdAt         DateTime           @default(now()) @map("created_at")
-  updatedAt         DateTime           @updatedAt @map("updated_at")
+  id                Int                         @id @default(autoincrement())
+  roomId            Int                         @map("room_id")
+  startedAt         DateTime                    @map("started_at")
+  endedAt           DateTime?                   @map("ended_at")
+  pausedAt          DateTime?                   @map("paused_at")
+  resumedAt         DateTime?                   @map("resumed_at")
+  scheduledDuration Int                         @map("scheduled_duration") // in seconds
+  actualDuration    Int?                        @map("actual_duration") // in seconds
+  status            FocusSessionStatus          @default(ACTIVE)
+  createdAt         DateTime                    @default(now()) @map("created_at")
+  updatedAt         DateTime                    @updatedAt @map("updated_at")
 
-  room FocusRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  room                FocusRoom                 @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  recurringOccurrence RecurringSessionOccurrence?
 
   @@index([roomId, status])
   @@index([startedAt])
@@ -787,6 +789,44 @@ model FocusRoomTemplate {
 
   @@index([category, isSystem])
   @@map("focus_room_templates")
+}
+
+model RecurringSchedule {
+  id                Int       @id @default(autoincrement())
+  roomId            Int       @unique @map("room_id")
+  recurrenceType    String    @map("recurrence_type") @db.VarChar(20) // "DAILY", "WEEKLY", "CUSTOM"
+  daysOfWeek        Int[]     @map("days_of_week") // [0,1,2,3,4,5,6] for Sun-Sat
+  time              String    @db.VarChar(5) // "HH:mm" format (e.g., "14:30")
+  timezone          String    @default("UTC") @db.VarChar(50) // IANA timezone (e.g., "America/New_York")
+  startDate         DateTime  @map("start_date") // When recurring schedule starts
+  isActive          Boolean   @default(true) @map("is_active")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  room        FocusRoom                  @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  occurrences RecurringSessionOccurrence[]
+
+  @@index([isActive, startDate])
+  @@map("recurring_schedules")
+}
+
+model RecurringSessionOccurrence {
+  id                  Int       @id @default(autoincrement())
+  recurringScheduleId Int       @map("recurring_schedule_id")
+  scheduledTime       DateTime  @map("scheduled_time")
+  sessionId           Int?      @unique @map("session_id") // null if skipped
+  status              String    @default("PENDING") @db.VarChar(20) // "PENDING", "CREATED", "SKIPPED"
+  skipReason          String?   @map("skip_reason") @db.VarChar(100) // "ACTIVE_SESSION_EXISTS", "MANUALLY_SKIPPED"
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  recurringSchedule RecurringSchedule @relation(fields: [recurringScheduleId], references: [id], onDelete: Cascade)
+  session           FocusRoomSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+
+  @@unique([recurringScheduleId, scheduledTime])
+  @@index([scheduledTime, status])
+  @@index([recurringScheduleId])
+  @@map("recurring_session_occurrences")
 }
 
 enum FocusRoomVisibility {

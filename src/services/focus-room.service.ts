@@ -260,6 +260,7 @@ export class FocusRoomService {
     return prisma.focusRoom.findMany({
       where: {
         creatorId: userId,
+        status: { not: "completed" }, // Exclude completed rooms
       },
       include: {
         _count: {
@@ -288,6 +289,9 @@ export class FocusRoomService {
         userId,
         status: { not: "LEFT" },
         role: { not: "CREATOR" }, // Exclude rooms they created
+        room: {
+          status: { not: "completed" }, // Exclude completed rooms
+        },
       },
       include: {
         room: {
@@ -357,6 +361,9 @@ export class FocusRoomService {
     if (data.focusDuration !== undefined) updateData.focusDuration = data.focusDuration;
     if (data.breakDuration !== undefined) updateData.breakDuration = data.breakDuration;
     if (data.allowObservers !== undefined) updateData.allowObservers = data.allowObservers;
+    
+    // Handle status update
+    if (data.status !== undefined) updateData.status = data.status;
     
     // Handle scheduled time update
     if (data.scheduledStartTime !== undefined) {
@@ -474,7 +481,70 @@ export class FocusRoomService {
 
     return count >= 10;
   }
+
+  /**
+   * Get completed session rooms for a user (where user was creator or participant)
+   */
+  async getCompletedSessionRooms(userId: number) {
+    // Find rooms where user was creator or participant and room is completed
+    const rooms = await prisma.focusRoom.findMany({
+      where: {
+        status: "completed",
+        OR: [
+          { creatorId: userId },
+          {
+            participants: {
+              some: {
+                userId,
+              },
+            },
+          },
+        ],
+      },
+      include: {
+        creator: {
+          select: {
+            id: true,
+            name: true,
+            username: true,
+            profile_photo_url: true,
+          },
+        },
+        sessions: {
+          where: {
+            status: "COMPLETED",
+          },
+          orderBy: {
+            endedAt: "desc",
+          },
+          take: 1, // Get the completed session (room can only have one)
+        },
+        participants: {
+          // Include all participants (even if they left)
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                username: true,
+                profile_photo_url: true,
+              },
+            },
+          },
+          orderBy: {
+            joinedAt: "asc",
+          },
+        },
+      },
+      orderBy: {
+        updatedAt: "desc", // Most recently completed first
+      },
+    });
+
+    return rooms;
+  }
 }
 
 export const focusRoomService = new FocusRoomService();
+
 

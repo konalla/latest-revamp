@@ -6,6 +6,7 @@ import {
   isSessionEnded,
   calculateActualDuration,
 } from "../utils/focus-room.utils.js";
+import userStatusService from "./user-status.service.js";
 
 export class FocusRoomSessionService {
   /**
@@ -68,6 +69,35 @@ export class FocusRoomSessionService {
     }, {
       isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
     });
+
+    // Update all participants' user status to online
+    try {
+      const participants = await prisma.focusRoomParticipant.findMany({
+        where: {
+          roomId,
+          status: { not: "LEFT" },
+        },
+        select: {
+          userId: true,
+        },
+      });
+
+      // Update each participant's user status to online
+      await Promise.all(
+        participants.map((participant) =>
+          userStatusService.updateUserStatus(participant.userId, true).catch((error) => {
+            console.error(
+              `Error updating user status for participant ${participant.userId}:`,
+              error
+            );
+            // Don't throw - continue with other participants
+          })
+        )
+      );
+    } catch (error) {
+      console.error("Error updating participants' user status after starting session:", error);
+      // Don't throw error - session creation should still succeed
+    }
 
     return session;
   }
@@ -139,13 +169,44 @@ export class FocusRoomSessionService {
       throw new Error("Only paused sessions can be resumed");
     }
 
-    return prisma.focusRoomSession.update({
+    const updatedSession = await prisma.focusRoomSession.update({
       where: { id: sessionId },
       data: {
         status: "ACTIVE",
         resumedAt: new Date(),
       },
     });
+
+    // Update all participants' user status to online when session resumes
+    try {
+      const participants = await prisma.focusRoomParticipant.findMany({
+        where: {
+          roomId,
+          status: { not: "LEFT" },
+        },
+        select: {
+          userId: true,
+        },
+      });
+
+      // Update each participant's user status to online
+      await Promise.all(
+        participants.map((participant) =>
+          userStatusService.updateUserStatus(participant.userId, true).catch((error) => {
+            console.error(
+              `Error updating user status for participant ${participant.userId}:`,
+              error
+            );
+            // Don't throw - continue with other participants
+          })
+        )
+      );
+    } catch (error) {
+      console.error("Error updating participants' user status after resuming session:", error);
+      // Don't throw error - session resume should still succeed
+    }
+
+    return updatedSession;
   }
 
   /**
@@ -178,10 +239,15 @@ export class FocusRoomSessionService {
       session.resumedAt
     );
 
-    // Use transaction to update session and participant statuses
-    return prisma.$transaction(async (tx) => {
+    // Check if room has active recurring schedule
+    const recurringSchedule = await prisma.recurringSchedule.findUnique({
+      where: { roomId, isActive: true },
+    });
+
+    // Use transaction to update session, room, and participant statuses
+    const updatedSession = await prisma.$transaction(async (tx) => {
       // Update session
-      const updatedSession = await tx.focusRoomSession.update({
+      const session = await tx.focusRoomSession.update({
         where: { id: sessionId },
         data: {
           status: "COMPLETED",
@@ -189,6 +255,26 @@ export class FocusRoomSessionService {
           actualDuration,
         },
       });
+
+      // Only mark room as completed if NO active recurring schedule exists
+      // If recurring schedule exists, room stays "active" for next recurring session
+      if (!recurringSchedule) {
+        await tx.focusRoom.update({
+          where: { id: roomId },
+          data: {
+            status: "completed",
+          },
+        });
+      } else {
+        // Room stays active - just ensure it's not in "scheduled" state
+        // (it should already be "active" from when session started)
+        await tx.focusRoom.update({
+          where: { id: roomId },
+          data: {
+            status: "active",
+          },
+        });
+      }
 
       // Update all participants to "IDLE" status
       await tx.focusRoomParticipant.updateMany({
@@ -201,8 +287,39 @@ export class FocusRoomSessionService {
         },
       });
 
-      return updatedSession;
+      return session;
     });
+
+    // Update all participants' user status to offline
+    try {
+      const participants = await prisma.focusRoomParticipant.findMany({
+        where: {
+          roomId,
+          status: { not: "LEFT" },
+        },
+        select: {
+          userId: true,
+        },
+      });
+
+      // Update each participant's user status to offline
+      await Promise.all(
+        participants.map((participant) =>
+          userStatusService.updateUserStatus(participant.userId, false).catch((error) => {
+            console.error(
+              `Error updating user status for participant ${participant.userId}:`,
+              error
+            );
+            // Don't throw - continue with other participants
+          })
+        )
+      );
+    } catch (error) {
+      console.error("Error updating participants' user status after ending session:", error);
+      // Don't throw error - session ending should still succeed
+    }
+
+    return updatedSession;
   }
 
   /**
@@ -328,10 +445,10 @@ export class FocusRoomSessionService {
   }
 
   /**
-   * Get session history for a room
+   * Get session history for a room with participant data
    */
   async getSessionHistory(roomId: number, limit: number = 20) {
-    return prisma.focusRoomSession.findMany({
+    const sessions = await prisma.focusRoomSession.findMany({
       where: {
         roomId,
         status: "COMPLETED",
@@ -340,17 +457,59 @@ export class FocusRoomSessionService {
         endedAt: "desc",
       },
       take: limit,
-      include: {
-        _count: {
-          select: {
-            // We'll need to count participants who were in this session
-            // This might require a separate table or we track it differently
-          },
-        },
-      },
     });
+
+    // For each session, get participants who were active during that time
+    // We use timestamps to infer participation (joined before session ended, left after session started or never left)
+    const sessionsWithParticipants = await Promise.all(
+      sessions.map(async (session) => {
+        const participants = await prisma.focusRoomParticipant.findMany({
+          where: {
+            roomId,
+            OR: [
+              // Participant joined before session ended and (never left or left after session started)
+              {
+                joinedAt: { lte: session.endedAt || session.startedAt },
+                OR: [
+                  { leftAt: null },
+                  { leftAt: { gte: session.startedAt } },
+                ],
+              },
+            ],
+          },
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                username: true,
+                email: true,
+                profile_photo_url: true,
+              },
+            },
+          },
+        });
+
+        return {
+          ...session,
+          participants: participants.map((p) => ({
+            userId: p.userId,
+            user: p.user,
+            intention: p.intention,
+            completion: p.completion,
+            shareCompletion: p.shareCompletion,
+            role: p.role,
+            joinedAt: p.joinedAt,
+            leftAt: p.leftAt,
+          })),
+        };
+      })
+    );
+
+    return sessionsWithParticipants;
   }
 }
 
 export const focusRoomSessionService = new FocusRoomSessionService();
+
 

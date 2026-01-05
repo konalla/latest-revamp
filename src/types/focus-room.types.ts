@@ -20,6 +20,7 @@ export const updateRoomSchema = z.object({
   allowObservers: z.boolean().optional(),
   password: z.string().min(4).max(100).optional().nullable(),
   scheduledStartTime: z.string().datetime().optional().nullable(),
+  status: z.enum(["draft", "active", "scheduled", "completed", "archived"]).optional(),
 });
 
 // Session Schemas
@@ -75,6 +76,69 @@ export const createRoomFromTemplateSchema = z.object({
   password: z.string().min(4).max(100).optional(),
 });
 
+// Recurring Schedule Schemas
+export const recurringScheduleSchema = z.object({
+  type: z.enum(["DAILY", "WEEKLY", "CUSTOM"]),
+  daysOfWeek: z
+    .array(z.number().int().min(0).max(6))
+    .optional()
+    .refine(
+      (days) => !days || days.length > 0,
+      { message: "daysOfWeek array cannot be empty if provided" }
+    ),
+  time: z.string().regex(/^([0-1][0-9]|2[0-3]):[0-5][0-9]$/, {
+    message: "Time must be in HH:mm format (24-hour)",
+  }),
+  timezone: z.string().optional().default("UTC"),
+  startDate: z.string().datetime(),
+});
+
+export const scheduleSessionSchema = z
+  .object({
+    scheduledStartTime: z.string().datetime().optional(),
+    recurring: recurringScheduleSchema.optional(),
+  })
+  .refine(
+    (data) => data.scheduledStartTime || data.recurring,
+    { message: "Either scheduledStartTime or recurring must be provided" }
+  )
+  .refine(
+    (data) => !(data.scheduledStartTime && data.recurring),
+    { message: "Cannot provide both scheduledStartTime and recurring" }
+  )
+  .refine(
+    (data) => {
+      if (data.recurring) {
+        if (data.recurring.type === "WEEKLY" || data.recurring.type === "CUSTOM") {
+          return (
+            data.recurring.daysOfWeek !== undefined &&
+            data.recurring.daysOfWeek.length > 0
+          );
+        }
+      }
+      return true;
+    },
+    { message: "daysOfWeek is required for WEEKLY and CUSTOM recurrence types" }
+  );
+
+export const updateRecurringScheduleSchema = z.object({
+  type: z.enum(["DAILY", "WEEKLY", "CUSTOM"]).optional(),
+  daysOfWeek: z
+    .array(z.number().int().min(0).max(6))
+    .optional()
+    .refine(
+      (days) => !days || days.length > 0,
+      { message: "daysOfWeek array cannot be empty if provided" }
+    ),
+  time: z.string().regex(/^([0-1][0-9]|2[0-3]):[0-5][0-9]$/).optional(),
+  timezone: z.string().optional(),
+  startDate: z.string().datetime().optional(),
+});
+
+export const cancelRecurringScheduleSchema = z.object({
+  cancelOccurrence: z.string().datetime().optional(),
+});
+
 // Type exports
 export type CreateRoomInput = z.infer<typeof createRoomSchema>;
 export type UpdateRoomInput = z.infer<typeof updateRoomSchema>;
@@ -87,4 +151,9 @@ export type CreateInvitationInput = z.infer<typeof createInvitationSchema>;
 export type AcceptInvitationInput = z.infer<typeof acceptInvitationSchema>;
 export type CreateTemplateInput = z.infer<typeof createTemplateSchema>;
 export type CreateRoomFromTemplateInput = z.infer<typeof createRoomFromTemplateSchema>;
+export type ScheduleSessionInput = z.infer<typeof scheduleSessionSchema>;
+export type CreateRecurringScheduleInput = z.infer<typeof recurringScheduleSchema>;
+export type UpdateRecurringScheduleInput = z.infer<typeof updateRecurringScheduleSchema>;
+export type CancelRecurringScheduleInput = z.infer<typeof cancelRecurringScheduleSchema>;
+
 
