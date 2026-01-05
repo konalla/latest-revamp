@@ -5,6 +5,7 @@ import sharp from "sharp";
 import path from "path";
 import fs from "fs";
 import prisma from "../config/prisma.js";
+import { walletService } from "../services/wallet.service.js";
 
 const createUser = async (req: Request<{}, {}, CreateUserRequest>, res: Response) => {
   try {
@@ -69,7 +70,10 @@ const getCurrentUser = async (req: Request, res: Response) => {
       },
     });
     
-    // Add default language and badge info
+    // Get wallet balance
+    const wallet = await walletService.getWallet(user.id);
+    
+    // Add default language, badge info, and wallet balance
     const response = {
       ...userWithoutPassword,
       language: "english",
@@ -78,6 +82,10 @@ const getCurrentUser = async (req: Request, res: Response) => {
         originId: referralStatus.originId,
         vanguardId: referralStatus.vanguardId,
       } : null,
+      wallet: {
+        balance: wallet.balance,
+        totalEarned: wallet.totalEarned,
+      },
     };
     
     res.json(response);

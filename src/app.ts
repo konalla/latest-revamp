@@ -22,6 +22,7 @@ import webhookRoutes from "./routes/webhook.routes.js";
 import referralRoutes from "./routes/referral.routes.js";
 import adminRoutes from "./routes/admin.routes.js";
 import focusRoomRoutes from "./routes/focus-room.routes.js";
+import walletRoutes from "./routes/wallet.routes.js";
 
 const app = express();
 
@@ -64,5 +65,6 @@ app.use("/api/subscriptions", subscriptionRoutes);
 app.use("/api/referrals", referralRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/focus-rooms", focusRoomRoutes);
+app.use("/api/wallet", walletRoutes);
 
 export default app;
