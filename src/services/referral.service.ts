@@ -1,5 +1,6 @@
 import prisma from "../config/prisma.js";
 import { statusAssignmentService } from "./status-assignment.service.js";
+import { walletService } from "./wallet.service.js";
 import {
   generateReferralCode,
   validateReferralCodeFormat,
@@ -240,6 +241,41 @@ export class ReferralService {
           status: "REGISTERED",
         },
       });
+
+      // Award coins to referrer
+      try {
+        // Get referred user info for description
+        const referredUser = await prisma.user.findUnique({
+          where: { id: userId },
+          select: { email: true, name: true, username: true },
+        });
+
+        const referredUserDisplay = referredUser?.name || referredUser?.username || referredUser?.email || "a new user";
+        
+        // Get coin amount from environment variable (default: 100)
+        const coinAmount = parseInt(process.env.REFERRAL_COIN_REWARD || "100", 10);
+
+        const coinResult = await walletService.awardCoins(
+          referrerId,
+          coinAmount,
+          "REFERRAL",
+          `Earned ${coinAmount} coins from referral: ${referredUserDisplay}`,
+          {
+            referralId: referral.id,
+            referredUserId: userId,
+          }
+        );
+
+        if (coinResult.success) {
+          console.log(`[Wallet] Awarded ${coinAmount} coins to user ${referrerId} for referral ${referral.id}`);
+        } else {
+          console.error(`[Wallet] Failed to award coins to user ${referrerId}:`, coinResult.error);
+          // Don't fail referral registration if coin award fails
+        }
+      } catch (coinError: any) {
+        console.error("[Wallet] Error awarding coins for referral:", coinError);
+        // Don't fail referral registration if coin award fails
+      }
 
       return {
         success: true,
