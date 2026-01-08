@@ -92,6 +92,14 @@ export interface AdminSubscriptionFilters extends AdminQueryParams {
   createdAtTo?: string;
 }
 
+export interface AdminRedemptionFilters extends AdminQueryParams {
+  status?: string;
+  userId?: number;
+  redeemableItemId?: number;
+  createdAtFrom?: string;
+  createdAtTo?: string;
+}
+
 export class AdminService {
   /**
    * Get all users with filters and pagination
@@ -1227,6 +1235,352 @@ export class AdminService {
         })),
       },
     };
+  }
+
+  // ============================================
+  // Redeemable Items Management
+  // ============================================
+
+  /**
+   * Get all redeemable items with filters and pagination
+   */
+  async getAllRedeemableItems(filters: AdminQueryParams) {
+    const {
+      page = 1,
+      limit = 20,
+      search,
+      sortBy = "sortOrder",
+      sortOrder = "asc",
+    } = filters;
+
+    const skip = (page - 1) * limit;
+
+    const where: any = {};
+
+    if (search) {
+      where.OR = [
+        { name: { contains: search, mode: "insensitive" } },
+        { description: { contains: search, mode: "insensitive" } },
+      ];
+    }
+
+    const [items, total] = await Promise.all([
+      prisma.redeemableItem.findMany({
+        where,
+        orderBy: {
+          [sortBy]: sortOrder,
+        },
+        take: limit,
+        skip,
+        include: {
+          _count: {
+            select: {
+              redemptions: true,
+            },
+          },
+        },
+      }),
+      prisma.redeemableItem.count({ where }),
+    ]);
+
+    return { items, total };
+  }
+
+  /**
+   * Get redeemable item by ID
+   */
+  async getRedeemableItemById(id: number) {
+    const item = await prisma.redeemableItem.findUnique({
+      where: { id },
+      include: {
+        _count: {
+          select: {
+            redemptions: true,
+          },
+        },
+      },
+    });
+
+    if (!item) {
+      throw new Error("Redeemable item not found");
+    }
+
+    return item;
+  }
+
+  /**
+   * Create a new redeemable item
+   */
+  async createRedeemableItem(data: {
+    name: string;
+    description?: string;
+    imageUrl?: string;
+    requiredCredits: number;
+    isActive?: boolean;
+    sortOrder?: number;
+    variantOptions?: Record<string, any>;
+  }) {
+    // Check if item with same name already exists
+    const existing = await prisma.redeemableItem.findUnique({
+      where: { name: data.name },
+    });
+
+    if (existing) {
+      throw new Error("Redeemable item with this name already exists");
+    }
+
+    const item = await prisma.redeemableItem.create({
+      data: {
+        name: data.name,
+        description: data.description || null,
+        imageUrl: data.imageUrl || null,
+        requiredCredits: data.requiredCredits,
+        isActive: data.isActive ?? true,
+        sortOrder: data.sortOrder ?? 0,
+        variantOptions: data.variantOptions || {},
+      },
+    });
+
+    return item;
+  }
+
+  /**
+   * Update a redeemable item
+   */
+  async updateRedeemableItem(
+    id: number,
+    data: {
+      name?: string;
+      description?: string;
+      imageUrl?: string;
+      requiredCredits?: number;
+      isActive?: boolean;
+      sortOrder?: number;
+      variantOptions?: Record<string, any>;
+    }
+  ) {
+    // If name is being updated, check if new name already exists
+    if (data.name) {
+      const existing = await prisma.redeemableItem.findFirst({
+        where: {
+          name: data.name,
+          id: { not: id },
+        },
+      });
+
+      if (existing) {
+        throw new Error("Redeemable item with this name already exists");
+      }
+    }
+
+    const item = await prisma.redeemableItem.update({
+      where: { id },
+      data: {
+        ...(data.name && { name: data.name }),
+        ...(data.description !== undefined && { description: data.description }),
+        ...(data.imageUrl !== undefined && { imageUrl: data.imageUrl }),
+        ...(data.requiredCredits !== undefined && { requiredCredits: data.requiredCredits }),
+        ...(data.isActive !== undefined && { isActive: data.isActive }),
+        ...(data.sortOrder !== undefined && { sortOrder: data.sortOrder }),
+        ...(data.variantOptions !== undefined && { variantOptions: data.variantOptions }),
+      },
+    });
+
+    return item;
+  }
+
+  /**
+   * Delete a redeemable item
+   */
+  async deleteRedeemableItem(id: number) {
+    // Check if item has any redemptions
+    const redemptionCount = await prisma.redemption.count({
+      where: { redeemableItemId: id },
+    });
+
+    if (redemptionCount > 0) {
+      throw new Error(
+        `Cannot delete item. It has ${redemptionCount} redemption(s). Consider deactivating it instead.`
+      );
+    }
+
+    await prisma.redeemableItem.delete({
+      where: { id },
+    });
+
+    return { success: true };
+  }
+
+  // ============================================
+  // Redemptions Management
+  // ============================================
+
+  /**
+   * Get all redemptions with filters and pagination
+   */
+  async getAllRedemptions(filters: AdminRedemptionFilters) {
+    const {
+      page = 1,
+      limit = 20,
+      search,
+      sortBy = "createdAt",
+      sortOrder = "desc",
+      status,
+      userId,
+      redeemableItemId,
+      createdAtFrom,
+      createdAtTo,
+    } = filters;
+
+    const skip = (page - 1) * limit;
+
+    const where: any = {};
+
+    if (status) {
+      where.status = status;
+    }
+
+    if (userId) {
+      where.userId = userId;
+    }
+
+    if (redeemableItemId) {
+      where.redeemableItemId = redeemableItemId;
+    }
+
+    if (createdAtFrom || createdAtTo) {
+      where.createdAt = {};
+      if (createdAtFrom) {
+        where.createdAt.gte = new Date(createdAtFrom);
+      }
+      if (createdAtTo) {
+        where.createdAt.lte = new Date(createdAtTo);
+      }
+    }
+
+    if (search) {
+      where.OR = [
+        {
+          user: {
+            name: { contains: search, mode: "insensitive" },
+          },
+        },
+        {
+          user: {
+            email: { contains: search, mode: "insensitive" },
+          },
+        },
+        {
+          redeemableItem: {
+            name: { contains: search, mode: "insensitive" },
+          },
+        },
+      ];
+    }
+
+    const [redemptions, total] = await Promise.all([
+      prisma.redemption.findMany({
+        where,
+        orderBy: {
+          [sortBy]: sortOrder,
+        },
+        take: limit,
+        skip,
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              username: true,
+            },
+          },
+          redeemableItem: {
+            select: {
+              id: true,
+              name: true,
+              description: true,
+              imageUrl: true,
+              requiredCredits: true,
+            },
+          },
+        },
+      }),
+      prisma.redemption.count({ where }),
+    ]);
+
+    return { redemptions, total };
+  }
+
+  /**
+   * Get redemption by ID
+   */
+  async getRedemptionById(id: number) {
+    const redemption = await prisma.redemption.findUnique({
+      where: { id },
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            username: true,
+            phone_number: true,
+          },
+        },
+        redeemableItem: true,
+        transaction: {
+          select: {
+            id: true,
+            amount: true,
+            balanceAfter: true,
+            createdAt: true,
+          },
+        },
+      },
+    });
+
+    if (!redemption) {
+      throw new Error("Redemption not found");
+    }
+
+    return redemption;
+  }
+
+  /**
+   * Update redemption status (for fulfillment tracking)
+   */
+  async updateRedemptionStatus(
+    id: number,
+    data: {
+      status?: "PENDING" | "FULFILLED" | "CANCELLED";
+      fulfillmentNotes?: string;
+    }
+  ) {
+    const redemption = await prisma.redemption.update({
+      where: { id },
+      data: {
+        ...(data.status && { status: data.status }),
+        ...(data.fulfillmentNotes !== undefined && { fulfillmentNotes: data.fulfillmentNotes }),
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+        redeemableItem: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+    });
+
+    return redemption;
   }
 }
 

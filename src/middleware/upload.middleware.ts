@@ -34,6 +34,9 @@ const upload = multer({
 // Middleware for single file upload
 export const uploadProfilePhoto = upload.single("photo");
 
+// Middleware for redeemable item image upload
+export const uploadRedeemableItemImage = upload.single("image");
+
 // Error handling middleware
 export const handleUploadError = (error: any, req: any, res: any, next: any) => {
   if (error instanceof multer.MulterError) {

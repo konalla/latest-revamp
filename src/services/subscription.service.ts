@@ -2,6 +2,7 @@ import Stripe from "stripe";
 import prisma from "../config/prisma.js";
 import { statusAssignmentService } from "./status-assignment.service.js";
 import { referralService } from "./referral.service.js";
+import { walletService } from "./wallet.service.js";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "", {
   apiVersion: "2025-10-29.clover",
@@ -276,6 +277,88 @@ export class SubscriptionService {
           },
         },
       });
+
+      // Award 5 coins to referrer if user was referred and subscribed to free plan
+      try {
+        const referral = await prisma.referral.findUnique({
+          where: { referredId: userId },
+          include: {
+            referrer: {
+              select: {
+                id: true,
+                email: true,
+                name: true,
+              },
+            },
+          },
+        });
+
+        if (referral) {
+          // Check if coins were already awarded for free plan subscription (to avoid duplicates)
+          const wallet = await prisma.wallet.findUnique({
+            where: { userId: referral.referrerId },
+          });
+
+          let alreadyAwarded = false;
+          if (wallet) {
+            const referralTransactions = await prisma.walletTransaction.findMany({
+              where: {
+                walletId: wallet.id,
+                category: "REFERRAL",
+              },
+            });
+
+            // Check if there's a transaction with this referralId and type "free_plan" in metadata
+            for (const transaction of referralTransactions) {
+              const metadata = transaction.metadata as any;
+              if (metadata?.referralId === referral.id && metadata?.type === "free_plan") {
+                alreadyAwarded = true;
+                break;
+              }
+            }
+          }
+
+          if (!alreadyAwarded) {
+            const referredUserDisplay =
+              subscription.user.name ||
+              subscription.user.email ||
+              `User ${userId}`;
+
+            const freePlanCoinAmount = 5;
+
+            const coinResult = await walletService.awardCoins(
+              referral.referrerId,
+              freePlanCoinAmount,
+              "REFERRAL",
+              `Earned ${freePlanCoinAmount} coins from referral free plan subscription: ${referredUserDisplay}`,
+              {
+                referralId: referral.id,
+                referredUserId: userId,
+                type: "free_plan", // Mark as free plan subscription reward
+              }
+            );
+
+            if (coinResult.success) {
+              console.log(
+                `[Wallet] Awarded ${freePlanCoinAmount} coins to user ${referral.referrerId} ` +
+                `for referral free plan subscription ${referral.id}`
+              );
+            } else {
+              console.error(
+                `[Wallet] Failed to award free plan coins to user ${referral.referrerId}:`,
+                coinResult.error
+              );
+            }
+          } else {
+            console.log(
+              `[Wallet] Free plan coins already awarded for referral ${referral.id}, skipping`
+            );
+          }
+        }
+      } catch (coinError: any) {
+        console.error("[Wallet] Error awarding coins for free plan subscription:", coinError);
+        // Don't fail subscription creation if coin award fails
+      }
 
       return subscription;
     } catch (error: any) {

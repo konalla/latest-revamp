@@ -9,7 +9,11 @@ import type {
   AdminWorkspaceFilters,
   AdminTeamFilters,
   AdminSubscriptionFilters,
+  AdminRedemptionFilters,
 } from "../services/admin.service.js";
+import sharp from "sharp";
+import path from "path";
+import fs from "fs";
 
 export class AdminController {
   /**
@@ -516,6 +520,374 @@ export class AdminController {
       res.status(200).json({ message: "Dashboard stats retrieved successfully", data: stats });
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to get dashboard stats" });
+    }
+  }
+
+  // ============================================
+  // Redeemable Items Management
+  // ============================================
+
+  /**
+   * Get all redeemable items
+   * GET /api/admin/redeemable-items
+   */
+  async getAllRedeemableItems(req: Request, res: Response): Promise<void> {
+    try {
+      const filters = {
+        page: req.query.page ? parseInt(req.query.page as string) : 1,
+        limit: req.query.limit ? parseInt(req.query.limit as string) : 20,
+        sortBy: (req.query.sortBy as string) || "sortOrder",
+        sortOrder: (req.query.sortOrder as "asc" | "desc") || "asc",
+        ...(req.query.search && { search: req.query.search as string }),
+      };
+
+      const result = await adminService.getAllRedeemableItems(filters);
+
+      res.status(200).json({
+        message: "Redeemable items retrieved successfully",
+        data: result.items,
+        pagination: {
+          page: filters.page!,
+          limit: filters.limit!,
+          total: result.total,
+          totalPages: Math.ceil(result.total / filters.limit!),
+        },
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed to get redeemable items" });
+    }
+  }
+
+  /**
+   * Get redeemable item by ID
+   * GET /api/admin/redeemable-items/:id
+   */
+  async getRedeemableItemById(req: Request, res: Response): Promise<void> {
+    try {
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) {
+        res.status(400).json({ message: "Invalid item ID" });
+        return;
+      }
+
+      const item = await adminService.getRedeemableItemById(id);
+      res.status(200).json({ message: "Redeemable item retrieved successfully", data: item });
+    } catch (error: any) {
+      if (error.message === "Redeemable item not found") {
+        res.status(404).json({ message: error.message });
+      } else {
+        res.status(500).json({ message: error.message || "Failed to get redeemable item" });
+      }
+    }
+  }
+
+  /**
+   * Create a new redeemable item
+   * POST /api/admin/redeemable-items
+   * Supports multipart/form-data with image upload
+   */
+  async createRedeemableItem(req: Request, res: Response): Promise<void> {
+    try {
+      const { name, description, requiredCredits, isActive, sortOrder, variantOptions } = req.body;
+
+      if (!name || !requiredCredits) {
+        res.status(400).json({
+          message: "Name and requiredCredits are required",
+        });
+        return;
+      }
+
+      if (requiredCredits <= 0) {
+        res.status(400).json({
+          message: "Required credits must be greater than 0",
+        });
+        return;
+      }
+
+      let imageUrl: string | undefined = undefined;
+
+      // Handle image upload if provided
+      if (req.file) {
+        // Ensure uploads directory exists
+        const uploadsDir = path.join(process.cwd(), "uploads", "redeemable-items");
+        if (!fs.existsSync(uploadsDir)) {
+          fs.mkdirSync(uploadsDir, { recursive: true });
+        }
+
+        // Generate unique filename
+        const timestamp = Date.now();
+        const randomSuffix = Math.random().toString(36).substring(2, 8);
+        const filename = `item_${timestamp}_${randomSuffix}.jpg`;
+        const filePath = path.join(uploadsDir, filename);
+
+        // Process image: resize, compress, and convert to JPEG
+        await sharp(req.file.buffer)
+          .resize(1200, 1200, {
+            fit: "inside",
+            withoutEnlargement: true,
+          })
+          .jpeg({
+            quality: 85,
+            mozjpeg: true,
+          })
+          .toFile(filePath);
+
+        // Generate the image URL path
+        imageUrl = `/uploads/redeemable-items/${filename}`;
+      }
+
+      // Parse variantOptions if it's a string (from form data)
+      let parsedVariantOptions: Record<string, any> | undefined = undefined;
+      if (variantOptions) {
+        try {
+          parsedVariantOptions =
+            typeof variantOptions === "string" ? JSON.parse(variantOptions) : variantOptions;
+        } catch (e) {
+          // If parsing fails, treat as empty object
+          parsedVariantOptions = {};
+        }
+      }
+
+      const item = await adminService.createRedeemableItem({
+        name,
+        description,
+        imageUrl,
+        requiredCredits: parseInt(requiredCredits),
+        isActive: isActive === "true" || isActive === true,
+        sortOrder: sortOrder ? parseInt(sortOrder) : undefined,
+        variantOptions: parsedVariantOptions,
+      });
+
+      res.status(201).json({
+        message: "Redeemable item created successfully",
+        data: item,
+      });
+    } catch (error: any) {
+      if (error.message.includes("already exists")) {
+        res.status(409).json({ message: error.message });
+      } else {
+        res.status(500).json({ message: error.message || "Failed to create redeemable item" });
+      }
+    }
+  }
+
+  /**
+   * Update a redeemable item
+   * PUT /api/admin/redeemable-items/:id
+   * Supports multipart/form-data with image upload
+   */
+  async updateRedeemableItem(req: Request, res: Response): Promise<void> {
+    try {
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) {
+        res.status(400).json({ message: "Invalid item ID" });
+        return;
+      }
+
+      const { name, description, requiredCredits, isActive, sortOrder, variantOptions } = req.body;
+
+      if (requiredCredits !== undefined && requiredCredits <= 0) {
+        res.status(400).json({
+          message: "Required credits must be greater than 0",
+        });
+        return;
+      }
+
+      let imageUrl: string | undefined = undefined;
+
+      // Handle image upload if provided
+      if (req.file) {
+        // Ensure uploads directory exists
+        const uploadsDir = path.join(process.cwd(), "uploads", "redeemable-items");
+        if (!fs.existsSync(uploadsDir)) {
+          fs.mkdirSync(uploadsDir, { recursive: true });
+        }
+
+        // Generate unique filename
+        const timestamp = Date.now();
+        const randomSuffix = Math.random().toString(36).substring(2, 8);
+        const filename = `item_${timestamp}_${randomSuffix}.jpg`;
+        const filePath = path.join(uploadsDir, filename);
+
+        // Process image: resize, compress, and convert to JPEG
+        await sharp(req.file.buffer)
+          .resize(1200, 1200, {
+            fit: "inside",
+            withoutEnlargement: true,
+          })
+          .jpeg({
+            quality: 85,
+            mozjpeg: true,
+          })
+          .toFile(filePath);
+
+        // Generate the image URL path
+        imageUrl = `/uploads/redeemable-items/${filename}`;
+      }
+
+      // Parse variantOptions if it's a string (from form data)
+      let parsedVariantOptions: Record<string, any> | undefined = undefined;
+      if (variantOptions !== undefined) {
+        try {
+          parsedVariantOptions =
+            typeof variantOptions === "string" ? JSON.parse(variantOptions) : variantOptions;
+        } catch (e) {
+          // If parsing fails, treat as empty object
+          parsedVariantOptions = {};
+        }
+      }
+
+      const item = await adminService.updateRedeemableItem(id, {
+        name,
+        description,
+        imageUrl,
+        requiredCredits: requiredCredits ? parseInt(requiredCredits) : undefined,
+        isActive: isActive !== undefined ? (isActive === "true" || isActive === true) : undefined,
+        sortOrder: sortOrder !== undefined ? parseInt(sortOrder) : undefined,
+        variantOptions: parsedVariantOptions,
+      });
+
+      res.status(200).json({
+        message: "Redeemable item updated successfully",
+        data: item,
+      });
+    } catch (error: any) {
+      if (error.message === "Redeemable item not found") {
+        res.status(404).json({ message: error.message });
+      } else if (error.message.includes("already exists")) {
+        res.status(409).json({ message: error.message });
+      } else {
+        res.status(500).json({ message: error.message || "Failed to update redeemable item" });
+      }
+    }
+  }
+
+  /**
+   * Delete a redeemable item
+   * DELETE /api/admin/redeemable-items/:id
+   */
+  async deleteRedeemableItem(req: Request, res: Response): Promise<void> {
+    try {
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) {
+        res.status(400).json({ message: "Invalid item ID" });
+        return;
+      }
+
+      await adminService.deleteRedeemableItem(id);
+      res.status(200).json({ message: "Redeemable item deleted successfully" });
+    } catch (error: any) {
+      if (error.message === "Redeemable item not found") {
+        res.status(404).json({ message: error.message });
+      } else if (error.message.includes("Cannot delete")) {
+        res.status(400).json({ message: error.message });
+      } else {
+        res.status(500).json({ message: error.message || "Failed to delete redeemable item" });
+      }
+    }
+  }
+
+  // ============================================
+  // Redemptions Management
+  // ============================================
+
+  /**
+   * Get all redemptions
+   * GET /api/admin/redemptions
+   */
+  async getAllRedemptions(req: Request, res: Response): Promise<void> {
+    try {
+      const filters: AdminRedemptionFilters = {
+        page: req.query.page ? parseInt(req.query.page as string) : 1,
+        limit: req.query.limit ? parseInt(req.query.limit as string) : 20,
+        sortBy: (req.query.sortBy as string) || "createdAt",
+        sortOrder: (req.query.sortOrder as "asc" | "desc") || "desc",
+        ...(req.query.search && { search: req.query.search as string }),
+        ...(req.query.status && { status: req.query.status as string }),
+        ...(req.query.userId && { userId: parseInt(req.query.userId as string) }),
+        ...(req.query.redeemableItemId && {
+          redeemableItemId: parseInt(req.query.redeemableItemId as string),
+        }),
+        ...(req.query.createdAtFrom && { createdAtFrom: req.query.createdAtFrom as string }),
+        ...(req.query.createdAtTo && { createdAtTo: req.query.createdAtTo as string }),
+      };
+
+      const result = await adminService.getAllRedemptions(filters);
+
+      res.status(200).json({
+        message: "Redemptions retrieved successfully",
+        data: result.redemptions,
+        pagination: {
+          page: filters.page!,
+          limit: filters.limit!,
+          total: result.total,
+          totalPages: Math.ceil(result.total / filters.limit!),
+        },
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed to get redemptions" });
+    }
+  }
+
+  /**
+   * Get redemption by ID
+   * GET /api/admin/redemptions/:id
+   */
+  async getRedemptionById(req: Request, res: Response): Promise<void> {
+    try {
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) {
+        res.status(400).json({ message: "Invalid redemption ID" });
+        return;
+      }
+
+      const redemption = await adminService.getRedemptionById(id);
+      res.status(200).json({ message: "Redemption retrieved successfully", data: redemption });
+    } catch (error: any) {
+      if (error.message === "Redemption not found") {
+        res.status(404).json({ message: error.message });
+      } else {
+        res.status(500).json({ message: error.message || "Failed to get redemption" });
+      }
+    }
+  }
+
+  /**
+   * Update redemption status
+   * PATCH /api/admin/redemptions/:id/status
+   */
+  async updateRedemptionStatus(req: Request, res: Response): Promise<void> {
+    try {
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) {
+        res.status(400).json({ message: "Invalid redemption ID" });
+        return;
+      }
+
+      const { status, fulfillmentNotes } = req.body;
+
+      if (status && !["PENDING", "FULFILLED", "CANCELLED"].includes(status)) {
+        res.status(400).json({
+          message: "Invalid status. Must be one of: PENDING, FULFILLED, CANCELLED",
+        });
+        return;
+      }
+
+      const redemption = await adminService.updateRedemptionStatus(id, {
+        status,
+        fulfillmentNotes,
+      });
+
+      res.status(200).json({
+        message: "Redemption status updated successfully",
+        data: redemption,
+      });
+    } catch (error: any) {
+      if (error.message === "Redemption not found") {
+        res.status(404).json({ message: error.message });
+      } else {
+        res.status(500).json({ message: error.message || "Failed to update redemption status" });
+      }
     }
   }
 }

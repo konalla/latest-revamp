@@ -101,6 +101,9 @@ model User {
   // Wallet relation
   wallet Wallet?
 
+  // Redemption relations
+  redemptions Redemption[]
+
   // Focus Room relations
   createdFocusRooms            FocusRoom[]            @relation("FocusRoomCreator")
   focusRoomParticipations      FocusRoomParticipant[] @relation("FocusRoomParticipant")
@@ -680,10 +683,12 @@ model ReferralClick {
 
 enum WalletTransactionType {
   EARNED
+  REDEEMED
 }
 
 enum WalletTransactionCategory {
   REFERRAL
+  REDEMPTION
 }
 
 model Wallet {
@@ -704,19 +709,74 @@ model Wallet {
 model WalletTransaction {
   id           Int                       @id @default(autoincrement())
   walletId     Int
-  type         WalletTransactionType // EARNED only for MVP
-  amount       Int // Positive amount (coins earned)
+  type         WalletTransactionType // EARNED or REDEEMED
+  amount       Int // Positive amount (coins earned or redeemed)
   balanceAfter Int // Wallet balance after this transaction
   category     WalletTransactionCategory
   description  String
-  metadata     Json                      @default("{}") // Referral ID, referred user ID, etc.
+  metadata     Json                      @default("{}") // Referral ID, referred user ID, redemption ID, etc.
+  redemptionId Int?                      @unique // Link to redemption if this is a redemption transaction
   createdAt    DateTime                  @default(now())
 
-  wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  wallet     Wallet      @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  redemption Redemption? @relation(fields: [redemptionId], references: [id], onDelete: SetNull)
 
   @@index([walletId, createdAt])
   @@index([type, category])
   @@map("wallet_transactions")
+}
+
+// ============================================
+// Redemption System Models
+// ============================================
+
+enum RedemptionStatus {
+  PENDING
+  FULFILLED
+  CANCELLED
+}
+
+model RedeemableItem {
+  id              Int      @id @default(autoincrement())
+  name            String   @unique // e.g., "IQniti T-shirt"
+  description     String?  // Optional description
+  imageUrl        String?  // Optional preview image URL
+  requiredCredits Int      // Credits threshold (e.g., 200, 1500)
+  isActive        Boolean  @default(true) // Can be disabled
+  sortOrder       Int      @default(0) // For display ordering
+  variantOptions  Json?    @default("{}") // Optional: {"sizes": ["S", "M", "L"], "colors": ["Black", "White"]}
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  redemptions Redemption[]
+
+  @@index([isActive, sortOrder])
+  @@map("redeemable_items")
+}
+
+model Redemption {
+  id                Int              @id @default(autoincrement())
+  userId            Int
+  redeemableItemId  Int
+  creditsDeducted   Int              // Amount of credits deducted
+  balanceAfter      Int              // Wallet balance after redemption
+  status            RedemptionStatus @default(PENDING) // PENDING, FULFILLED, CANCELLED
+  selectedVariant   Json?            @default("{}") // Optional: {"size": "M", "color": "Black"}
+  webhookSent       Boolean          @default(false) // Track if webhook was sent
+  webhookSentAt     DateTime?        // When webhook was sent
+  webhookRetryCount Int              @default(0) // Track retry attempts
+  fulfillmentNotes  String?          // Optional notes from fulfillment team
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  redeemableItem RedeemableItem @relation(fields: [redeemableItemId], references: [id])
+  transaction    WalletTransaction? // Link to wallet transaction (one-to-one via redemptionId)
+
+  @@index([userId, createdAt])
+  @@index([status])
+  @@index([webhookSent])
+  @@map("redemptions")
 }
 
 // ============================================

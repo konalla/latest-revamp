@@ -6,6 +6,12 @@ export interface AwardCoinsMetadata {
   [key: string]: any;
 }
 
+export interface DeductCoinsMetadata {
+  redemptionId?: number;
+  redeemableItemId?: number;
+  [key: string]: any;
+}
+
 export class WalletService {
   /**
    * Get or create wallet for a user
@@ -192,6 +198,91 @@ export class WalletService {
       totalTransactions,
       referralTransactions,
     };
+  }
+
+  /**
+   * Check if user can afford an amount
+   */
+  async canAfford(userId: number, amount: number): Promise<boolean> {
+    const wallet = await this.getOrCreateWallet(userId);
+    return wallet.balance >= amount;
+  }
+
+  /**
+   * Deduct coins from a user's wallet
+   * Used for redemption transactions
+   */
+  async deductCredits(
+    userId: number,
+    amount: number,
+    category: "REDEMPTION",
+    description: string,
+    metadata?: DeductCoinsMetadata
+  ): Promise<{
+    success: boolean;
+    newBalance: number;
+    transactionId?: number;
+    error?: string;
+  }> {
+    try {
+      if (amount <= 0) {
+        return {
+          success: false,
+          newBalance: 0,
+          error: "Credit amount must be positive",
+        };
+      }
+
+      // Get or create wallet
+      const wallet = await this.getOrCreateWallet(userId);
+
+      // Check if user has sufficient balance
+      if (wallet.balance < amount) {
+        return {
+          success: false,
+          newBalance: wallet.balance,
+          error: "Insufficient credits",
+        };
+      }
+
+      // Calculate new balance
+      const newBalance = wallet.balance - amount;
+
+      // Update wallet balance
+      const updatedWallet = await prisma.wallet.update({
+        where: { id: wallet.id },
+        data: {
+          balance: newBalance,
+        },
+      });
+
+      // Create transaction record
+      const transaction = await prisma.walletTransaction.create({
+        data: {
+          walletId: wallet.id,
+          type: "REDEEMED",
+          amount: amount,
+          balanceAfter: newBalance,
+          category: category,
+          description: description,
+          metadata: metadata || {},
+          redemptionId: metadata?.redemptionId || null,
+        },
+      });
+
+      return {
+        success: true,
+        newBalance: updatedWallet.balance,
+        transactionId: transaction.id,
+      };
+    } catch (error: any) {
+      console.error("Error deducting credits:", error);
+      return {
+        success: false,
+        newBalance: 0,
+        error: error.message || "Failed to deduct credits",
+      };
+    }
   }
 }
 
