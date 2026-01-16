@@ -3,6 +3,10 @@ import { authenticateToken } from "../middleware/auth.middleware.js";
 import { requireAdmin } from "../middleware/admin.middleware.js";
 import { adminController } from "../controllers/admin.controller.js";
 import { adminAuthController } from "../controllers/admin-auth.controller.js";
+import {
+  uploadRedeemableItemImage,
+  handleUploadError,
+} from "../middleware/upload.middleware.js";
 
 const router = Router();
 
@@ -47,6 +51,28 @@ router.get("/teams/:id", adminController.getTeamDetails.bind(adminController));
 // Subscriptions
 router.get("/subscriptions", adminController.getAllSubscriptions.bind(adminController));
 router.get("/subscriptions/:id", adminController.getSubscriptionDetails.bind(adminController));
+
+// Redeemable Items
+router.get("/redeemable-items", adminController.getAllRedeemableItems.bind(adminController));
+router.get("/redeemable-items/:id", adminController.getRedeemableItemById.bind(adminController));
+router.post(
+  "/redeemable-items",
+  uploadRedeemableItemImage,
+  handleUploadError,
+  adminController.createRedeemableItem.bind(adminController)
+);
+router.put(
+  "/redeemable-items/:id",
+  uploadRedeemableItemImage,
+  handleUploadError,
+  adminController.updateRedeemableItem.bind(adminController)
+);
+router.delete("/redeemable-items/:id", adminController.deleteRedeemableItem.bind(adminController));
+
+// Redemptions
+router.get("/redemptions", adminController.getAllRedemptions.bind(adminController));
+router.get("/redemptions/:id", adminController.getRedemptionById.bind(adminController));
+router.patch("/redemptions/:id/status", adminController.updateRedemptionStatus.bind(adminController));
 
 export default router;
 

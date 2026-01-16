@@ -242,40 +242,10 @@ export class ReferralService {
         },
       });
 
-      // Award coins to referrer
-      try {
-        // Get referred user info for description
-        const referredUser = await prisma.user.findUnique({
-          where: { id: userId },
-          select: { email: true, name: true, username: true },
-        });
-
-        const referredUserDisplay = referredUser?.name || referredUser?.username || referredUser?.email || "a new user";
-        
-        // Get coin amount from environment variable (default: 100)
-        const coinAmount = parseInt(process.env.REFERRAL_COIN_REWARD || "100", 10);
-
-        const coinResult = await walletService.awardCoins(
-          referrerId,
-          coinAmount,
-          "REFERRAL",
-          `Earned ${coinAmount} coins from referral: ${referredUserDisplay}`,
-          {
-            referralId: referral.id,
-            referredUserId: userId,
-          }
-        );
-
-        if (coinResult.success) {
-          console.log(`[Wallet] Awarded ${coinAmount} coins to user ${referrerId} for referral ${referral.id}`);
-        } else {
-          console.error(`[Wallet] Failed to award coins to user ${referrerId}:`, coinResult.error);
-          // Don't fail referral registration if coin award fails
-        }
-      } catch (coinError: any) {
-        console.error("[Wallet] Error awarding coins for referral:", coinError);
-        // Don't fail referral registration if coin award fails
-      }
+      // Note: Coins are not awarded here on signup
+      // Coins will be awarded when:
+      // 1. User subscribes to free plan (5 coins) - handled in subscription.service.ts
+      // 2. User makes first payment (100 coins) - handled in completeReferralOnboarding()
 
       return {
         success: true,
@@ -331,6 +301,71 @@ export class ReferralService {
         completedAt: new Date(),
       },
     });
+
+    // Award additional coins to referrer when referred user makes first payment
+    try {
+      // Get referred user info for description
+      const referredUser = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { email: true, name: true, username: true },
+      });
+
+      const referredUserDisplay = referredUser?.name || referredUser?.username || referredUser?.email || "a new user";
+      
+      // Get coin amount from environment variable (default: 100)
+      // This is the additional reward when referred user pays
+      const paymentCoinAmount = parseInt(process.env.REFERRAL_COIN_REWARD || "100", 10);
+
+      // Check if coins were already awarded for payment (to avoid duplicates)
+      const wallet = await prisma.wallet.findUnique({
+        where: { userId: referral.referrerId },
+      });
+
+      let alreadyAwardedForPayment = false;
+      if (wallet) {
+        // Get all referral transactions for this wallet
+        const referralTransactions = await prisma.walletTransaction.findMany({
+          where: {
+            walletId: wallet.id,
+            category: "REFERRAL",
+          },
+        });
+
+        // Check if there's a transaction with this referralId and type "payment" in metadata
+        for (const transaction of referralTransactions) {
+          const metadata = transaction.metadata as any;
+          if (metadata?.referralId === referral.id && metadata?.type === "payment") {
+            alreadyAwardedForPayment = true;
+            break;
+          }
+        }
+      }
+
+      if (!alreadyAwardedForPayment) {
+        const coinResult = await walletService.awardCoins(
+          referral.referrerId,
+          paymentCoinAmount,
+          "REFERRAL",
+          `Earned ${paymentCoinAmount} coins from referral payment: ${referredUserDisplay}`,
+          {
+            referralId: referral.id,
+            referredUserId: userId,
+            type: "payment", // Mark as payment reward
+          }
+        );
+
+        if (coinResult.success) {
+          console.log(`[Wallet] Awarded ${paymentCoinAmount} coins to user ${referral.referrerId} for referral payment ${referral.id}`);
+        } else {
+          console.error(`[Wallet] Failed to award payment coins to user ${referral.referrerId}:`, coinResult.error);
+        }
+      } else {
+        console.log(`[Wallet] Payment coins already awarded for referral ${referral.id}, skipping`);
+      }
+    } catch (coinError: any) {
+      console.error("[Wallet] Error awarding payment coins for referral:", coinError);
+      // Don't fail referral completion if coin award fails
+    }
 
     // Check and update referrer's status
     const statusUpdate = await statusAssignmentService.checkAndUpdateUserStatus(referral.referrerId);
