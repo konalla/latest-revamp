@@ -28,8 +28,12 @@ import redemptionRoutes from "./routes/redemption.routes.js";
 const app = express();
 
 // Configure CORS
+const corsOrigins = process.env.CORS_ORIGINS
+  ? process.env.CORS_ORIGINS.split(",").map(origin => origin.trim())
+  : ["http://localhost:5173"]; // Default fallback for development
+
 app.use(cors({
-  origin: ["https://workspace.iqniti.com","https://dashboard.iqniti.com","http://workspace-detail.s3-website.eu-north-1.amazonaws.com","http://localhost:5173", "http://localhost:5174", "http://localhost:5175", "http://127.0.0.1:5173", "http://127.0.0.1:5174", "http://127.0.0.1:5175"],
+  origin: corsOrigins,
   credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"]
