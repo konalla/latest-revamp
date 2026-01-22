@@ -15,6 +15,7 @@ import { ensureWorkspaceAndTeamForUser } from "./workspace.service.js";
 import { subscriptionService } from "./subscription.service.js";
 import { sendPasswordResetEmail } from "./email.service.js";
 import { referralService } from "./referral.service.js";
+import { webhookService } from "./webhook.service.js";
 
 const SALT_ROUNDS = 10;
 
@@ -69,6 +70,71 @@ const register = async (data: RegisterRequest): Promise<AuthResponse> => {
       // Log error but don't fail registration if referral fails
       console.error("Error registering referral during signup:", error);
     }
+  }
+
+  // Send signup webhook asynchronously (don't block registration)
+  // Get the full user profile with all necessary data for webhook
+  const fullUserData = await prisma.user.findUnique({
+    where: { id: user.id },
+    select: {
+      id: true,
+      email: true,
+      username: true,
+      name: true,
+      phone_number: true,
+      created_at: true,
+      // Job & Company info
+      job_title: true,
+      company_name: true,
+      company_size: true,
+      company_description: true,
+      industry: true,
+      // Profile info
+      bio: true,
+      website: true,
+      linkedin_url: true,
+      website_url: true,
+      timezone: true,
+      profile_photo_url: true,
+      // Referral status for badge info
+      referralStatus: {
+        select: {
+          earlyAccessStatus: true,
+          originId: true,
+          vanguardId: true,
+        },
+      },
+    },
+  });
+
+  if (fullUserData) {
+    // Send webhook asynchronously - don't block registration
+    webhookService
+      .sendSignupWebhook({
+        id: fullUserData.id,
+        email: fullUserData.email,
+        username: fullUserData.username,
+        name: fullUserData.name,
+        phone_number: fullUserData.phone_number,
+        created_at: fullUserData.created_at,
+        job_title: fullUserData.job_title,
+        company_name: fullUserData.company_name,
+        company_size: fullUserData.company_size,
+        company_description: fullUserData.company_description,
+        industry: fullUserData.industry,
+        bio: fullUserData.bio,
+        website: fullUserData.website,
+        linkedin_url: fullUserData.linkedin_url,
+        website_url: fullUserData.website_url,
+        timezone: fullUserData.timezone,
+        profile_photo_url: fullUserData.profile_photo_url,
+        referralStatus: fullUserData.referralStatus,
+      })
+      .catch((error) => {
+        // Log error but don't throw - registration is already successful
+        // Webhook failures should not affect user registration
+        console.error("Failed to send signup webhook (non-blocking):", error.message || error);
+      });
   }
 
   // Note: Users need to select a subscription plan after registration
