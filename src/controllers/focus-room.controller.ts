@@ -1712,8 +1712,20 @@ export const cancelRecurringSchedule = async (req: Request, res: Response): Prom
       return;
     }
 
-    const validatedData = cancelRecurringScheduleSchema.parse(req.body);
-    const { cancelOccurrence } = validatedData;
+    // Handle empty body for DELETE requests - default to empty object
+    const body = req.body || {};
+    const validationResult = cancelRecurringScheduleSchema.safeParse(body);
+    
+    if (!validationResult.success) {
+      res.status(400).json({
+        success: false,
+        error: "Validation error",
+        details: validationResult.error.errors,
+      });
+      return;
+    }
+
+    const { cancelOccurrence } = validationResult.data;
 
     if (cancelOccurrence) {
       // Cancel specific occurrence
