@@ -54,6 +54,9 @@ Before setting up the application, make sure you have the following installed:
    # Server Configuration
    PORT=3000
    NODE_ENV="development"
+   
+   # CORS Configuration
+   CORS_ORIGINS="https://workspace.iqniti.com,https://dashboard.iqniti.com,http://localhost:5173"
    ```
 
 ## 🗄️ Database Setup
@@ -121,6 +124,158 @@ npx prisma migrate reset
 npx prisma db pull
 ```
 
+🗄️ Database Setup
+
+### 1. Generate Prisma Client
+```bash
+npx prisma generate
+```
+Or it runs automatically after `npm install` via `postinstall` script.
+
+### 2. Run Database Migrations
+
+**For Development:**
+```bash
+npx prisma migrate dev
+```
+
+**For Production:**
+```bash
+npx prisma migrate deploy
+```
+
+### 3. Check Migration Status
+```bash
+npx prisma migrate status
+```
+
+### 4. Prisma Studio (Database GUI)
+```bash
+npx prisma studio
+```
+
+---
+
+## 🌱 Seeding Scripts
+
+### Individual Seeding Scripts
+
+#### 1. Seed Subscription Plans
+Creates all subscription plans (Trial, Free, Monthly, Yearly, Essential Twenty, Business Pro, Focus Master, Performance Founder) and Stripe payment provider.
+
+```bash
+# OR
+npx tsx scripts/seed-subscriptions.ts
+```
+
+**What it seeds:**
+- Stripe payment provider
+- Clarity Plan (trial - 14 days, 50 tasks)
+- Free Plan (1 project, 5 objectives, 10 key results, 50 tasks, 1 workspace, 5 teams)
+- Pro Plan - Monthly ($18/month, 1000 tasks)
+- Pro Plan - Yearly ($180/year, 10000 tasks)
+- Essential Twenty ($24/month, 1500 tasks)
+- Business Pro ($49/month, 2000 tasks)
+- Focus Master ($20/month, unlimited tasks, 7 workspaces)
+- Performance Founder ($200/year, unlimited tasks, 12 workspaces)
+
+**Note:** After running this script, you need to manually update `stripePriceId` and `stripeProductId` fields in the database after creating products in Stripe Dashboard.
+
+#### 2. Seed Referral Programs
+Creates the Origin 1000 and Vanguard 300 referral programs.
+
+```bash
+# OR
+npx tsx scripts/seed-referral-programs.ts
+```
+
+**What it seeds:**
+- Origin 1000 program (first 1000 users, 0 referrals required)
+- Vanguard 300 program (first 300 users with 3+ referrals)
+
+#### 3. Seed Focus Room Templates
+Creates default focus room templates for users.
+
+```bash
+# OR
+npx tsx scripts/seed-focus-room-templates.ts
+```
+
+**What it seeds:**
+- Pomodoro Deep Work (25 min focus, 5 min break)
+- Creative Flow (50 min focus, 10 min break)
+- Study Session (30 min focus, 8 min break)
+- Strategic Planning (20 min focus, 5 min break)
+
+**Note:** Requires an admin user with ID 1 to exist. If not, templates will be created with `creatorId = 1`.
+
+
+
+## 👤 Admin User Creation
+
+### Create First Admin User
+Creates the first admin user for accessing the admin panel.
+
+```bash
+npx tsx scripts/create-admin.ts <email> <username> <name> <password>
+```
+
+**Example:**
+```bash
+npx tsx scripts/create-admin.ts admin@example.com admin "Admin User" "SecurePassword123!"
+```
+
+**Important:** 
+- Run this **before** seeding focus room templates if you want them associated with the admin user
+- The script checks if an admin already exists and prevents duplicate creation
+
+---
+
+## 🔧 Complete Setup Workflow
+
+### For Fresh Installation (Development)
+
+```bash
+# 1. Install dependencies
+npm install
+
+# 2. Set up environment variables
+# Create .env file with required variables
+
+# 3. Create database (if not exists)
+createdb iqniti_db
+
+# 4. Generate Prisma client
+npx prisma generate
+
+# 5. Run migrations
+npx prisma migrate dev
+
+# 6. Create admin user
+npx tsx scripts/create-admin.ts admin@example.com admin "Admin User" "SecurePassword123!"
+
+# 8. Start development server
+npm run dev
+```
+
+### For Production
+
+```bash
+# 1. Install dependencies
+npm install
+
+# 2. Set up environment variables
+# Create .env file with production values
+
+# 3. Generate Prisma client
+npx prisma generate
+
+# 4. Run migrations (production)
+npx prisma migrate deploy
+
+# 5. Create admin user
+npx tsx scripts/create-admin.ts admin@example.com admin "Admin User" "SecurePassword123!"
+
 ## 🔗 API Endpoints
 
 The application provides the following API endpoints:
@@ -171,6 +326,7 @@ iqniti-backend/
 | `JWT_EXPIRES_IN` | JWT token expiration time | `7d` | ❌ |
 | `PORT` | Server port | `3000` | ❌ |
 | `NODE_ENV` | Environment mode | `development` | ❌ |
+| `CORS_ORIGINS` | Comma-separated list of allowed CORS origins | `http://localhost:5173` | ❌ |
 
 ⚠️ **Security Note**: Always use a strong, unique `JWT_SECRET` in production environments.
 
