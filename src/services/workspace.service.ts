@@ -31,7 +31,7 @@ export const getWorkspaceLimits = async (userId: number): Promise<{
     let canCreateTeam = false;
     
     if (hasWorkspacePlan) {
-      if (status === "ACTIVE") {
+      if (status === "ACTIVE" || status === "TRIAL") {
         // Full access (including during 14-day trial for all paid plans)
         if (hasEssentialTwenty) {
           maxWorkspaces = 3; // 1 default + 2 more
