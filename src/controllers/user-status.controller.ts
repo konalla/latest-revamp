@@ -30,7 +30,7 @@ export const getCurrentUserStatus = async (req: Request, res: Response): Promise
 export const getUserStatus = async (req: Request, res: Response): Promise<void> => {
   try {
     const requesterId = req.user?.userId || req.user?.id;
-    const targetUserId = parseInt(req.params.userId);
+    const targetUserId = parseInt(req.params.userId || "");
 
     if (!requesterId) {
       res.status(401).json({ error: "Unauthorized" });
@@ -110,8 +110,8 @@ export const getActiveUsers = async (req: Request, res: Response): Promise<void>
 
     // Get active users based on filters
     const activeUsers = await userStatusService.getActiveUsers({
-      workspaceId,
-      teamId,
+      ...(workspaceId !== undefined && { workspaceId }),
+      ...(teamId !== undefined && { teamId }),
       requesterId,
     });
 
@@ -129,7 +129,7 @@ export const getActiveUsers = async (req: Request, res: Response): Promise<void>
 export const getWorkspaceMembersStatus = async (req: Request, res: Response): Promise<void> => {
   try {
     const requesterId = req.user?.userId || req.user?.id;
-    const workspaceId = parseInt(req.params.workspaceId);
+    const workspaceId = parseInt(req.params.workspaceId || "");
 
     if (!requesterId) {
       res.status(401).json({ error: "Unauthorized" });
@@ -183,7 +183,7 @@ export const getWorkspaceMembersStatus = async (req: Request, res: Response): Pr
 export const getTeamMembersStatus = async (req: Request, res: Response): Promise<void> => {
   try {
     const requesterId = req.user?.userId || req.user?.id;
-    const teamId = parseInt(req.params.teamId);
+    const teamId = parseInt(req.params.teamId || "");
 
     if (!requesterId) {
       res.status(401).json({ error: "Unauthorized" });
@@ -230,4 +230,5 @@ export const getTeamMembersStatus = async (req: Request, res: Response): Promise
     res.status(500).json({ error: error.message || "Failed to get team members status" });
   }
 };
+
 

@@ -564,7 +564,7 @@ export class AdminController {
    */
   async getRedeemableItemById(req: Request, res: Response): Promise<void> {
     try {
-      const id = parseInt(req.params.id);
+      const id = parseInt(req.params.id || "");
       if (isNaN(id)) {
         res.status(400).json({ message: "Invalid item ID" });
         return;
@@ -651,11 +651,11 @@ export class AdminController {
       const item = await adminService.createRedeemableItem({
         name,
         description,
-        imageUrl,
+        ...(imageUrl !== undefined && { imageUrl }),
         requiredCredits: parseInt(requiredCredits),
         isActive: isActive === "true" || isActive === true,
-        sortOrder: sortOrder ? parseInt(sortOrder) : undefined,
-        variantOptions: parsedVariantOptions,
+        ...(sortOrder && { sortOrder: parseInt(sortOrder) }),
+        ...(parsedVariantOptions !== undefined && { variantOptions: parsedVariantOptions }),
       });
 
       res.status(201).json({
@@ -678,7 +678,7 @@ export class AdminController {
    */
   async updateRedeemableItem(req: Request, res: Response): Promise<void> {
     try {
-      const id = parseInt(req.params.id);
+      const id = parseInt(req.params.id || "");
       if (isNaN(id)) {
         res.status(400).json({ message: "Invalid item ID" });
         return;
@@ -740,11 +740,11 @@ export class AdminController {
       const item = await adminService.updateRedeemableItem(id, {
         name,
         description,
-        imageUrl,
-        requiredCredits: requiredCredits ? parseInt(requiredCredits) : undefined,
-        isActive: isActive !== undefined ? (isActive === "true" || isActive === true) : undefined,
-        sortOrder: sortOrder !== undefined ? parseInt(sortOrder) : undefined,
-        variantOptions: parsedVariantOptions,
+        ...(imageUrl !== undefined && { imageUrl }),
+        ...(requiredCredits !== undefined && { requiredCredits: parseInt(requiredCredits) }),
+        ...(isActive !== undefined && { isActive: isActive === "true" || isActive === true }),
+        ...(sortOrder !== undefined && { sortOrder: parseInt(sortOrder) }),
+        ...(parsedVariantOptions !== undefined && { variantOptions: parsedVariantOptions }),
       });
 
       res.status(200).json({
@@ -768,7 +768,7 @@ export class AdminController {
    */
   async deleteRedeemableItem(req: Request, res: Response): Promise<void> {
     try {
-      const id = parseInt(req.params.id);
+      const id = parseInt(req.params.id || "");
       if (isNaN(id)) {
         res.status(400).json({ message: "Invalid item ID" });
         return;
@@ -835,7 +835,7 @@ export class AdminController {
    */
   async getRedemptionById(req: Request, res: Response): Promise<void> {
     try {
-      const id = parseInt(req.params.id);
+      const id = parseInt(req.params.id || "");
       if (isNaN(id)) {
         res.status(400).json({ message: "Invalid redemption ID" });
         return;
@@ -858,7 +858,7 @@ export class AdminController {
    */
   async updateRedemptionStatus(req: Request, res: Response): Promise<void> {
     try {
-      const id = parseInt(req.params.id);
+      const id = parseInt(req.params.id || "");
       if (isNaN(id)) {
         res.status(400).json({ message: "Invalid redemption ID" });
         return;

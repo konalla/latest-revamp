@@ -90,7 +90,7 @@ export class FocusRoomService {
     const room = await prisma.focusRoom.create({
       data: {
         name: data.name,
-        description: data.description,
+        ...(data.description !== undefined && { description: data.description }),
         creatorId: userId,
         visibility: data.visibility,
         focusDuration: data.focusDuration,
