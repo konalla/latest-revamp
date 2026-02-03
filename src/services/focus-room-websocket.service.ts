@@ -2,6 +2,12 @@ import { Server as SocketIOServer, Socket } from "socket.io";
 import { focusRoomSessionService } from "./focus-room-session.service.js";
 import { focusRoomParticipantService } from "./focus-room-participant.service.js";
 import { verifyToken } from "../utils/jwt.utils.js";
+import type { UserJWTPayload } from "../types/auth.types.js";
+import type {
+  WebSocketSessionPayload,
+  WebSocketTimerPayload,
+  SessionTimerInfo,
+} from "../types/focus-room-service.types.js";
 import prisma from "../config/prisma.js";
 
 interface AuthenticatedSocket extends Socket {
@@ -30,8 +36,8 @@ export class FocusRoomWebSocketService {
 
         if (token && typeof token === "string") {
           try {
-            const user = verifyToken(token) as any;
-            const userId = user?.id ?? user?.userId;
+            const user = verifyToken(token) as UserJWTPayload;
+            const userId = user?.userId;
             
             if (userId) {
               socket.userId = userId;
@@ -122,9 +128,10 @@ export class FocusRoomWebSocketService {
           socket.to(roomName).emit("participant_joined", {
             participant: participants.find((p) => p.userId === socket.userId),
           });
-        } catch (error: any) {
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : "Failed to join room";
           console.error("Error joining room:", error);
-          socket.emit("error", { message: error.message || "Failed to join room" });
+          socket.emit("error", { message: errorMessage });
         }
       });
 
@@ -150,7 +157,7 @@ export class FocusRoomWebSocketService {
 
           const { roomId, status } = data;
           const participant = await focusRoomParticipantService.updateStatus(roomId, socket.userId, {
-            status: status as any,
+            status: status as "JOINED" | "FOCUSING" | "BREAK" | "IDLE" | "LEFT",
           });
 
           const roomName = `room:${roomId}`;
@@ -162,9 +169,10 @@ export class FocusRoomWebSocketService {
               user: participant.user,
             },
           });
-        } catch (error: any) {
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : "Failed to update status";
           console.error("Error updating participant status:", error);
-          socket.emit("error", { message: error.message || "Failed to update status" });
+          socket.emit("error", { message: errorMessage });
         }
       });
 
@@ -190,9 +198,10 @@ export class FocusRoomWebSocketService {
               user: participant.user,
             },
           });
-        } catch (error: any) {
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : "Failed to update intention";
           console.error("Error updating intention:", error);
-          socket.emit("error", { message: error.message || "Failed to update intention" });
+          socket.emit("error", { message: errorMessage });
         }
       });
 
@@ -207,7 +216,7 @@ export class FocusRoomWebSocketService {
           } else {
             socket.emit("error", { message: "Session not found" });
           }
-        } catch (error: any) {
+        } catch (error) {
           console.error("Error syncing timer:", error);
           socket.emit("error", { message: "Failed to sync timer" });
         }
@@ -222,26 +231,33 @@ export class FocusRoomWebSocketService {
 
   /**
    * Broadcast timer updates to all active sessions
+   * Note: PAUSED sessions do not receive timer_update events - timer is frozen
    */
   private startTimerBroadcasts() {
     setInterval(async () => {
       try {
-        // Get all active sessions
-        const activeSessions = await prisma.focusRoomSession.findMany({
+        // Get all active and paused sessions (paused for expired session checking)
+        const sessions = await prisma.focusRoomSession.findMany({
           where: {
             status: { in: ["ACTIVE", "PAUSED"] },
           },
         });
 
-        for (const session of activeSessions) {
+        for (const session of sessions) {
           const timer = await focusRoomSessionService.getSessionTimer(session.id);
           const roomName = `room:${session.roomId}`;
 
           if (timer) {
-            // Broadcast timer update
-            this.io.to(roomName).emit("timer_update", timer);
+            // Only broadcast timer_update for ACTIVE sessions
+            // PAUSED sessions should not receive timer updates (timer is frozen)
+            // This prevents the timer from continuing to count down when paused
+            if (session.status === "ACTIVE" && timer.status === "ACTIVE") {
+              this.io.to(roomName).emit("timer_update", timer);
+            }
+            // Note: PAUSED sessions are skipped - no timer_update events sent
+            // The session_paused event is sent once when pause is called
 
-            // Auto-end expired sessions
+            // Auto-end expired sessions (check both ACTIVE and PAUSED)
             if (timer.status === "COMPLETED" && session.status !== "COMPLETED") {
               try {
                 await focusRoomSessionService.endSession(session.roomId, session.id);
@@ -264,7 +280,7 @@ export class FocusRoomWebSocketService {
   /**
    * Broadcast session started event
    */
-  broadcastSessionStarted(roomId: number, session: any, timer: any) {
+  broadcastSessionStarted(roomId: number, session: WebSocketSessionPayload, timer: WebSocketTimerPayload): void {
     const roomName = `room:${roomId}`;
     this.io.to(roomName).emit("session_started", {
       session,
@@ -275,7 +291,7 @@ export class FocusRoomWebSocketService {
   /**
    * Broadcast session paused event
    */
-  broadcastSessionPaused(roomId: number, session: any, timer: any) {
+  broadcastSessionPaused(roomId: number, session: WebSocketSessionPayload, timer: WebSocketTimerPayload): void {
     const roomName = `room:${roomId}`;
     this.io.to(roomName).emit("session_paused", {
       session,
@@ -286,7 +302,7 @@ export class FocusRoomWebSocketService {
   /**
    * Broadcast session resumed event
    */
-  broadcastSessionResumed(roomId: number, session: any, timer: any) {
+  broadcastSessionResumed(roomId: number, session: WebSocketSessionPayload, timer: WebSocketTimerPayload): void {
     const roomName = `room:${roomId}`;
     this.io.to(roomName).emit("session_resumed", {
       session,
@@ -297,11 +313,12 @@ export class FocusRoomWebSocketService {
   /**
    * Broadcast session ended event
    */
-  broadcastSessionEnded(roomId: number, session: any) {
+  broadcastSessionEnded(roomId: number, session: WebSocketSessionPayload): void {
     const roomName = `room:${roomId}`;
     this.io.to(roomName).emit("session_ended", {
       session,
     });
   }
 }
+
 

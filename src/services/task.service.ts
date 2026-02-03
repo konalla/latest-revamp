@@ -1776,21 +1776,108 @@ export class TaskService {
       // Include Signal Layer fields
       const overdueTasksFormatted: TodayTaskResponse[] = overdueTasksFromDB
         .filter(task => task.dueDate !== null) // Only include tasks with due dates
-        .map(task => ({
-          ...task,
+        .map(task => {
+          const aiRec = (task as any).aiRecommendation;
+          return {
+            id: task.id,
+            title: task.title,
+            description: task.description || '', // Convert null to empty string
+            duration: task.duration,
+            priority: task.priority,
+            importance: task.importance,
+            urgency: task.urgency,
+            dueDate: task.dueDate!, // We know it's not null due to filter above
+            // Signal Layer fields
+            isHighLeverage: (task as any).isHighLeverage || false,
+            advancesKeyResults: (task as any).advancesKeyResults || false,
+            aiRecommendationStatus: 'available' as const,
+            rank: 0, // Will be calculated later if needed
+            // Explicitly include AI recommendation in proper format
+            aiRecommendation: aiRec ? {
+              id: aiRec.id,
+              taskId: aiRec.taskId,
+              category: aiRec.category,
+              recommendedTime: aiRec.recommendedTime,
+              confidence: aiRec.confidence,
+              reasoning: aiRec.reasoning,
+              signalType: aiRec.signalType || null,
+              recommendedDuration: aiRec.recommendedDuration || null,
+              breakRecommendation: aiRec.breakRecommendation || null,
+              loadWarning: aiRec.loadWarning || null,
+              importanceFlag: aiRec.importanceFlag || null,
+              urgencyFlag: aiRec.urgencyFlag || null,
+              createdAt: aiRec.createdAt,
+              updatedAt: aiRec.updatedAt
+            } : undefined
+          };
+        });
+      
+      // Also get tasks WITHOUT due dates that have AI recommendations
+      // These are unscheduled tasks that can be recommended based on AI recommended time
+      const tasksWithoutDueDate = await prisma.task.findMany({
+        where: {
+          userId,
+          completed: false,
+          dueDate: null, // Tasks without due dates
+          aiRecommendation: {
+            isNot: null // Must have AI recommendation
+          }
+        },
+        include: {
+          aiRecommendation: true,
+          okr: {
+            select: {
+              id: true,
+              currentValue: true,
+              targetValue: true,
+              endDate: true,
+              confidenceScore: true
+            }
+          }
+        }
+      } as any);
+      
+      // Convert tasks without due dates to TodayTaskResponse format
+      const tasksWithoutDueDateFormatted: TodayTaskResponse[] = tasksWithoutDueDate.map(task => {
+        const aiRec = (task as any).aiRecommendation;
+        return {
+          id: task.id,
+          title: task.title,
           description: task.description || '', // Convert null to empty string
-          dueDate: task.dueDate!, // We know it's not null due to filter above
+          duration: task.duration,
+          priority: task.priority,
+          importance: task.importance,
+          urgency: task.urgency,
+          dueDate: null, // Explicitly set to null
           // Signal Layer fields
           isHighLeverage: (task as any).isHighLeverage || false,
           advancesKeyResults: (task as any).advancesKeyResults || false,
           aiRecommendationStatus: 'available' as const,
-          rank: 0 // Will be calculated later if needed
-        }));
+          rank: 0, // Will be calculated later if needed
+          // Explicitly include AI recommendation in proper format
+          aiRecommendation: aiRec ? {
+            id: aiRec.id,
+            taskId: aiRec.taskId,
+            category: aiRec.category,
+            recommendedTime: aiRec.recommendedTime,
+            confidence: aiRec.confidence,
+            reasoning: aiRec.reasoning,
+            signalType: aiRec.signalType || null,
+            recommendedDuration: aiRec.recommendedDuration || null,
+            breakRecommendation: aiRec.breakRecommendation || null,
+            loadWarning: aiRec.loadWarning || null,
+            importanceFlag: aiRec.importanceFlag || null,
+            urgencyFlag: aiRec.urgencyFlag || null,
+            createdAt: aiRec.createdAt,
+            updatedAt: aiRec.updatedAt
+          } : undefined
+        };
+      });
       
-      // Combine today's tasks and overdue tasks
+      // Combine today's tasks, overdue tasks, and tasks without due dates
       const allTasks = {
         ...todayTasks,
-        tasks: [...todayTasks.tasks, ...overdueTasksFormatted]
+        tasks: [...todayTasks.tasks, ...overdueTasksFormatted, ...tasksWithoutDueDateFormatted]
       };
       
       if (!allTasks.tasks.length) {
@@ -1798,7 +1885,7 @@ export class TaskService {
           task: null,
           nextRecommendation: null,
           currentTime: timeOnly,
-          reasoning: "No tasks found for today or overdue"
+          reasoning: "No tasks found with AI recommendations"
         };
       }
 
@@ -1884,12 +1971,15 @@ export class TaskService {
       }
 
       // PRIORITY 3: Find next recommended task (closest future recommendation)
-      const futureTasks = allTasks.tasks
+      const allTasksWithRecommendations = allTasks.tasks
         .filter(task => task.aiRecommendation)
         .map(task => ({
           ...task,
           recommendedMinutes: this.parseTimeToMinutes(task.aiRecommendation!.recommendedTime)
-        }))
+        }));
+
+      // Find future tasks (recommended time is after current time)
+      const futureTasks = allTasksWithRecommendations
         .filter(task => task.recommendedMinutes > currentMinutes)
         .sort((a, b) => a.recommendedMinutes - b.recommendedMinutes);
 
@@ -1906,11 +1996,40 @@ export class TaskService {
         };
       }
 
+      // FALLBACK: If no future tasks, find the closest past task (within last 4 hours)
+      // This handles cases where recommended times have passed but are still relevant
+      const PAST_WINDOW_HOURS = 4;
+      const pastTasks = allTasksWithRecommendations
+        .filter(task => {
+          const timeDiff = currentMinutes - task.recommendedMinutes;
+          return timeDiff > 0 && timeDiff <= (PAST_WINDOW_HOURS * 60); // Within last 4 hours
+        })
+        .sort((a, b) => {
+          // Sort by closest to current time (most recent first)
+          const aDiff = currentMinutes - a.recommendedMinutes;
+          const bDiff = currentMinutes - b.recommendedMinutes;
+          return aDiff - bDiff; // Smaller diff = more recent
+        });
+
+      if (pastTasks.length > 0) {
+        const closestPastTask = pastTasks[0];
+        const timeAgo = currentMinutes - closestPastTask.recommendedMinutes;
+        const hoursAgo = Math.floor(timeAgo / 60);
+        const minutesAgo = timeAgo % 60;
+        
+        return {
+          task: closestPastTask,
+          nextRecommendation: null,
+          currentTime: timeOnly,
+          reasoning: `This task was recommended for ${closestPastTask.aiRecommendation?.recommendedTime} (${hoursAgo > 0 ? `${hoursAgo}h ` : ''}${minutesAgo}m ago). It's still relevant and can be done now.`
+        };
+      }
+
       return {
         task: null,
         nextRecommendation: null,
         currentTime: timeOnly,
-        reasoning: `No upcoming task recommendations found. Current time: ${timeOnly}`
+        reasoning: `No task recommendations found. Current time: ${timeOnly}`
       };
 
     } catch (error) {

@@ -84,8 +84,9 @@ export class FocusRoomSchedulerService {
 
           try {
             await this.startScheduledSession(room.id);
-          } catch (error: any) {
-            console.error(`[Scheduler] Error starting scheduled session for room ${room.id}:`, error.message);
+          } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : "Unknown error";
+            console.error(`[Scheduler] Error starting scheduled session for room ${room.id}:`, errorMessage);
             // Continue with other rooms even if one fails
           }
         }
@@ -120,10 +121,11 @@ export class FocusRoomSchedulerService {
 
             // Create session for this occurrence
             await this.startRecurringSession(schedule.roomId, schedule.id, schedule.scheduledTime);
-          } catch (error: any) {
+          } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : "Unknown error";
             console.error(
               `[Scheduler] Error processing recurring schedule ${schedule.id} for room ${schedule.roomId}:`,
-              error.message
+              errorMessage
             );
             // Continue with other schedules even if one fails
           }
@@ -222,8 +224,18 @@ export class FocusRoomSchedulerService {
     const timer = await focusRoomSessionService.getSessionTimer(session.id);
 
     // Broadcast session started event via WebSocket
-    if (this.wsService) {
-      this.wsService.broadcastSessionStarted(roomId, session, timer);
+    if (this.wsService && timer) {
+      this.wsService.broadcastSessionStarted(roomId, {
+        id: session.id,
+        roomId: session.roomId,
+        startedAt: session.startedAt,
+        endedAt: session.endedAt,
+        pausedAt: session.pausedAt,
+        resumedAt: session.resumedAt,
+        scheduledDuration: session.scheduledDuration,
+        actualDuration: session.actualDuration,
+        status: session.status,
+      }, timer);
     }
 
     console.log(`[Scheduler] ✅ Successfully started scheduled session ${session.id} for room ${roomId}`);
@@ -340,8 +352,18 @@ export class FocusRoomSchedulerService {
     const timer = await focusRoomSessionService.getSessionTimer(session.id);
 
     // Broadcast session started event via WebSocket
-    if (this.wsService) {
-      this.wsService.broadcastSessionStarted(roomId, session, timer);
+    if (this.wsService && timer) {
+      this.wsService.broadcastSessionStarted(roomId, {
+        id: session.id,
+        roomId: session.roomId,
+        startedAt: session.startedAt,
+        endedAt: session.endedAt,
+        pausedAt: session.pausedAt,
+        resumedAt: session.resumedAt,
+        scheduledDuration: session.scheduledDuration,
+        actualDuration: session.actualDuration,
+        status: session.status,
+      }, timer);
     }
 
     console.log(`[Scheduler] ✅ Successfully started recurring session ${session.id} for room ${roomId}`);
@@ -421,8 +443,9 @@ export class FocusRoomSchedulerService {
         if (room.sessions.length === 0) {
           try {
             await this.startScheduledSession(room.id);
-          } catch (error: any) {
-            console.error(`[Scheduler] Error rescheduling missed session for room ${room.id}:`, error.message);
+          } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : "Unknown error";
+            console.error(`[Scheduler] Error rescheduling missed session for room ${room.id}:`, errorMessage);
           }
         }
       }

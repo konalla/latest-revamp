@@ -15,6 +15,7 @@ import {
   resumeSession,
   endSession,
   getSessionTimer,
+  getRoomSessionHistory,
   // Participant Management
   joinRoom,
   leaveRoom,
@@ -37,13 +38,13 @@ import {
   getTemplateById,
   createTemplate,
   createRoomFromTemplate,
+  // Scheduling Management
   scheduleSession,
   cancelScheduledSession,
   updateRecurringSchedule,
   cancelRecurringSchedule,
   getUpcomingOccurrences,
-  getRoomSessionHistory,
-} from "../controllers/focus-room.controller.js";
+} from "../controllers/focus-room/index.js";
 
 const router = Router();
 

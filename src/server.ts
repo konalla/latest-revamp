@@ -7,6 +7,7 @@ import app from "./app.js";
 import { FocusRoomWebSocketService } from "./services/focus-room-websocket.service.js";
 import { FocusSessionWebSocketService } from "./services/focus-session-websocket.service.js";
 import { FocusRoomSchedulerService } from "./services/focus-room-scheduler.service.js";
+import "./types/global.types.js"; // Load global type definitions
 
 const port = process.env.PORT || 3000;
 
@@ -34,8 +35,8 @@ const focusRoomWebSocketService = new FocusRoomWebSocketService(io);
 const focusSessionWebSocketService = new FocusSessionWebSocketService(io);
 
 // Make WebSocket services available globally (for use in controllers)
-(global as any).focusRoomWebSocketService = focusRoomWebSocketService;
-(global as any).focusSessionWebSocketService = focusSessionWebSocketService;
+global.focusRoomWebSocketService = focusRoomWebSocketService;
+global.focusSessionWebSocketService = focusSessionWebSocketService;
 
 // Initialize Focus Room Scheduler service
 const focusRoomSchedulerService = new FocusRoomSchedulerService(focusRoomWebSocketService);

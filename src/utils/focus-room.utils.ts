@@ -90,3 +90,54 @@ export function calculateActualDuration(
   return totalDuration;
 }
 
+/**
+ * Parse room ID from request parameter
+ * Returns null if invalid or missing
+ */
+export function parseRoomId(roomIdParam: string | undefined): number | null {
+  if (!roomIdParam) return null;
+  const roomId = parseInt(roomIdParam, 10);
+  return isNaN(roomId) ? null : roomId;
+}
+
+/**
+ * Parse session ID from request parameter
+ * Returns null if invalid or missing
+ */
+export function parseSessionId(sessionIdParam: string | undefined): number | null {
+  if (!sessionIdParam) return null;
+  const sessionId = parseInt(sessionIdParam, 10);
+  return isNaN(sessionId) ? null : sessionId;
+}
+
+/**
+ * Parse participant ID from request parameter
+ * Returns null if invalid or missing
+ */
+export function parseParticipantId(participantIdParam: string | undefined): number | null {
+  if (!participantIdParam) return null;
+  const participantId = parseInt(participantIdParam, 10);
+  return isNaN(participantId) ? null : participantId;
+}
+
+/**
+ * Parse invitation ID from request parameter
+ * Returns null if invalid or missing
+ */
+export function parseInvitationId(invitationIdParam: string | undefined): number | null {
+  if (!invitationIdParam) return null;
+  const invitationId = parseInt(invitationIdParam, 10);
+  return isNaN(invitationId) ? null : invitationId;
+}
+
+/**
+ * Parse template ID from request parameter
+ * Returns null if invalid or missing
+ */
+export function parseTemplateId(templateIdParam: string | undefined): number | null {
+  if (!templateIdParam) return null;
+  const templateId = parseInt(templateIdParam, 10);
+  return isNaN(templateId) ? null : templateId;
+}
+
+
