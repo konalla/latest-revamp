@@ -1792,23 +1792,25 @@ export class TaskService {
             advancesKeyResults: (task as any).advancesKeyResults || false,
             aiRecommendationStatus: 'available' as const,
             rank: 0, // Will be calculated later if needed
-            // Explicitly include AI recommendation in proper format
-            aiRecommendation: aiRec ? {
-              id: aiRec.id,
-              taskId: aiRec.taskId,
-              category: aiRec.category,
-              recommendedTime: aiRec.recommendedTime,
-              confidence: aiRec.confidence,
-              reasoning: aiRec.reasoning,
-              signalType: aiRec.signalType || null,
-              recommendedDuration: aiRec.recommendedDuration || null,
-              breakRecommendation: aiRec.breakRecommendation || null,
-              loadWarning: aiRec.loadWarning || null,
-              importanceFlag: aiRec.importanceFlag || null,
-              urgencyFlag: aiRec.urgencyFlag || null,
-              createdAt: aiRec.createdAt,
-              updatedAt: aiRec.updatedAt
-            } : undefined
+            // Conditionally include AI recommendation in proper format (use spread to avoid undefined)
+            ...(aiRec ? {
+              aiRecommendation: {
+                id: aiRec.id,
+                taskId: aiRec.taskId,
+                category: aiRec.category,
+                recommendedTime: aiRec.recommendedTime,
+                confidence: aiRec.confidence,
+                reasoning: aiRec.reasoning,
+                signalType: aiRec.signalType || null,
+                recommendedDuration: aiRec.recommendedDuration || null,
+                breakRecommendation: aiRec.breakRecommendation || null,
+                loadWarning: aiRec.loadWarning || null,
+                importanceFlag: aiRec.importanceFlag || null,
+                urgencyFlag: aiRec.urgencyFlag || null,
+                createdAt: aiRec.createdAt,
+                updatedAt: aiRec.updatedAt
+              }
+            } : {})
           };
         });
       
@@ -1854,23 +1856,25 @@ export class TaskService {
           advancesKeyResults: (task as any).advancesKeyResults || false,
           aiRecommendationStatus: 'available' as const,
           rank: 0, // Will be calculated later if needed
-          // Explicitly include AI recommendation in proper format
-          aiRecommendation: aiRec ? {
-            id: aiRec.id,
-            taskId: aiRec.taskId,
-            category: aiRec.category,
-            recommendedTime: aiRec.recommendedTime,
-            confidence: aiRec.confidence,
-            reasoning: aiRec.reasoning,
-            signalType: aiRec.signalType || null,
-            recommendedDuration: aiRec.recommendedDuration || null,
-            breakRecommendation: aiRec.breakRecommendation || null,
-            loadWarning: aiRec.loadWarning || null,
-            importanceFlag: aiRec.importanceFlag || null,
-            urgencyFlag: aiRec.urgencyFlag || null,
-            createdAt: aiRec.createdAt,
-            updatedAt: aiRec.updatedAt
-          } : undefined
+          // Conditionally include AI recommendation in proper format (use spread to avoid undefined)
+          ...(aiRec ? {
+            aiRecommendation: {
+              id: aiRec.id,
+              taskId: aiRec.taskId,
+              category: aiRec.category,
+              recommendedTime: aiRec.recommendedTime,
+              confidence: aiRec.confidence,
+              reasoning: aiRec.reasoning,
+              signalType: aiRec.signalType || null,
+              recommendedDuration: aiRec.recommendedDuration || null,
+              breakRecommendation: aiRec.breakRecommendation || null,
+              loadWarning: aiRec.loadWarning || null,
+              importanceFlag: aiRec.importanceFlag || null,
+              urgencyFlag: aiRec.urgencyFlag || null,
+              createdAt: aiRec.createdAt,
+              updatedAt: aiRec.updatedAt
+            }
+          } : {})
         };
       });
       
@@ -2012,7 +2016,7 @@ export class TaskService {
         });
 
       if (pastTasks.length > 0) {
-        const closestPastTask = pastTasks[0];
+        const closestPastTask = pastTasks[0]!;
         const timeAgo = currentMinutes - closestPastTask.recommendedMinutes;
         const hoursAgo = Math.floor(timeAgo / 60);
         const minutesAgo = timeAgo % 60;
