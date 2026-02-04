@@ -30,7 +30,7 @@ export const getCurrentUserStatus = async (req: Request, res: Response): Promise
 export const getUserStatus = async (req: Request, res: Response): Promise<void> => {
   try {
     const requesterId = req.user?.userId || req.user?.id;
-    const targetUserId = parseInt(req.params.userId || "");
+    const targetUserId = parseInt(req.params.userId as string);
 
     if (!requesterId) {
       res.status(401).json({ error: "Unauthorized" });
@@ -129,7 +129,7 @@ export const getActiveUsers = async (req: Request, res: Response): Promise<void>
 export const getWorkspaceMembersStatus = async (req: Request, res: Response): Promise<void> => {
   try {
     const requesterId = req.user?.userId || req.user?.id;
-    const workspaceId = parseInt(req.params.workspaceId || "");
+    const workspaceId = parseInt(req.params.workspaceId as string);
 
     if (!requesterId) {
       res.status(401).json({ error: "Unauthorized" });
@@ -183,7 +183,7 @@ export const getWorkspaceMembersStatus = async (req: Request, res: Response): Pr
 export const getTeamMembersStatus = async (req: Request, res: Response): Promise<void> => {
   try {
     const requesterId = req.user?.userId || req.user?.id;
-    const teamId = parseInt(req.params.teamId || "");
+    const teamId = parseInt(req.params.teamId as string);
 
     if (!requesterId) {
       res.status(401).json({ error: "Unauthorized" });

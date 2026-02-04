@@ -564,7 +564,7 @@ export class AdminController {
    */
   async getRedeemableItemById(req: Request, res: Response): Promise<void> {
     try {
-      const id = parseInt(req.params.id || "");
+      const id = parseInt(req.params.id as string);
       if (isNaN(id)) {
         res.status(400).json({ message: "Invalid item ID" });
         return;
@@ -648,15 +648,24 @@ export class AdminController {
         }
       }
 
-      const item = await adminService.createRedeemableItem({
+      const itemData: any = {
         name,
         description,
-        ...(imageUrl !== undefined && { imageUrl }),
         requiredCredits: parseInt(requiredCredits),
         isActive: isActive === "true" || isActive === true,
-        ...(sortOrder && { sortOrder: parseInt(sortOrder) }),
-        ...(parsedVariantOptions !== undefined && { variantOptions: parsedVariantOptions }),
-      });
+      };
+
+      if (imageUrl !== undefined) {
+        itemData.imageUrl = imageUrl;
+      }
+      if (sortOrder) {
+        itemData.sortOrder = parseInt(sortOrder);
+      }
+      if (parsedVariantOptions !== undefined) {
+        itemData.variantOptions = parsedVariantOptions;
+      }
+
+      const item = await adminService.createRedeemableItem(itemData);
 
       res.status(201).json({
         message: "Redeemable item created successfully",
@@ -678,7 +687,7 @@ export class AdminController {
    */
   async updateRedeemableItem(req: Request, res: Response): Promise<void> {
     try {
-      const id = parseInt(req.params.id || "");
+      const id = parseInt(req.params.id as string);
       if (isNaN(id)) {
         res.status(400).json({ message: "Invalid item ID" });
         return;
@@ -737,15 +746,28 @@ export class AdminController {
         }
       }
 
-      const item = await adminService.updateRedeemableItem(id, {
+      const itemData: any = {
         name,
         description,
-        ...(imageUrl !== undefined && { imageUrl }),
-        ...(requiredCredits !== undefined && { requiredCredits: parseInt(requiredCredits) }),
-        ...(isActive !== undefined && { isActive: isActive === "true" || isActive === true }),
-        ...(sortOrder !== undefined && { sortOrder: parseInt(sortOrder) }),
-        ...(parsedVariantOptions !== undefined && { variantOptions: parsedVariantOptions }),
-      });
+      };
+
+      if (imageUrl !== undefined) {
+        itemData.imageUrl = imageUrl;
+      }
+      if (requiredCredits !== undefined) {
+        itemData.requiredCredits = parseInt(requiredCredits);
+      }
+      if (isActive !== undefined) {
+        itemData.isActive = isActive === "true" || isActive === true;
+      }
+      if (sortOrder !== undefined) {
+        itemData.sortOrder = parseInt(sortOrder);
+      }
+      if (parsedVariantOptions !== undefined) {
+        itemData.variantOptions = parsedVariantOptions;
+      }
+
+      const item = await adminService.updateRedeemableItem(id, itemData);
 
       res.status(200).json({
         message: "Redeemable item updated successfully",
@@ -768,7 +790,7 @@ export class AdminController {
    */
   async deleteRedeemableItem(req: Request, res: Response): Promise<void> {
     try {
-      const id = parseInt(req.params.id || "");
+      const id = parseInt(req.params.id as string);
       if (isNaN(id)) {
         res.status(400).json({ message: "Invalid item ID" });
         return;
@@ -835,7 +857,7 @@ export class AdminController {
    */
   async getRedemptionById(req: Request, res: Response): Promise<void> {
     try {
-      const id = parseInt(req.params.id || "");
+      const id = parseInt(req.params.id as string);
       if (isNaN(id)) {
         res.status(400).json({ message: "Invalid redemption ID" });
         return;
@@ -858,7 +880,7 @@ export class AdminController {
    */
   async updateRedemptionStatus(req: Request, res: Response): Promise<void> {
     try {
-      const id = parseInt(req.params.id || "");
+      const id = parseInt(req.params.id as string);
       if (isNaN(id)) {
         res.status(400).json({ message: "Invalid redemption ID" });
         return;

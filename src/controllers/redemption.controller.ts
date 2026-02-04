@@ -190,7 +190,7 @@ export const getRedemptionById = async (req: Request, res: Response) => {
       return;
     }
 
-    const redemptionId = parseInt(req.params.id || "");
+    const redemptionId = parseInt(req.params.id as string);
     if (isNaN(redemptionId)) {
       res.status(400).json({
         success: false,
