@@ -812,15 +812,16 @@ model FocusRoom {
 }
 
 model FocusRoomSession {
-  id                Int                @id @default(autoincrement())
-  roomId            Int                @map("room_id")
-  startedAt         DateTime           @map("started_at")
-  endedAt           DateTime?          @map("ended_at")
-  pausedAt          DateTime?          @map("paused_at")
-  resumedAt         DateTime?          @map("resumed_at")
-  scheduledDuration Int                @map("scheduled_duration") // in seconds
-  actualDuration    Int?               @map("actual_duration") // in seconds
-  status            FocusSessionStatus @default(ACTIVE)
+  id                  Int                @id @default(autoincrement())
+  roomId              Int                @map("room_id")
+  startedAt           DateTime           @map("started_at")
+  endedAt             DateTime?          @map("ended_at")
+  pausedAt            DateTime?          @map("paused_at")
+  resumedAt           DateTime?          @map("resumed_at")
+  totalPauseDuration  Int                @default(0) @map("total_pause_duration") // cumulative pause time in seconds
+  scheduledDuration   Int                @map("scheduled_duration") // in seconds
+  actualDuration      Int?               @map("actual_duration") // in seconds
+  status              FocusSessionStatus @default(ACTIVE)
   createdAt         DateTime           @default(now()) @map("created_at")
   updatedAt         DateTime           @updatedAt @map("updated_at")
 

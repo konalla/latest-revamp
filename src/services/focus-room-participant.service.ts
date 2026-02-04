@@ -9,7 +9,23 @@ import { focusRoomService } from "./focus-room.service.js";
 
 export class FocusRoomParticipantService {
   /**
+   * Check if room has an active or paused session
+   */
+  private async hasActiveSession(roomId: number): Promise<boolean> {
+    const activeSession = await prisma.focusRoomSession.findFirst({
+      where: {
+        roomId,
+        status: { in: ["ACTIVE", "PAUSED"] },
+      },
+      select: { id: true },
+    });
+    return activeSession !== null;
+  }
+
+  /**
    * Join a room as a participant
+   * If room has an active session, participant status is set to FOCUSING
+   * Otherwise, participant status is set to JOINED
    */
   async joinRoom(roomId: number, userId: number, data: JoinRoomInput) {
     // Check if room exists
@@ -39,6 +55,10 @@ export class FocusRoomParticipantService {
       }
     }
 
+    // Determine participant status based on active session
+    const hasSession = await this.hasActiveSession(roomId);
+    const participantStatus = hasSession ? "FOCUSING" : "JOINED";
+
     // Check if user is already a participant
     const existingParticipant = await prisma.focusRoomParticipant.findUnique({
       where: {
@@ -55,7 +75,7 @@ export class FocusRoomParticipantService {
         return prisma.focusRoomParticipant.update({
           where: { id: existingParticipant.id },
           data: {
-            status: "JOINED",
+            status: participantStatus,
             leftAt: null,
             intention: data.intention || null,
           },
@@ -112,7 +132,7 @@ export class FocusRoomParticipantService {
         roomId,
         userId,
         role: data.role || "PARTICIPANT",
-        status: "JOINED",
+        status: participantStatus,
         intention: data.intention || null,
       },
       include: {

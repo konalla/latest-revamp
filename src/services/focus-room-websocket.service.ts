@@ -1,3 +1,15 @@
+/**
+ * Focus Room WebSocket Service
+ *
+ * Handles real-time communication for focus room sessions including:
+ * - Participant presence tracking (online/offline status)
+ * - Session timer broadcasts
+ * - Participant status and intention updates
+ * - Room join/leave management
+ *
+ * @module services/focus-room-websocket
+ */
+
 import { Server as SocketIOServer, Socket } from "socket.io";
 import { focusRoomSessionService } from "./focus-room-session.service.js";
 import { focusRoomParticipantService } from "./focus-room-participant.service.js";
@@ -6,17 +18,75 @@ import type { UserJWTPayload } from "../types/auth.types.js";
 import type {
   WebSocketSessionPayload,
   WebSocketTimerPayload,
-  SessionTimerInfo,
 } from "../types/focus-room-service.types.js";
 import prisma from "../config/prisma.js";
 
+// ============================================================================
+// Types
+// ============================================================================
+
+/** Socket extended with authentication data */
 interface AuthenticatedSocket extends Socket {
   userId?: number;
+  currentRoomId?: number;
 }
 
+/** Participant status types */
+type ParticipantStatus = "JOINED" | "FOCUSING" | "BREAK" | "IDLE" | "LEFT";
+
+/** User information for participant */
+interface ParticipantUser {
+  id: number;
+  username: string;
+  email: string;
+}
+
+/** Participant data sent to clients */
+interface ParticipantData {
+  id: number;
+  userId: number;
+  role: string;
+  status: string;
+  intention: string | null;
+  completion: string | null;
+  user: ParticipantUser | null;
+  isOnline: boolean;
+}
+
+/** Socket to user mapping for cleanup */
+interface SocketUserMapping {
+  userId: number;
+  roomId: number;
+}
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+const LOG_PREFIX = "[FocusRoom WS]";
+const TIMER_BROADCAST_INTERVAL_MS = 1000;
+
+// ============================================================================
+// Online Tracking State
+// ============================================================================
+
+/** Track online users per room: Map<roomId, Set<userId>> */
+const roomOnlineUsers = new Map<number, Set<number>>();
+
+/** Track socket to user mapping for cleanup on disconnect */
+const socketToUser = new Map<string, SocketUserMapping>();
+
+// ============================================================================
+// Service Class
+// ============================================================================
+
+/**
+ * Focus Room WebSocket Service
+ *
+ * Manages WebSocket connections and real-time events for focus rooms.
+ */
 export class FocusRoomWebSocketService {
-  private io: SocketIOServer;
-  private roomTimers: Map<number, NodeJS.Timeout> = new Map();
+  private readonly io: SocketIOServer;
 
   constructor(io: SocketIOServer) {
     this.io = io;
@@ -25,300 +95,595 @@ export class FocusRoomWebSocketService {
     this.startTimerBroadcasts();
   }
 
+  // ==========================================================================
+  // Authentication Middleware
+  // ==========================================================================
+
   /**
-   * Setup authentication middleware
+   * Setup authentication middleware for WebSocket connections
    */
-  private setupMiddleware() {
+  private setupMiddleware(): void {
     this.io.use(async (socket: AuthenticatedSocket, next) => {
       try {
-        // Try to get token from auth object (preferred) or query params (fallback)
-        const token = socket.handshake.auth?.token || socket.handshake.query?.token;
+        const token = this.extractToken(socket);
 
-        if (token && typeof token === "string") {
-          try {
-            const user = verifyToken(token) as UserJWTPayload;
-            const userId = user?.userId;
-            
-            if (userId) {
-              socket.userId = userId;
-              next();
-              return;
-            }
-          } catch (error) {
-            // Token invalid, continue to check query params fallback
-          }
+        if (!token) {
+          console.warn(`${LOG_PREFIX} Connection rejected - no token from ${socket.handshake.address}`);
+          return next(new Error("Authentication required"));
         }
 
-        // Fallback: Get userId from query params (for development/testing)
-        // In production, this should be removed and only JWT should be used
-        const userId = socket.handshake.query.userId
-          ? parseInt(socket.handshake.query.userId as string)
-          : undefined;
+        const userId = this.verifyAndExtractUserId(token);
 
-        if (userId) {
-          socket.userId = userId;
-          next();
-        } else {
-          // Allow connection but mark as unauthenticated
-          // Some events will require authentication
-          next();
+        if (!userId) {
+          console.warn(`${LOG_PREFIX} Connection rejected - invalid token from ${socket.handshake.address}`);
+          return next(new Error("Invalid authentication token"));
         }
+
+        socket.userId = userId;
+        next();
       } catch (error) {
+        console.error(`${LOG_PREFIX} Middleware error:`, error);
         next(new Error("Authentication failed"));
       }
     });
   }
 
   /**
+   * Extract token from socket handshake
+   */
+  private extractToken(socket: Socket): string | null {
+    const token = socket.handshake.auth?.token || socket.handshake.query?.token;
+    return typeof token === "string" ? token : null;
+  }
+
+  /**
+   * Verify token and extract user ID
+   */
+  private verifyAndExtractUserId(token: string): number | null {
+    try {
+      const user = verifyToken(token) as UserJWTPayload;
+      const userId = user?.userId;
+      return typeof userId === "number" ? userId : null;
+    } catch {
+      return null;
+    }
+  }
+
+  // ==========================================================================
+  // Online Tracking
+  // ==========================================================================
+
+  /**
+   * Check if a user is online in a room
+   */
+  isUserOnline(roomId: number, userId: number): boolean {
+    return roomOnlineUsers.get(roomId)?.has(userId) ?? false;
+  }
+
+  /**
+   * Get all online user IDs for a room
+   */
+  getOnlineUsers(roomId: number): number[] {
+    const onlineSet = roomOnlineUsers.get(roomId);
+    return onlineSet ? Array.from(onlineSet) : [];
+  }
+
+  /**
+   * Add user to online tracking (in-memory for real-time participant list)
+   * Note: Database isOnline status is managed by focus-room-session.service when sessions start/end
+   */
+  private addUserOnline(roomId: number, userId: number, socketId: string): void {
+    if (!roomOnlineUsers.has(roomId)) {
+      roomOnlineUsers.set(roomId, new Set());
+    }
+    roomOnlineUsers.get(roomId)!.add(userId);
+    socketToUser.set(socketId, { userId, roomId });
+    console.log(`${LOG_PREFIX} User ${userId} joined room ${roomId} (WebSocket presence)`);
+  }
+
+  /**
+   * Remove user from online tracking (in-memory for real-time participant list)
+   * Only removes if no other sockets for this user exist in the room
+   * Note: Database isOnline status is managed by focus-room-session.service when sessions end
+   */
+  private removeUserOnline(socketId: string): SocketUserMapping | null {
+    const mapping = socketToUser.get(socketId);
+    if (!mapping) return null;
+
+    const { userId, roomId } = mapping;
+    socketToUser.delete(socketId);
+
+    // Check if user has other sockets in this room
+    const hasOtherSocketInRoom = Array.from(socketToUser.entries()).some(
+      ([, otherMapping]) => otherMapping.userId === userId && otherMapping.roomId === roomId
+    );
+
+    if (!hasOtherSocketInRoom) {
+      const onlineSet = roomOnlineUsers.get(roomId);
+      if (onlineSet) {
+        onlineSet.delete(userId);
+        if (onlineSet.size === 0) {
+          roomOnlineUsers.delete(roomId);
+        }
+        console.log(`${LOG_PREFIX} User ${userId} left room ${roomId} (WebSocket presence)`);
+      }
+    }
+
+    return mapping;
+  }
+
+  // ==========================================================================
+  // Event Handlers
+  // ==========================================================================
+
+  /**
    * Setup WebSocket event handlers
    */
-  private setupEventHandlers() {
+  private setupEventHandlers(): void {
     this.io.on("connection", (socket: AuthenticatedSocket) => {
-      console.log(`Client connected: ${socket.id}`);
+      console.log(`${LOG_PREFIX} Client connected: ${socket.id}`);
 
-      // Join room
-      socket.on("join_room", async (data: { roomId: number }) => {
-        try {
-          if (!socket.userId) {
-            socket.emit("error", { message: "Authentication required" });
-            return;
-          }
+      if (!socket.userId) {
+        socket.emit("error", { message: "Authentication required" });
+        socket.disconnect();
+        return;
+      }
 
-          const { roomId } = data;
-          const roomName = `room:${roomId}`;
+      this.setupJoinRoomHandler(socket);
+      this.setupLeaveRoomHandler(socket);
+      this.setupParticipantStatusHandler(socket);
+      this.setupIntentionHandler(socket);
+      this.setupTimerSyncHandler(socket);
+      this.setupParticipantsListHandler(socket);
+      this.setupDisconnectHandler(socket);
+    });
+  }
 
-          // Verify user has access to room
-          const participant = await prisma.focusRoomParticipant.findFirst({
-            where: {
-              roomId,
-              userId: socket.userId,
-              status: { not: "LEFT" },
-            },
-          });
-
-          if (!participant) {
-            socket.emit("error", { message: "You are not a participant in this room" });
-            return;
-          }
-
-          socket.join(roomName);
-
-          // Get current room state
-          const activeSession = await focusRoomSessionService.getActiveSession(roomId);
-          const participants = await focusRoomParticipantService.getRoomParticipants(roomId);
-
-          // Send room info to the joining client
-          socket.emit("room_info", {
-            roomId,
-            activeSession: activeSession
-              ? await focusRoomSessionService.getSessionTimer(activeSession.id)
-              : null,
-            participants: participants.map((p) => ({
-              id: p.id,
-              userId: p.userId,
-              role: p.role,
-              status: p.status,
-              intention: p.intention,
-              completion: p.shareCompletion ? p.completion : null,
-              user: p.user,
-            })),
-          });
-
-          // Notify others that someone joined
-          socket.to(roomName).emit("participant_joined", {
-            participant: participants.find((p) => p.userId === socket.userId),
-          });
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : "Failed to join room";
-          console.error("Error joining room:", error);
-          socket.emit("error", { message: errorMessage });
-        }
-      });
-
-      // Leave room
-      socket.on("leave_room", (data: { roomId: number }) => {
+  /**
+   * Handle join_room event
+   */
+  private setupJoinRoomHandler(socket: AuthenticatedSocket): void {
+    socket.on("join_room", async (data: { roomId: number }) => {
+      try {
+        const userId = socket.userId!;
         const { roomId } = data;
-        const roomName = `room:${roomId}`;
-        socket.leave(roomName);
+        const roomName = this.getRoomName(roomId);
+
+        // Verify access
+        const participant = await this.verifyRoomAccess(roomId, userId);
+        if (!participant) {
+          socket.emit("error", { message: "You are not a participant in this room" });
+          return;
+        }
+
+        // Leave previous room if switching
+        await this.handleRoomSwitch(socket, roomId);
+
+        // Join new room
+        socket.join(roomName);
+        socket.currentRoomId = roomId;
+        this.addUserOnline(roomId, userId, socket.id);
+
+        // Send room info
+        await this.sendRoomInfo(socket, roomId);
 
         // Notify others
-        socket.to(roomName).emit("participant_left", {
+        const participants = await focusRoomParticipantService.getRoomParticipants(roomId);
+        const participantData = participants.find((p) => p.userId === userId);
+        const activeSession = await focusRoomSessionService.getActiveSession(roomId);
+        const hasActiveSession = activeSession !== null && 
+          (activeSession.status === "ACTIVE" || activeSession.status === "PAUSED");
+
+        socket.to(roomName).emit("participant_joined", {
+          participant: participantData 
+            ? this.mapParticipant(participantData, this.isParticipantFocusing(participantData.status, hasActiveSession)) 
+            : null,
+        });
+
+        // Only emit participant_online if session is active and user is focusing
+        if (participantData && this.isParticipantFocusing(participantData.status, hasActiveSession)) {
+          socket.to(roomName).emit("participant_online", {
+            participantId: participant.id,
+            userId,
+          });
+        }
+      } catch (error) {
+        this.handleError(socket, "joining room", error);
+      }
+    });
+  }
+
+  /**
+   * Handle leave_room event
+   */
+  private setupLeaveRoomHandler(socket: AuthenticatedSocket): void {
+    socket.on("leave_room", (data: { roomId: number }) => {
+      const { roomId } = data;
+      const roomName = this.getRoomName(roomId);
+
+      const mapping = this.removeUserOnline(socket.id);
+      socket.leave(roomName);
+      delete socket.currentRoomId;
+
+      if (mapping) {
+        socket.to(roomName).emit("participant_left", { userId: socket.userId });
+        socket.to(roomName).emit("participant_offline", { userId: socket.userId });
+      }
+    });
+  }
+
+  /**
+   * Handle update_participant_status event
+   */
+  private setupParticipantStatusHandler(socket: AuthenticatedSocket): void {
+    socket.on("update_participant_status", async (data: { roomId: number; status: string }) => {
+      try {
+        const userId = socket.userId!;
+        const { roomId, status } = data;
+
+        const participant = await focusRoomParticipantService.updateStatus(roomId, userId, {
+          status: status as ParticipantStatus,
+        });
+
+        const activeSession = await focusRoomSessionService.getActiveSession(roomId);
+        const hasActiveSession = activeSession !== null && 
+          (activeSession.status === "ACTIVE" || activeSession.status === "PAUSED");
+
+        const roomName = this.getRoomName(roomId);
+        this.io.to(roomName).emit("participant_status_updated", {
+          participant: this.mapParticipant(
+            participant, 
+            this.isParticipantFocusing(participant.status, hasActiveSession)
+          ),
+        });
+      } catch (error) {
+        this.handleError(socket, "updating participant status", error);
+      }
+    });
+  }
+
+  /**
+   * Handle update_intention event
+   */
+  private setupIntentionHandler(socket: AuthenticatedSocket): void {
+    socket.on("update_intention", async (data: { roomId: number; intention: string }) => {
+      try {
+        const userId = socket.userId!;
+        const { roomId, intention } = data;
+
+        const participant = await focusRoomParticipantService.updateIntention(roomId, userId, {
+          intention,
+        });
+
+        const activeSession = await focusRoomSessionService.getActiveSession(roomId);
+        const hasActiveSession = activeSession !== null && 
+          (activeSession.status === "ACTIVE" || activeSession.status === "PAUSED");
+
+        const roomName = this.getRoomName(roomId);
+        this.io.to(roomName).emit("intention_updated", {
+          participant: this.mapParticipant(
+            participant, 
+            this.isParticipantFocusing(participant.status, hasActiveSession)
+          ),
+        });
+      } catch (error) {
+        this.handleError(socket, "updating intention", error);
+      }
+    });
+  }
+
+  /**
+   * Handle sync_timer event
+   */
+  private setupTimerSyncHandler(socket: AuthenticatedSocket): void {
+    socket.on("sync_timer", async (data: { sessionId: number }) => {
+      try {
+        const { sessionId } = data;
+        const timer = await focusRoomSessionService.getSessionTimer(sessionId);
+
+        if (timer) {
+          socket.emit("timer_sync", timer);
+        } else {
+          socket.emit("error", { message: "Session not found" });
+        }
+      } catch (error) {
+        this.handleError(socket, "syncing timer", error);
+      }
+    });
+  }
+
+  /**
+   * Handle get_participants event
+   */
+  private setupParticipantsListHandler(socket: AuthenticatedSocket): void {
+    socket.on("get_participants", async (data: { roomId: number }) => {
+      try {
+        const { roomId } = data;
+        const participants = await focusRoomParticipantService.getRoomParticipants(roomId);
+        const activeSession = await focusRoomSessionService.getActiveSession(roomId);
+        const hasActiveSession = activeSession !== null && 
+          (activeSession.status === "ACTIVE" || activeSession.status === "PAUSED");
+
+        socket.emit("participants_list", {
+          participants: participants.map((p) =>
+            this.mapParticipant(p, this.isParticipantFocusing(p.status, hasActiveSession))
+          ),
+        });
+      } catch (error) {
+        this.handleError(socket, "getting participants", error);
+      }
+    });
+  }
+
+  /**
+   * Handle disconnect event
+   */
+  private setupDisconnectHandler(socket: AuthenticatedSocket): void {
+    socket.on("disconnect", (reason) => {
+      console.log(`${LOG_PREFIX} Client disconnected: ${socket.id} (${reason})`);
+
+      const mapping = this.removeUserOnline(socket.id);
+      if (mapping) {
+        const roomName = this.getRoomName(mapping.roomId);
+        socket.to(roomName).emit("participant_offline", { userId: mapping.userId });
+      }
+    });
+  }
+
+  // ==========================================================================
+  // Helper Methods
+  // ==========================================================================
+
+  /**
+   * Get Socket.IO room name for a focus room
+   */
+  private getRoomName(roomId: number): string {
+    return `room:${roomId}`;
+  }
+
+  /**
+   * Verify user has access to a room
+   */
+  private async verifyRoomAccess(
+    roomId: number,
+    userId: number
+  ): Promise<{ id: number; userId: number } | null> {
+    const participant = await prisma.focusRoomParticipant.findFirst({
+      where: {
+        roomId,
+        userId,
+        status: { not: "LEFT" },
+      },
+      select: { id: true, userId: true },
+    });
+
+    return participant;
+  }
+
+  /**
+   * Handle room switching (leave previous room)
+   */
+  private async handleRoomSwitch(socket: AuthenticatedSocket, newRoomId: number): Promise<void> {
+    if (socket.currentRoomId && socket.currentRoomId !== newRoomId) {
+      const prevRoomName = this.getRoomName(socket.currentRoomId);
+      socket.leave(prevRoomName);
+
+      const mapping = this.removeUserOnline(socket.id);
+      if (mapping) {
+        socket.to(prevRoomName).emit("participant_offline", {
           userId: socket.userId,
         });
-      });
+      }
+    }
+  }
 
-      // Update participant status
-      socket.on("update_participant_status", async (data: { roomId: number; status: string }) => {
-        try {
-          if (!socket.userId) {
-            socket.emit("error", { message: "Authentication required" });
-            return;
-          }
+  /**
+   * Send room info to a socket
+   */
+  private async sendRoomInfo(socket: AuthenticatedSocket, roomId: number): Promise<void> {
+    const activeSession = await focusRoomSessionService.getActiveSession(roomId);
+    const participants = await focusRoomParticipantService.getRoomParticipants(roomId);
+    const hasActiveSession = activeSession !== null && 
+      (activeSession.status === "ACTIVE" || activeSession.status === "PAUSED");
 
-          const { roomId, status } = data;
-          const participant = await focusRoomParticipantService.updateStatus(roomId, socket.userId, {
-            status: status as "JOINED" | "FOCUSING" | "BREAK" | "IDLE" | "LEFT",
-          });
-
-          const roomName = `room:${roomId}`;
-          this.io.to(roomName).emit("participant_status_updated", {
-            participant: {
-              id: participant.id,
-              userId: participant.userId,
-              status: participant.status,
-              user: participant.user,
-            },
-          });
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : "Failed to update status";
-          console.error("Error updating participant status:", error);
-          socket.emit("error", { message: errorMessage });
-        }
-      });
-
-      // Update intention
-      socket.on("update_intention", async (data: { roomId: number; intention: string }) => {
-        try {
-          if (!socket.userId) {
-            socket.emit("error", { message: "Authentication required" });
-            return;
-          }
-
-          const { roomId, intention } = data;
-          const participant = await focusRoomParticipantService.updateIntention(roomId, socket.userId, {
-            intention,
-          });
-
-          const roomName = `room:${roomId}`;
-          this.io.to(roomName).emit("intention_updated", {
-            participant: {
-              id: participant.id,
-              userId: participant.userId,
-              intention: participant.intention,
-              user: participant.user,
-            },
-          });
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : "Failed to update intention";
-          console.error("Error updating intention:", error);
-          socket.emit("error", { message: errorMessage });
-        }
-      });
-
-      // Request timer sync
-      socket.on("sync_timer", async (data: { sessionId: number }) => {
-        try {
-          const { sessionId } = data;
-          const timer = await focusRoomSessionService.getSessionTimer(sessionId);
-
-          if (timer) {
-            socket.emit("timer_sync", timer);
-          } else {
-            socket.emit("error", { message: "Session not found" });
-          }
-        } catch (error) {
-          console.error("Error syncing timer:", error);
-          socket.emit("error", { message: "Failed to sync timer" });
-        }
-      });
-
-      // Disconnect
-      socket.on("disconnect", () => {
-        console.log(`Client disconnected: ${socket.id}`);
-      });
+    socket.emit("room_info", {
+      roomId,
+      activeSession: activeSession
+        ? await focusRoomSessionService.getSessionTimer(activeSession.id)
+        : null,
+      participants: participants.map((p) =>
+        this.mapParticipant(p, this.isParticipantFocusing(p.status, hasActiveSession))
+      ),
     });
+  }
+
+  /**
+   * Determine if a participant is "online" (actively focusing)
+   * A participant is online only when:
+   * 1. There is an active/paused session in the room
+   * 2. The participant's status is FOCUSING
+   */
+  private isParticipantFocusing(participantStatus: string, hasActiveSession: boolean): boolean {
+    if (!hasActiveSession) return false;
+    return participantStatus === "FOCUSING";
+  }
+
+  /**
+   * Map participant to client format
+   */
+  private mapParticipant(
+    participant: {
+      id: number;
+      userId: number;
+      role: string;
+      status: string;
+      intention: string | null;
+      completion?: string | null;
+      shareCompletion?: boolean;
+      user: { id: number; username: string; email: string } | null;
+    },
+    isOnline: boolean
+  ): ParticipantData {
+    return {
+      id: participant.id,
+      userId: participant.userId,
+      role: participant.role,
+      status: participant.status,
+      intention: participant.intention,
+      completion: participant.shareCompletion ? (participant.completion ?? null) : null,
+      user: participant.user,
+      isOnline,
+    };
+  }
+
+  /**
+   * Handle and emit error
+   */
+  private handleError(socket: Socket, action: string, error: unknown): void {
+    const message = error instanceof Error ? error.message : `Failed to ${action}`;
+    console.error(`${LOG_PREFIX} Error ${action}:`, error);
+    socket.emit("error", { message });
+  }
+
+  // ==========================================================================
+  // Timer Broadcasts
+  // ==========================================================================
+
+  /**
+   * Start periodic timer broadcasts for all active sessions
+   */
+  private startTimerBroadcasts(): void {
+    setInterval(async () => {
+      try {
+        await this.broadcastAllActiveTimers();
+      } catch (error) {
+        console.error(`${LOG_PREFIX} Error in timer broadcast:`, error);
+      }
+    }, TIMER_BROADCAST_INTERVAL_MS);
   }
 
   /**
    * Broadcast timer updates to all active sessions
-   * Note: PAUSED sessions do not receive timer_update events - timer is frozen
    */
-  private startTimerBroadcasts() {
-    setInterval(async () => {
+  private async broadcastAllActiveTimers(): Promise<void> {
+    const sessions = await prisma.focusRoomSession.findMany({
+      where: {
+        status: { in: ["ACTIVE", "PAUSED"] },
+      },
+      select: {
+        id: true,
+        roomId: true,
+        status: true,
+      },
+    });
+
+    for (const session of sessions) {
+      await this.broadcastTimerForSession(session);
+    }
+  }
+
+  /**
+   * Broadcast timer for a single session
+   */
+  private async broadcastTimerForSession(session: {
+    id: number;
+    roomId: number;
+    status: string;
+  }): Promise<void> {
+    const timer = await focusRoomSessionService.getSessionTimer(session.id);
+    if (!timer) return;
+
+    const roomName = this.getRoomName(session.roomId);
+
+    // Only broadcast timer_update for ACTIVE sessions
+    if (session.status === "ACTIVE" && timer.status === "ACTIVE") {
+      this.io.to(roomName).emit("timer_update", timer);
+    }
+
+    // Auto-end expired sessions
+    if (timer.status === "COMPLETED" && session.status !== "COMPLETED") {
       try {
-        // Get all active and paused sessions (paused for expired session checking)
-        const sessions = await prisma.focusRoomSession.findMany({
-          where: {
-            status: { in: ["ACTIVE", "PAUSED"] },
-          },
+        await focusRoomSessionService.endSession(session.roomId, session.id);
+        this.io.to(roomName).emit("session_ended", {
+          sessionId: session.id,
+          endedAt: new Date().toISOString(),
         });
-
-        for (const session of sessions) {
-          const timer = await focusRoomSessionService.getSessionTimer(session.id);
-          const roomName = `room:${session.roomId}`;
-
-          if (timer) {
-            // Only broadcast timer_update for ACTIVE sessions
-            // PAUSED sessions should not receive timer updates (timer is frozen)
-            // This prevents the timer from continuing to count down when paused
-            if (session.status === "ACTIVE" && timer.status === "ACTIVE") {
-              this.io.to(roomName).emit("timer_update", timer);
-            }
-            // Note: PAUSED sessions are skipped - no timer_update events sent
-            // The session_paused event is sent once when pause is called
-
-            // Auto-end expired sessions (check both ACTIVE and PAUSED)
-            if (timer.status === "COMPLETED" && session.status !== "COMPLETED") {
-              try {
-                await focusRoomSessionService.endSession(session.roomId, session.id);
-                this.io.to(roomName).emit("session_ended", {
-                  sessionId: session.id,
-                  endedAt: new Date(),
-                });
-              } catch (error) {
-                console.error(`Error auto-ending session ${session.id}:`, error);
-              }
-            }
-          }
-        }
       } catch (error) {
-        console.error("Error in timer broadcast:", error);
+        console.error(`${LOG_PREFIX} Error auto-ending session ${session.id}:`, error);
       }
-    }, 1000); // Every second
+    }
+  }
+
+  // ==========================================================================
+  // Public Broadcast Methods
+  // ==========================================================================
+
+  /**
+   * Broadcast session started event and update participant statuses
+   */
+  async broadcastSessionStarted(
+    roomId: number,
+    session: WebSocketSessionPayload,
+    timer: WebSocketTimerPayload
+  ): Promise<void> {
+    const roomName = this.getRoomName(roomId);
+    this.io.to(roomName).emit("session_started", { session, timer });
+    // Broadcast updated participant statuses (isOnline will now be based on FOCUSING status)
+    await this.broadcastParticipantsUpdate(roomId);
   }
 
   /**
-   * Broadcast session started event
+   * Broadcast session paused event and update participant statuses
    */
-  broadcastSessionStarted(roomId: number, session: WebSocketSessionPayload, timer: WebSocketTimerPayload): void {
-    const roomName = `room:${roomId}`;
-    this.io.to(roomName).emit("session_started", {
-      session,
-      timer,
-    });
+  async broadcastSessionPaused(
+    roomId: number,
+    session: WebSocketSessionPayload,
+    timer: WebSocketTimerPayload
+  ): Promise<void> {
+    const roomName = this.getRoomName(roomId);
+    this.io.to(roomName).emit("session_paused", { session, timer });
+    // Broadcast updated participant statuses
+    await this.broadcastParticipantsUpdate(roomId);
   }
 
   /**
-   * Broadcast session paused event
+   * Broadcast session resumed event and update participant statuses
    */
-  broadcastSessionPaused(roomId: number, session: WebSocketSessionPayload, timer: WebSocketTimerPayload): void {
-    const roomName = `room:${roomId}`;
-    this.io.to(roomName).emit("session_paused", {
-      session,
-      timer,
-    });
+  async broadcastSessionResumed(
+    roomId: number,
+    session: WebSocketSessionPayload,
+    timer: WebSocketTimerPayload
+  ): Promise<void> {
+    const roomName = this.getRoomName(roomId);
+    this.io.to(roomName).emit("session_resumed", { session, timer });
+    // Broadcast updated participant statuses
+    await this.broadcastParticipantsUpdate(roomId);
   }
 
   /**
-   * Broadcast session resumed event
+   * Broadcast session ended event and update participant statuses
    */
-  broadcastSessionResumed(roomId: number, session: WebSocketSessionPayload, timer: WebSocketTimerPayload): void {
-    const roomName = `room:${roomId}`;
-    this.io.to(roomName).emit("session_resumed", {
-      session,
-      timer,
-    });
+  async broadcastSessionEnded(roomId: number, session: WebSocketSessionPayload): Promise<void> {
+    const roomName = this.getRoomName(roomId);
+    this.io.to(roomName).emit("session_ended", { session });
+    // Broadcast updated participant statuses (all will be offline now)
+    await this.broadcastParticipantsUpdate(roomId);
   }
 
   /**
-   * Broadcast session ended event
+   * Broadcast participants update with online status based on session state
    */
-  broadcastSessionEnded(roomId: number, session: WebSocketSessionPayload): void {
-    const roomName = `room:${roomId}`;
-    this.io.to(roomName).emit("session_ended", {
-      session,
+  async broadcastParticipantsUpdate(roomId: number): Promise<void> {
+    const roomName = this.getRoomName(roomId);
+    const participants = await focusRoomParticipantService.getRoomParticipants(roomId);
+    const activeSession = await focusRoomSessionService.getActiveSession(roomId);
+    const hasActiveSession = activeSession !== null && 
+      (activeSession.status === "ACTIVE" || activeSession.status === "PAUSED");
+
+    this.io.to(roomName).emit("participants_updated", {
+      participants: participants.map((p) =>
+        this.mapParticipant(p, this.isParticipantFocusing(p.status, hasActiveSession))
+      ),
     });
   }
 }
-
-
