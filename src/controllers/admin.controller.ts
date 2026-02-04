@@ -648,24 +648,15 @@ export class AdminController {
         }
       }
 
-      const itemData: any = {
+      const item = await adminService.createRedeemableItem({
         name,
         description,
+        ...(imageUrl !== undefined && { imageUrl }),
         requiredCredits: parseInt(requiredCredits),
         isActive: isActive === "true" || isActive === true,
-      };
-
-      if (imageUrl !== undefined) {
-        itemData.imageUrl = imageUrl;
-      }
-      if (sortOrder) {
-        itemData.sortOrder = parseInt(sortOrder);
-      }
-      if (parsedVariantOptions !== undefined) {
-        itemData.variantOptions = parsedVariantOptions;
-      }
-
-      const item = await adminService.createRedeemableItem(itemData);
+        ...(sortOrder && { sortOrder: parseInt(sortOrder) }),
+        ...(parsedVariantOptions !== undefined && { variantOptions: parsedVariantOptions }),
+      });
 
       res.status(201).json({
         message: "Redeemable item created successfully",
@@ -746,28 +737,15 @@ export class AdminController {
         }
       }
 
-      const itemData: any = {
+      const item = await adminService.updateRedeemableItem(id, {
         name,
         description,
-      };
-
-      if (imageUrl !== undefined) {
-        itemData.imageUrl = imageUrl;
-      }
-      if (requiredCredits !== undefined) {
-        itemData.requiredCredits = parseInt(requiredCredits);
-      }
-      if (isActive !== undefined) {
-        itemData.isActive = isActive === "true" || isActive === true;
-      }
-      if (sortOrder !== undefined) {
-        itemData.sortOrder = parseInt(sortOrder);
-      }
-      if (parsedVariantOptions !== undefined) {
-        itemData.variantOptions = parsedVariantOptions;
-      }
-
-      const item = await adminService.updateRedeemableItem(id, itemData);
+        ...(imageUrl !== undefined && { imageUrl }),
+        ...(requiredCredits !== undefined && { requiredCredits: parseInt(requiredCredits) }),
+        ...(isActive !== undefined && { isActive: isActive === "true" || isActive === true }),
+        ...(sortOrder !== undefined && { sortOrder: parseInt(sortOrder) }),
+        ...(parsedVariantOptions !== undefined && { variantOptions: parsedVariantOptions }),
+      });
 
       res.status(200).json({
         message: "Redeemable item updated successfully",
