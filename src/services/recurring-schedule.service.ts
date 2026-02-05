@@ -2,6 +2,10 @@ import prisma from "../config/prisma.js";
 import { fromZonedTime, toZonedTime } from "date-fns-tz";
 import { addDays, addWeeks, startOfDay, setHours, setMinutes, isBefore, isAfter, isEqual } from "date-fns";
 import type { CreateRecurringScheduleInput, UpdateRecurringScheduleInput } from "../types/focus-room.types.js";
+import type {
+  RecurringSchedule,
+  RecurringScheduleUpdateData,
+} from "../types/focus-room-service.types.js";
 
 export class RecurringScheduleService {
   /**
@@ -136,7 +140,7 @@ export class RecurringScheduleService {
     roomId: number,
     userId: number,
     data: CreateRecurringScheduleInput
-  ) {
+  ): Promise<RecurringSchedule> {
     // Verify user is room creator
     const room = await prisma.focusRoom.findUnique({
       where: { id: roomId },
@@ -210,7 +214,7 @@ export class RecurringScheduleService {
     roomId: number,
     userId: number,
     data: UpdateRecurringScheduleInput
-  ) {
+  ): Promise<RecurringSchedule> {
     // Verify user is room creator
     const room = await prisma.focusRoom.findUnique({
       where: { id: roomId },
@@ -234,7 +238,7 @@ export class RecurringScheduleService {
     }
 
     // Build update data
-    const updateData: any = {};
+    const updateData: RecurringScheduleUpdateData = {};
 
     if (data.type !== undefined) {
       updateData.recurrenceType = data.type;
@@ -277,7 +281,7 @@ export class RecurringScheduleService {
   /**
    * Get recurring schedule for a room
    */
-  async getRecurringSchedule(roomId: number) {
+  async getRecurringSchedule(roomId: number): Promise<RecurringSchedule | null> {
     return prisma.recurringSchedule.findUnique({
       where: { roomId },
     });
@@ -286,7 +290,7 @@ export class RecurringScheduleService {
   /**
    * Deactivate recurring schedule
    */
-  async deactivateRecurringSchedule(roomId: number, userId: number) {
+  async deactivateRecurringSchedule(roomId: number, userId: number): Promise<RecurringSchedule> {
     // Verify user is room creator
     const room = await prisma.focusRoom.findUnique({
       where: { id: roomId },
@@ -322,7 +326,7 @@ export class RecurringScheduleService {
     roomId: number,
     scheduledTime: Date,
     userId: number
-  ) {
+  ): Promise<{ id: number; status: string; skipReason: string | null }> {
     // Verify user is room creator
     const room = await prisma.focusRoom.findUnique({
       where: { id: roomId },

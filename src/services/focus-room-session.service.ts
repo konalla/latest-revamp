@@ -5,6 +5,7 @@ import {
   calculateRemainingTime,
   isSessionEnded,
   calculateActualDuration,
+  calculateElapsedTime,
 } from "../utils/focus-room.utils.js";
 import userStatusService from "./user-status.service.js";
 
@@ -104,6 +105,7 @@ export class FocusRoomSessionService {
 
   /**
    * Pause an active session (creator only)
+   * Tracks cumulative pause duration to support multiple pause/resume cycles
    */
   async pauseSession(roomId: number, sessionId: number, userId: number) {
     // Verify user is creator
@@ -131,17 +133,22 @@ export class FocusRoomSessionService {
       throw new Error("Only active sessions can be paused");
     }
 
+    const now = new Date();
+
     return prisma.focusRoomSession.update({
       where: { id: sessionId },
       data: {
         status: "PAUSED",
-        pausedAt: new Date(),
+        pausedAt: now,
+        // Clear resumedAt when pausing (it was from previous cycle)
+        resumedAt: null,
       },
     });
   }
 
   /**
    * Resume a paused session (creator only)
+   * Tracks cumulative pause duration to support multiple pause/resume cycles
    */
   async resumeSession(roomId: number, sessionId: number, userId: number) {
     // Verify user is creator
@@ -169,11 +176,29 @@ export class FocusRoomSessionService {
       throw new Error("Only paused sessions can be resumed");
     }
 
+    const now = new Date();
+
+    // Calculate this pause cycle's duration and add to cumulative total
+    let additionalPauseDuration = 0;
+    if (session.pausedAt) {
+      additionalPauseDuration = Math.floor((now.getTime() - session.pausedAt.getTime()) / 1000);
+    }
+
+    const newTotalPauseDuration = session.totalPauseDuration + additionalPauseDuration;
+
+    console.log(`[FocusRoom] Resuming session ${sessionId}:`, {
+      previousTotalPauseDuration: session.totalPauseDuration,
+      thisPauseDuration: additionalPauseDuration,
+      newTotalPauseDuration,
+    });
+
     const updatedSession = await prisma.focusRoomSession.update({
       where: { id: sessionId },
       data: {
         status: "ACTIVE",
-        resumedAt: new Date(),
+        resumedAt: now,
+        totalPauseDuration: newTotalPauseDuration,
+        // Keep pausedAt for reference (shows when last pause started)
       },
     });
 
@@ -232,11 +257,20 @@ export class FocusRoomSessionService {
     }
 
     const endedAt = new Date();
+
+    // If session is currently paused, add current pause duration to total
+    let finalTotalPauseDuration = session.totalPauseDuration;
+    if (session.status === "PAUSED" && session.pausedAt) {
+      const currentPauseDuration = Math.floor((endedAt.getTime() - session.pausedAt.getTime()) / 1000);
+      finalTotalPauseDuration += currentPauseDuration;
+    }
+
     const actualDuration = calculateActualDuration(
       session.startedAt,
       endedAt,
       session.pausedAt,
-      session.resumedAt
+      session.resumedAt,
+      finalTotalPauseDuration
     );
 
     // Check if room has active recurring schedule
@@ -375,6 +409,7 @@ export class FocusRoomSessionService {
 
   /**
    * Get session timer info (remaining time, status)
+   * Uses cumulative totalPauseDuration for accurate timer calculation
    */
   async getSessionTimer(sessionId: number) {
     const session = await prisma.focusRoomSession.findUnique({
@@ -389,24 +424,34 @@ export class FocusRoomSessionService {
       session.startedAt,
       session.scheduledDuration,
       session.pausedAt,
-      session.resumedAt
+      session.resumedAt,
+      session.totalPauseDuration
     );
 
     const hasEnded = isSessionEnded(
       session.startedAt,
       session.scheduledDuration,
       session.pausedAt,
-      session.resumedAt
+      session.resumedAt,
+      session.totalPauseDuration
+    );
+
+    const elapsedTime = calculateElapsedTime(
+      session.startedAt,
+      session.status === "PAUSED" ? session.pausedAt : null,
+      session.totalPauseDuration
     );
 
     return {
       sessionId: session.id,
       status: hasEnded ? "COMPLETED" : session.status,
       remainingTime,
+      elapsedTime,
       startedAt: session.startedAt,
       scheduledDuration: session.scheduledDuration,
       pausedAt: session.pausedAt,
       resumedAt: session.resumedAt,
+      totalPauseDuration: session.totalPauseDuration,
     };
   }
 
@@ -428,7 +473,8 @@ export class FocusRoomSessionService {
         session.startedAt,
         session.scheduledDuration,
         session.pausedAt,
-        session.resumedAt
+        session.resumedAt,
+        session.totalPauseDuration
       );
 
       if (hasEnded && session.status !== "COMPLETED") {

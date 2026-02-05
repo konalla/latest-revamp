@@ -21,32 +21,31 @@ export function validateInvitationToken(token: string): boolean {
 
 /**
  * Calculate remaining time in seconds for a session
- * Takes into account paused time
+ * Takes into account cumulative paused time (supports multiple pause/resume cycles)
  */
 export function calculateRemainingTime(
   startedAt: Date,
   scheduledDuration: number, // in seconds
   pausedAt: Date | null,
-  resumedAt: Date | null
+  resumedAt: Date | null,
+  totalPauseDuration: number = 0 // cumulative pause duration in seconds
 ): number {
   const now = new Date();
   
-  // If session is paused, calculate time until pause
+  // If session is currently paused, calculate time until pause started
+  // Don't count the ongoing pause in elapsed time
   if (pausedAt && !resumedAt) {
-    const elapsedBeforePause = Math.floor((pausedAt.getTime() - startedAt.getTime()) / 1000);
-    return Math.max(0, scheduledDuration - elapsedBeforePause);
+    const elapsedUntilPause = Math.floor((pausedAt.getTime() - startedAt.getTime()) / 1000);
+    // Subtract previous cumulative pause duration from elapsed time
+    const activeTime = Math.max(0, elapsedUntilPause - totalPauseDuration);
+    return Math.max(0, scheduledDuration - activeTime);
   }
   
-  // If session was paused and resumed, subtract paused duration
-  if (pausedAt && resumedAt) {
-    const pausedDuration = Math.floor((resumedAt.getTime() - pausedAt.getTime()) / 1000);
-    const elapsed = Math.floor((now.getTime() - startedAt.getTime()) / 1000) - pausedDuration;
-    return Math.max(0, scheduledDuration - elapsed);
-  }
-  
-  // Normal running session
-  const elapsed = Math.floor((now.getTime() - startedAt.getTime()) / 1000);
-  return Math.max(0, scheduledDuration - elapsed);
+  // Session is active (running or was resumed)
+  // Calculate total elapsed time minus all pause durations
+  const totalElapsed = Math.floor((now.getTime() - startedAt.getTime()) / 1000);
+  const activeTime = Math.max(0, totalElapsed - totalPauseDuration);
+  return Math.max(0, scheduledDuration - activeTime);
 }
 
 /**
@@ -56,19 +55,42 @@ export function isSessionEnded(
   startedAt: Date,
   scheduledDuration: number,
   pausedAt: Date | null,
-  resumedAt: Date | null
+  resumedAt: Date | null,
+  totalPauseDuration: number = 0
 ): boolean {
-  return calculateRemainingTime(startedAt, scheduledDuration, pausedAt, resumedAt) <= 0;
+  return calculateRemainingTime(startedAt, scheduledDuration, pausedAt, resumedAt, totalPauseDuration) <= 0;
 }
 
 /**
- * Calculate actual duration of a session in seconds
+ * Calculate the elapsed time for a session (active time only, excluding pauses)
+ */
+export function calculateElapsedTime(
+  startedAt: Date,
+  pausedAt: Date | null,
+  totalPauseDuration: number = 0
+): number {
+  const now = new Date();
+  
+  // If currently paused, calculate until pause started
+  if (pausedAt) {
+    const elapsedUntilPause = Math.floor((pausedAt.getTime() - startedAt.getTime()) / 1000);
+    return Math.max(0, elapsedUntilPause - totalPauseDuration);
+  }
+  
+  // Session is active
+  const totalElapsed = Math.floor((now.getTime() - startedAt.getTime()) / 1000);
+  return Math.max(0, totalElapsed - totalPauseDuration);
+}
+
+/**
+ * Calculate actual duration of a session in seconds (active time only)
  */
 export function calculateActualDuration(
   startedAt: Date,
   endedAt: Date | null,
   pausedAt: Date | null,
-  resumedAt: Date | null
+  resumedAt: Date | null,
+  totalPauseDuration: number = 0
 ): number | null {
   if (!endedAt) {
     return null;
@@ -76,17 +98,58 @@ export function calculateActualDuration(
   
   const totalDuration = Math.floor((endedAt.getTime() - startedAt.getTime()) / 1000);
   
-  // Subtract paused time if session was paused
-  if (pausedAt && resumedAt) {
-    const pausedDuration = Math.floor((resumedAt.getTime() - pausedAt.getTime()) / 1000);
-    return totalDuration - pausedDuration;
-  }
-  
-  // If paused but not resumed, calculate until pause
-  if (pausedAt && !resumedAt) {
-    return Math.floor((pausedAt.getTime() - startedAt.getTime()) / 1000);
-  }
-  
-  return totalDuration;
+  // Subtract cumulative pause duration
+  return Math.max(0, totalDuration - totalPauseDuration);
 }
+
+/**
+ * Parse room ID from request parameter
+ * Returns null if invalid or missing
+ */
+export function parseRoomId(roomIdParam: string | undefined): number | null {
+  if (!roomIdParam) return null;
+  const roomId = parseInt(roomIdParam, 10);
+  return isNaN(roomId) ? null : roomId;
+}
+
+/**
+ * Parse session ID from request parameter
+ * Returns null if invalid or missing
+ */
+export function parseSessionId(sessionIdParam: string | undefined): number | null {
+  if (!sessionIdParam) return null;
+  const sessionId = parseInt(sessionIdParam, 10);
+  return isNaN(sessionId) ? null : sessionId;
+}
+
+/**
+ * Parse participant ID from request parameter
+ * Returns null if invalid or missing
+ */
+export function parseParticipantId(participantIdParam: string | undefined): number | null {
+  if (!participantIdParam) return null;
+  const participantId = parseInt(participantIdParam, 10);
+  return isNaN(participantId) ? null : participantId;
+}
+
+/**
+ * Parse invitation ID from request parameter
+ * Returns null if invalid or missing
+ */
+export function parseInvitationId(invitationIdParam: string | undefined): number | null {
+  if (!invitationIdParam) return null;
+  const invitationId = parseInt(invitationIdParam, 10);
+  return isNaN(invitationId) ? null : invitationId;
+}
+
+/**
+ * Parse template ID from request parameter
+ * Returns null if invalid or missing
+ */
+export function parseTemplateId(templateIdParam: string | undefined): number | null {
+  if (!templateIdParam) return null;
+  const templateId = parseInt(templateIdParam, 10);
+  return isNaN(templateId) ? null : templateId;
+}
+
 
