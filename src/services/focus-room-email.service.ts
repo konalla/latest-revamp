@@ -55,10 +55,13 @@ export const sendFocusRoomInvitationEmail = async (
 
   try {
     await sgMail.send(msg);
-  } catch (error: any) {
+  } catch (error) {
     console.error("Error sending focus room invitation email:", error);
-    if (error.response) {
-      console.error("SendGrid Error:", error.response.body);
+    if (error && typeof error === "object" && "response" in error) {
+      const sendGridError = error as { response?: { body?: unknown } };
+      if (sendGridError.response?.body) {
+        console.error("SendGrid Error:", sendGridError.response.body);
+      }
     }
     throw new Error("Failed to send focus room invitation email");
   }
@@ -151,4 +154,5 @@ const generateHtmlEmail = (
 </html>
   `;
 };
+
 

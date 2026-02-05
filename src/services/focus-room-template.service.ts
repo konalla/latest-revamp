@@ -1,12 +1,18 @@
 import prisma from "../config/prisma.js";
 import type { CreateTemplateInput, CreateRoomFromTemplateInput } from "../types/focus-room.types.js";
 import { focusRoomService } from "./focus-room.service.js";
+import type {
+  FocusRoomTemplate,
+  FocusRoomTemplateWithCreator,
+  FocusRoomTemplateUpdateData,
+  FocusRoomWithCreator,
+} from "../types/focus-room-service.types.js";
 
 export class FocusRoomTemplateService {
   /**
    * Get all system templates
    */
-  async getSystemTemplates() {
+  async getSystemTemplates(): Promise<FocusRoomTemplate[]> {
     return prisma.focusRoomTemplate.findMany({
       where: {
         isSystem: true,
@@ -21,7 +27,10 @@ export class FocusRoomTemplateService {
   /**
    * Get all templates available to user (system + user's templates)
    */
-  async getAllAvailableTemplates(userId: number) {
+  async getAllAvailableTemplates(userId: number): Promise<{
+    system: FocusRoomTemplate[];
+    user: FocusRoomTemplate[];
+  }> {
     const [systemTemplates, userTemplates] = await Promise.all([
       this.getSystemTemplates(),
       this.getUserTemplates(userId),
@@ -36,7 +45,7 @@ export class FocusRoomTemplateService {
   /**
    * Get user's templates
    */
-  async getUserTemplates(userId: number) {
+  async getUserTemplates(userId: number): Promise<FocusRoomTemplate[]> {
     return prisma.focusRoomTemplate.findMany({
       where: {
         creatorId: userId,
@@ -51,7 +60,7 @@ export class FocusRoomTemplateService {
   /**
    * Get template by ID
    */
-  async getTemplateById(templateId: number) {
+  async getTemplateById(templateId: number): Promise<FocusRoomTemplateWithCreator | null> {
     return prisma.focusRoomTemplate.findUnique({
       where: { id: templateId },
       include: {
@@ -69,7 +78,7 @@ export class FocusRoomTemplateService {
   /**
    * Create a new template
    */
-  async createTemplate(userId: number, data: CreateTemplateInput) {
+  async createTemplate(userId: number, data: CreateTemplateInput): Promise<FocusRoomTemplate> {
     return prisma.focusRoomTemplate.create({
       data: {
         name: data.name,
@@ -89,7 +98,11 @@ export class FocusRoomTemplateService {
   /**
    * Update template (creator only)
    */
-  async updateTemplate(templateId: number, userId: number, data: Partial<CreateTemplateInput>) {
+  async updateTemplate(
+    templateId: number,
+    userId: number,
+    data: Partial<CreateTemplateInput>
+  ): Promise<FocusRoomTemplate> {
     const template = await prisma.focusRoomTemplate.findUnique({
       where: { id: templateId },
     });
@@ -106,7 +119,7 @@ export class FocusRoomTemplateService {
       throw new Error("Cannot update system templates");
     }
 
-    const updateData: any = {};
+    const updateData: FocusRoomTemplateUpdateData = {};
     if (data.name !== undefined) updateData.name = data.name;
     if (data.description !== undefined) updateData.description = data.description;
     if (data.category !== undefined) updateData.category = data.category;
@@ -124,7 +137,7 @@ export class FocusRoomTemplateService {
   /**
    * Delete template (creator only)
    */
-  async deleteTemplate(templateId: number, userId: number) {
+  async deleteTemplate(templateId: number, userId: number): Promise<boolean> {
     const template = await prisma.focusRoomTemplate.findUnique({
       where: { id: templateId },
     });
@@ -155,7 +168,7 @@ export class FocusRoomTemplateService {
     templateId: number,
     userId: number,
     data: CreateRoomFromTemplateInput
-  ) {
+  ): Promise<FocusRoomWithCreator> {
     const template = await prisma.focusRoomTemplate.findUnique({
       where: { id: templateId },
     });

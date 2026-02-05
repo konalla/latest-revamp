@@ -1,6 +1,12 @@
 import prisma from "../config/prisma.js";
 import bcrypt from "bcrypt";
 import type { CreateRoomInput, UpdateRoomInput } from "../types/focus-room.types.js";
+import type {
+  FocusRoom,
+  FocusRoomWithCreator,
+  FocusRoomWithDetails,
+  FocusRoomUpdateData,
+} from "../types/focus-room-service.types.js";
 
 export class FocusRoomService {
   /**
@@ -61,7 +67,7 @@ export class FocusRoomService {
   /**
    * Create a new focus room
    */
-  async createRoom(userId: number, data: CreateRoomInput) {
+  async createRoom(userId: number, data: CreateRoomInput): Promise<FocusRoomWithCreator> {
     let passwordHash: string | null = null;
 
     // Hash password if provided
@@ -131,7 +137,16 @@ export class FocusRoomService {
   /**
    * Get room by ID with access control
    */
-  async getRoomById(roomId: number, userId?: number) {
+  async getRoomById(
+    roomId: number,
+    userId?: number
+  ): Promise<{
+    room: FocusRoomWithDetails | null;
+    hasAccess: boolean;
+    isCreator?: boolean;
+    isParticipant?: boolean;
+    requiresInvitation?: boolean;
+  } | null> {
     const room = await prisma.focusRoom.findUnique({
       where: { id: roomId },
       include: {
@@ -328,7 +343,11 @@ export class FocusRoomService {
   /**
    * Update room (creator only)
    */
-  async updateRoom(roomId: number, userId: number, data: UpdateRoomInput) {
+  async updateRoom(
+    roomId: number,
+    userId: number,
+    data: UpdateRoomInput
+  ): Promise<FocusRoomWithCreator> {
     // Verify user is creator
     const room = await prisma.focusRoom.findUnique({
       where: { id: roomId },
@@ -354,7 +373,7 @@ export class FocusRoomService {
       throw new Error("Cannot update room settings while a session is active");
     }
 
-    const updateData: any = {};
+    const updateData: FocusRoomUpdateData = {};
 
     if (data.name !== undefined) updateData.name = data.name;
     if (data.description !== undefined) updateData.description = data.description;
@@ -419,7 +438,7 @@ export class FocusRoomService {
   /**
    * Delete room (creator only)
    */
-  async deleteRoom(roomId: number, userId: number) {
+  async deleteRoom(roomId: number, userId: number): Promise<boolean> {
     const room = await prisma.focusRoom.findUnique({
       where: { id: roomId },
     });
