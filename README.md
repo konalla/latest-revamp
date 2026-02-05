@@ -83,10 +83,22 @@ Before setting up the application, make sure you have the following installed:
    - Create OKRs table
    - Create tasks table
 
-4. **Seed the database (optional)**
+4. **Create admin user (required before seeding)**
    ```bash
-   npx prisma db seed  # if seed file exists
+   npx tsx scripts/create-admin.ts <email> <username> <name> <password>
    ```
+   Example:
+   ```bash
+   npx tsx scripts/create-admin.ts admin@example.com admin "Admin User" "SecurePassword123!"
+   ```
+
+5. **Seed the database**
+   ```bash
+   npm run seed
+   # OR
+   npx prisma db seed
+   ```
+   **Important:** Admin user must be created first before running seed, as focus room templates require an admin user to exist.
 
 ## 🏃‍♂️ Running the Application
 
@@ -156,58 +168,49 @@ npx prisma studio
 
 ---
 
-## 🌱 Seeding Scripts
+## 🌱 Seeding the Database
 
-### Individual Seeding Scripts
+### Prerequisites
+**⚠️ IMPORTANT:** You must create an admin user **before** running the seed command. The seed script includes focus room templates that require an admin user to exist.
 
-#### 1. Seed Subscription Plans
-Creates all subscription plans (Trial, Free, Monthly, Yearly, Essential Twenty, Business Pro, Focus Master, Performance Founder) and Stripe payment provider.
-
-```bash
-# OR
-npx tsx scripts/seed-subscriptions.ts
-```
-
-**What it seeds:**
-- Stripe payment provider
-- Clarity Plan (trial - 14 days, 50 tasks)
-- Free Plan (1 project, 5 objectives, 10 key results, 50 tasks, 1 workspace, 5 teams)
-- Pro Plan - Monthly ($18/month, 1000 tasks)
-- Pro Plan - Yearly ($180/year, 10000 tasks)
-- Essential Twenty ($24/month, 1500 tasks)
-- Business Pro ($49/month, 2000 tasks)
-- Focus Master ($20/month, unlimited tasks, 7 workspaces)
-- Performance Founder ($200/year, unlimited tasks, 12 workspaces)
-
-**Note:** After running this script, you need to manually update `stripePriceId` and `stripeProductId` fields in the database after creating products in Stripe Dashboard.
-
-#### 2. Seed Referral Programs
-Creates the Origin 1000 and Vanguard 300 referral programs.
+### Run Seed Command
+The seed script runs all seeding operations in the correct order:
 
 ```bash
+npm run seed
 # OR
-npx tsx scripts/seed-referral-programs.ts
+npx prisma db seed
 ```
 
-**What it seeds:**
-- Origin 1000 program (first 1000 users, 0 referrals required)
-- Vanguard 300 program (first 300 users with 3+ referrals)
+### What Gets Seeded
 
-#### 3. Seed Focus Room Templates
-Creates default focus room templates for users.
+The seed script runs the following operations in order:
 
-```bash
-# OR
-npx tsx scripts/seed-focus-room-templates.ts
-```
+1. **Seed Subscription Plans**
+   - Stripe payment provider
+   - Clarity Plan (trial - 14 days, 50 tasks)
+   - Free Plan (1 project, 5 objectives, 10 key results, 50 tasks, 1 workspace, 5 teams)
+   - Pro Plan - Monthly ($18/month, 1000 tasks)
+   - Pro Plan - Yearly ($180/year, 10000 tasks)
+   - Essential Twenty ($24/month, 1500 tasks)
+   - Business Pro ($49/month, 2000 tasks)
+   - Focus Master ($20/month, unlimited tasks, 7 workspaces)
+   - Performance Founder ($200/year, unlimited tasks, 12 workspaces)
 
-**What it seeds:**
-- Pomodoro Deep Work (25 min focus, 5 min break)
-- Creative Flow (50 min focus, 10 min break)
-- Study Session (30 min focus, 8 min break)
-- Strategic Planning (20 min focus, 5 min break)
+2. **Update Stripe IDs** (from environment variables)
+   - Updates subscription plans with Stripe product and price IDs
+   - Reads from environment variables like `STRIPE_MONTHLY_PRICE_ID`, `STRIPE_MONTHLY_PRODUCT_ID`, etc.
 
-**Note:** Requires an admin user with ID 1 to exist. If not, templates will be created with `creatorId = 1`.
+3. **Seed Referral Programs**
+   - Origin 1000 program (first 1000 users, 0 referrals required)
+   - Vanguard 300 program (first 300 users with 3+ referrals)
+
+4. **Seed Focus Room Templates**
+   - Pomodoro Deep Work (25 min focus, 5 min break)
+   - Creative Flow (50 min focus, 10 min break)
+   - Study Session (30 min focus, 8 min break)
+   - Strategic Planning (20 min focus, 5 min break)
+   - **Note:** Requires an admin user to exist. Templates will be associated with the admin user.
 
 
 
@@ -225,8 +228,9 @@ npx tsx scripts/create-admin.ts <email> <username> <name> <password>
 npx tsx scripts/create-admin.ts admin@example.com admin "Admin User" "SecurePassword123!"
 ```
 
-**Important:** 
-- Run this **before** seeding focus room templates if you want them associated with the admin user
+**⚠️ IMPORTANT:** 
+- **You must create an admin user BEFORE running the seed command**
+- The seed script includes focus room templates that require an admin user to exist
 - The script checks if an admin already exists and prevents duplicate creation
 
 ---
@@ -251,8 +255,11 @@ npx prisma generate
 # 5. Run migrations
 npx prisma migrate dev
 
-# 6. Create admin user
+# 6. Create admin user (REQUIRED before seeding)
 npx tsx scripts/create-admin.ts admin@example.com admin "Admin User" "SecurePassword123!"
+
+# 7. Seed the database
+npm run seed
 
 # 8. Start development server
 npm run dev
@@ -273,8 +280,15 @@ npx prisma generate
 # 4. Run migrations (production)
 npx prisma migrate deploy
 
-# 5. Create admin user
+# 5. Create admin user (REQUIRED before seeding)
 npx tsx scripts/create-admin.ts admin@example.com admin "Admin User" "SecurePassword123!"
+
+# 6. Seed the database
+npm run seed
+
+# 7. Build and start
+npm run build
+npm start
 
 ## 🔗 API Endpoints
 

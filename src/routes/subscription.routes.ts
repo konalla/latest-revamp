@@ -34,5 +34,8 @@ router.post("/setup-clarity-plan", authenticateToken, subscriptionController.set
 // Update payment method
 router.post("/update-payment-method", authenticateToken, subscriptionController.updatePaymentMethod.bind(subscriptionController));
 
+// Sync subscription with Stripe (useful when webhooks might have been missed)
+router.post("/sync", authenticateToken, subscriptionController.syncWithStripe.bind(subscriptionController));
+
 export default router;
 

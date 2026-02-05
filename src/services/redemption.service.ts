@@ -183,12 +183,14 @@ export class RedemptionService {
       });
 
       // Send webhook asynchronously (don't block)
-      webhookService
-        .sendRedemptionWebhook(result, user)
-        .catch((error) => {
-          console.error("Failed to send redemption webhook:", error);
-          // Don't throw - redemption is already successful
-        });
+      if (result) {
+        webhookService
+          .sendRedemptionWebhook(result, user)
+          .catch((error) => {
+            console.error("Failed to send redemption webhook:", error);
+            // Don't throw - redemption is already successful
+          });
+      }
 
       return {
         success: true,

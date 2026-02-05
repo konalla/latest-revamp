@@ -252,6 +252,31 @@ export class SubscriptionController {
   }
 
   /**
+   * Sync subscription with Stripe
+   * Use this to force sync local subscription status with Stripe
+   * Useful when webhooks might have been missed
+   */
+  async syncWithStripe(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = (req as any).user?.id;
+      if (!userId) {
+        res.status(401).json({ error: "Unauthorized" });
+        return;
+      }
+
+      const subscription = await subscriptionService.syncWithStripe(userId);
+
+      res.status(200).json({
+        message: "Subscription synced with Stripe successfully",
+        subscription,
+      });
+    } catch (error: any) {
+      console.error("Error syncing with Stripe:", error);
+      res.status(500).json({ error: error.message || "Failed to sync with Stripe" });
+    }
+  }
+
+  /**
    * Calculate warnings for subscription
    */
   private calculateWarnings(subscription: any): {

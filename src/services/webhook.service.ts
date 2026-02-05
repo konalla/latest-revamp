@@ -109,10 +109,9 @@ export class WebhookService {
             itemName: redemption.redeemableItem.name,
             creditsDeducted: redemption.creditsDeducted,
             balanceAfter: redemption.balanceAfter,
-            selectedVariant:
-              redemption.selectedVariant && typeof redemption.selectedVariant === "object"
-                ? (redemption.selectedVariant as Record<string, any>)
-                : undefined,
+            ...(redemption.selectedVariant && typeof redemption.selectedVariant === "object"
+              ? { selectedVariant: redemption.selectedVariant as Record<string, any> }
+              : {}),
             createdAt: redemption.createdAt.toISOString(),
           },
         },

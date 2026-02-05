@@ -642,6 +642,8 @@ export class SubscriptionService {
 
   /**
    * Update subscription status based on dates and Stripe status
+   * IMPORTANT: This method now syncs with Stripe before making status decisions
+   * to prevent race conditions where the local status changes before webhooks arrive
    */
   async updateSubscriptionStatus(subscriptionId: number): Promise<any> {
     try {
@@ -659,58 +661,129 @@ export class SubscriptionService {
       const now = new Date();
       let newStatus = subscription.status;
       let gracePeriodEnd = subscription.gracePeriodEnd;
+      let updatedPeriodStart = subscription.currentPeriodStart;
+      let updatedPeriodEnd = subscription.currentPeriodEnd;
 
-      // If trial, check if trial ended
-      if (subscription.status === "TRIAL") {
-        if (subscription.trialEnd && now >= subscription.trialEnd) {
-          newStatus = "EXPIRED";
-        } else if (
-          subscription.subscriptionPlan.maxTasks &&
-          subscription.tasksCreatedThisPeriod >= subscription.subscriptionPlan.maxTasks
-        ) {
-          // Trial ended due to task limit
-          newStatus = "EXPIRED";
-        }
-      }
+      // CRITICAL: If subscription has a Stripe subscription ID, check with Stripe first
+      // This prevents race conditions where we mark as EXPIRED before webhook arrives
+      if (subscription.stripeSubscriptionId) {
+        try {
+          const stripeSubscription = await stripe.subscriptions.retrieve(subscription.stripeSubscriptionId);
+          
+          // Map Stripe status to our status
+          const stripeStatus = stripeSubscription.status;
+          
+          // Get period dates from Stripe (source of truth)
+          const stripePeriodStart = (stripeSubscription as any).current_period_start
+            ? new Date((stripeSubscription as any).current_period_start * 1000)
+            : null;
+          const stripePeriodEnd = (stripeSubscription as any).current_period_end
+            ? new Date((stripeSubscription as any).current_period_end * 1000)
+            : null;
 
-      // If active, check if period ended
-      if (subscription.status === "ACTIVE") {
-        if (subscription.currentPeriodEnd && now >= subscription.currentPeriodEnd) {
-          // Enter grace period
-          newStatus = "GRACE_PERIOD";
-          if (!gracePeriodEnd) {
-            gracePeriodEnd = new Date(subscription.currentPeriodEnd);
-            gracePeriodEnd.setDate(gracePeriodEnd.getDate() + 3);
+          if (stripePeriodStart && !isNaN(stripePeriodStart.getTime())) {
+            updatedPeriodStart = stripePeriodStart;
+          }
+          if (stripePeriodEnd && !isNaN(stripePeriodEnd.getTime())) {
+            updatedPeriodEnd = stripePeriodEnd;
           }
 
-          // Check if grace period ended
-          if (gracePeriodEnd && now >= gracePeriodEnd) {
+          // Handle Stripe subscription status
+          if (stripeStatus === "active") {
+            // Stripe says subscription is active - trust Stripe over local state
+            // This handles the case where trial ended and payment succeeded
+            newStatus = "ACTIVE";
+          } else if (stripeStatus === "trialing") {
+            // Still in trial period on Stripe
+            newStatus = "TRIAL";
+          } else if (stripeStatus === "past_due") {
+            // Payment failed
+            newStatus = "PAST_DUE";
+          } else if (stripeStatus === "canceled") {
+            // Subscription was canceled in Stripe
+            newStatus = "CANCELED";
+          } else if (stripeStatus === "unpaid" || stripeStatus === "incomplete_expired") {
+            // Subscription expired due to non-payment
+            newStatus = "EXPIRED";
+          } else if (stripeStatus === "incomplete") {
+            // Payment incomplete (requires action)
+            newStatus = "INCOMPLETE";
+          }
+          
+          console.log(`[Subscription] Synced with Stripe: ${subscription.id} - Stripe status: ${stripeStatus}, Local status: ${subscription.status} -> ${newStatus}`);
+        } catch (stripeError: any) {
+          // If Stripe subscription not found, it was likely deleted - mark as expired
+          if (stripeError.code === "resource_missing" || stripeError.statusCode === 404) {
+            console.warn(`[Subscription] Stripe subscription ${subscription.stripeSubscriptionId} not found, marking as expired`);
+            newStatus = "EXPIRED";
+          } else {
+            // For other errors, log but continue with local logic
+            console.warn(`[Subscription] Failed to sync with Stripe for ${subscription.stripeSubscriptionId}: ${stripeError.message}`);
+            // Fall through to local logic below
+          }
+        }
+      } else {
+        // No Stripe subscription - use local logic (for free plans or legacy subscriptions)
+        
+        // If trial, check if trial ended
+        if (subscription.status === "TRIAL") {
+          if (subscription.trialEnd && now >= subscription.trialEnd) {
+            newStatus = "EXPIRED";
+          } else if (
+            subscription.subscriptionPlan.maxTasks &&
+            subscription.tasksCreatedThisPeriod >= subscription.subscriptionPlan.maxTasks
+          ) {
+            // Trial ended due to task limit
+            newStatus = "EXPIRED";
+          }
+        }
+
+        // If active, check if period ended
+        if (subscription.status === "ACTIVE") {
+          if (subscription.currentPeriodEnd && now >= subscription.currentPeriodEnd) {
+            // Enter grace period
+            newStatus = "GRACE_PERIOD";
+            if (!gracePeriodEnd) {
+              gracePeriodEnd = new Date(subscription.currentPeriodEnd);
+              gracePeriodEnd.setDate(gracePeriodEnd.getDate() + 3);
+            }
+
+            // Check if grace period ended
+            if (gracePeriodEnd && now >= gracePeriodEnd) {
+              newStatus = "EXPIRED";
+            }
+          }
+        }
+
+        // If in grace period, check if it ended
+        if (subscription.status === "GRACE_PERIOD" && gracePeriodEnd) {
+          if (now >= gracePeriodEnd) {
+            newStatus = "EXPIRED";
+          }
+        }
+
+        // If canceled, check if should be expired
+        if (subscription.status === "CANCELED") {
+          if (subscription.currentPeriodEnd && now >= subscription.currentPeriodEnd) {
             newStatus = "EXPIRED";
           }
         }
       }
 
-      // If in grace period, check if it ended
-      if (subscription.status === "GRACE_PERIOD" && gracePeriodEnd) {
-        if (now >= gracePeriodEnd) {
-          newStatus = "EXPIRED";
-        }
-      }
+      // Update subscription if status or dates changed
+      const statusChanged = newStatus !== subscription.status;
+      const periodChanged = (updatedPeriodStart?.getTime() !== subscription.currentPeriodStart?.getTime()) ||
+                           (updatedPeriodEnd?.getTime() !== subscription.currentPeriodEnd?.getTime());
+      const gracePeriodChanged = gracePeriodEnd?.getTime() !== subscription.gracePeriodEnd?.getTime();
 
-      // If canceled, check if should be expired
-      if (subscription.status === "CANCELED") {
-        if (subscription.currentPeriodEnd && now >= subscription.currentPeriodEnd) {
-          newStatus = "EXPIRED";
-        }
-      }
-
-      // Update subscription if status changed
-      if (newStatus !== subscription.status || gracePeriodEnd !== subscription.gracePeriodEnd) {
+      if (statusChanged || periodChanged || gracePeriodChanged) {
         const updated = await prisma.subscription.update({
           where: { id: subscriptionId },
           data: {
             status: newStatus as any,
             gracePeriodEnd: gracePeriodEnd,
+            currentPeriodStart: updatedPeriodStart,
+            currentPeriodEnd: updatedPeriodEnd,
           },
           include: {
             subscriptionPlan: true,
@@ -1513,7 +1586,11 @@ export class SubscriptionService {
   }
 
   /**
-   * Resume canceled subscription
+   * Resume canceled or expired subscription
+   * This method handles multiple scenarios:
+   * 1. CANCELED subscription that's still within billing period
+   * 2. EXPIRED subscription where Stripe subscription is still active (post-trial)
+   * 3. TRIAL subscription that ended but Stripe payment succeeded
    */
   async resumeSubscription(userId: number): Promise<any> {
     try {
@@ -1533,44 +1610,205 @@ export class SubscriptionService {
         throw new Error("Clarity Plan subscriptions cannot be resumed. Please choose a paid subscription plan.");
       }
 
-      if (subscription.status !== "CANCELED") {
-        throw new Error("Subscription is not canceled");
+      // Handle different statuses
+      const validStatusesForResume = ["CANCELED", "EXPIRED", "TRIAL", "PAST_DUE"];
+      if (!validStatusesForResume.includes(subscription.status)) {
+        // If already ACTIVE, check if we need to sync with Stripe
+        if (subscription.status === "ACTIVE") {
+          // Already active - just return the current subscription
+          return subscription;
+        }
+        throw new Error(`Subscription cannot be resumed from status: ${subscription.status}`);
       }
 
-      // If has Stripe subscription, resume it
+      // If has Stripe subscription, check its status first
       if (subscription.stripeSubscriptionId) {
         try {
-          await stripe.subscriptions.update(subscription.stripeSubscriptionId, {
-            cancel_at_period_end: false,
-          });
-        } catch (error) {
-          console.error("Error resuming Stripe subscription:", error);
+          const stripeSubscription = await stripe.subscriptions.retrieve(subscription.stripeSubscriptionId);
+          const stripeStatus = stripeSubscription.status;
+          
+          console.log(`[Resume] Checking Stripe subscription ${subscription.stripeSubscriptionId}: status = ${stripeStatus}`);
+          
+          if (stripeStatus === "active") {
+            // Stripe subscription is active! This means:
+            // 1. Trial ended and payment succeeded, OR
+            // 2. Subscription was renewed successfully
+            // Update local status to match Stripe
+            
+            const periodStart = (stripeSubscription as any).current_period_start
+              ? new Date((stripeSubscription as any).current_period_start * 1000)
+              : new Date();
+            const periodEnd = (stripeSubscription as any).current_period_end
+              ? new Date((stripeSubscription as any).current_period_end * 1000)
+              : null;
+
+            const updated = await prisma.subscription.update({
+              where: { id: subscription.id },
+              data: {
+                status: "ACTIVE",
+                currentPeriodStart: periodStart,
+                currentPeriodEnd: periodEnd,
+                cancelAtPeriodEnd: false,
+                canceledAt: null,
+                trialEnd: null, // Clear trial end since we're now active
+                // Reset payment retry tracking
+                paymentRetryCount: 0,
+                lastPaymentRetryAt: null,
+                paymentFailureReason: null,
+              },
+              include: {
+                subscriptionPlan: true,
+              },
+            });
+
+            console.log(`[Resume] Subscription ${subscription.id} synced to ACTIVE from Stripe`);
+            return updated;
+          } else if (stripeStatus === "trialing") {
+            // Still in trial - update local status
+            const updated = await prisma.subscription.update({
+              where: { id: subscription.id },
+              data: {
+                status: "TRIAL",
+                cancelAtPeriodEnd: false,
+                canceledAt: null,
+              },
+              include: {
+                subscriptionPlan: true,
+              },
+            });
+
+            return updated;
+          } else if (stripeStatus === "canceled") {
+            // Stripe subscription is canceled
+            // Check if we can reactivate by removing cancel_at_period_end
+            if (stripeSubscription.cancel_at_period_end) {
+              // Can be resumed by removing cancel_at_period_end
+              await stripe.subscriptions.update(subscription.stripeSubscriptionId, {
+                cancel_at_period_end: false,
+              });
+
+              const periodEnd = (stripeSubscription as any).current_period_end
+                ? new Date((stripeSubscription as any).current_period_end * 1000)
+                : null;
+
+              if (periodEnd && new Date() < periodEnd) {
+                // Still within billing period
+                const updated = await prisma.subscription.update({
+                  where: { id: subscription.id },
+                  data: {
+                    status: "ACTIVE",
+                    cancelAtPeriodEnd: false,
+                    canceledAt: null,
+                  },
+                  include: {
+                    subscriptionPlan: true,
+                  },
+                });
+
+                return updated;
+              }
+            }
+            
+            // Subscription is fully canceled - user needs to create new subscription
+            throw new Error("Stripe subscription is canceled. Please create a new subscription.");
+          } else if (stripeStatus === "past_due") {
+            // Payment failed - update local status and provide guidance
+            await prisma.subscription.update({
+              where: { id: subscription.id },
+              data: {
+                status: "PAST_DUE",
+              },
+            });
+            throw new Error("Your payment has failed. Please update your payment method to resume your subscription.");
+          } else if (stripeStatus === "unpaid" || stripeStatus === "incomplete_expired") {
+            // Subscription expired - user needs to create new subscription
+            throw new Error("Subscription has expired due to non-payment. Please create a new subscription.");
+          }
+        } catch (stripeError: any) {
+          // If Stripe subscription not found
+          if (stripeError.code === "resource_missing" || stripeError.statusCode === 404) {
+            console.warn(`[Resume] Stripe subscription ${subscription.stripeSubscriptionId} not found`);
+            
+            // Clear the invalid Stripe subscription ID and mark as expired
+            await prisma.subscription.update({
+              where: { id: subscription.id },
+              data: {
+                stripeSubscriptionId: null,
+                status: "EXPIRED",
+              },
+            });
+            
+            throw new Error("Stripe subscription not found. Please create a new subscription.");
+          }
+          
+          // Re-throw if it's our custom error message
+          if (stripeError.message && !stripeError.code) {
+            throw stripeError;
+          }
+          
+          console.error("Error checking Stripe subscription:", stripeError);
+          throw new Error(`Failed to check Stripe subscription: ${stripeError.message}`);
         }
       }
 
-      // Determine new status
-      let newStatus = "ACTIVE";
-      if (subscription.currentPeriodEnd && new Date() >= subscription.currentPeriodEnd) {
-        // Period ended, need to renew
-        throw new Error("Subscription period has ended. Please create a new subscription.");
+      // No Stripe subscription - check if this is a free plan or legacy subscription
+      if (subscription.subscriptionPlan.name === "free") {
+        // Free plan - just reactivate
+        const now = new Date();
+        const periodEnd = new Date(now);
+        periodEnd.setMonth(periodEnd.getMonth() + 1);
+
+        const updated = await prisma.subscription.update({
+          where: { id: subscription.id },
+          data: {
+            status: "ACTIVE",
+            currentPeriodStart: now,
+            currentPeriodEnd: periodEnd,
+            cancelAtPeriodEnd: false,
+            canceledAt: null,
+          },
+          include: {
+            subscriptionPlan: true,
+          },
+        });
+
+        return updated;
       }
 
-      const updated = await prisma.subscription.update({
-        where: { id: subscription.id },
-        data: {
-          status: newStatus as any,
-          cancelAtPeriodEnd: false,
-          canceledAt: null,
-        },
+      // Paid plan without Stripe subscription - user needs to create new subscription
+      throw new Error("No active Stripe subscription found. Please create a new subscription.");
+    } catch (error: any) {
+      console.error("Error resuming subscription:", error);
+      throw new Error(`Failed to resume subscription: ${error.message}`);
+    }
+  }
+
+  /**
+   * Sync subscription status with Stripe
+   * Call this to force a sync with Stripe and update local status accordingly
+   */
+  async syncWithStripe(userId: number): Promise<any> {
+    try {
+      const subscription = await prisma.subscription.findUnique({
+        where: { userId },
         include: {
           subscriptionPlan: true,
         },
       });
 
-      return updated;
+      if (!subscription) {
+        throw new Error("No subscription found");
+      }
+
+      if (!subscription.stripeSubscriptionId) {
+        return subscription; // Nothing to sync
+      }
+
+      // Force sync by updating status
+      return await this.updateSubscriptionStatus(subscription.id);
     } catch (error: any) {
-      console.error("Error resuming subscription:", error);
-      throw new Error(`Failed to resume subscription: ${error.message}`);
+      console.error("Error syncing with Stripe:", error);
+      throw new Error(`Failed to sync with Stripe: ${error.message}`);
     }
   }
 
@@ -1650,6 +1888,8 @@ export class SubscriptionService {
    */
   async handleWebhookEvent(event: Stripe.Event): Promise<void> {
     try {
+      console.log(`[Webhook] Processing event: ${event.type} (${event.id})`);
+      
       switch (event.type) {
         case "checkout.session.completed":
           await this.handleCheckoutSessionCompleted(event.data.object as Stripe.Checkout.Session);
@@ -1662,6 +1902,11 @@ export class SubscriptionService {
 
         case "customer.subscription.deleted":
           await this.handleSubscriptionDeleted(event.data.object as Stripe.Subscription);
+          break;
+
+        case "customer.subscription.trial_will_end":
+          // Trial will end in 3 days - good for notifications
+          await this.handleTrialWillEnd(event.data.object as Stripe.Subscription);
           break;
 
         case "invoice.payment_succeeded":
@@ -1678,12 +1923,56 @@ export class SubscriptionService {
           await this.handleInvoicePaymentActionRequired(event.data.object as Stripe.Invoice);
           break;
 
+        case "invoice.created":
+          // Invoice created (happens when trial ends before payment attempt)
+          console.log(`[Webhook] Invoice created: ${(event.data.object as Stripe.Invoice).id}`);
+          break;
+
         default:
-          console.log(`Unhandled event type: ${event.type}`);
+          console.log(`[Webhook] Unhandled event type: ${event.type}`);
       }
     } catch (error: any) {
       console.error("Error handling webhook event:", error);
       throw error;
+    }
+  }
+
+  /**
+   * Handle trial will end event (sent 3 days before trial ends)
+   */
+  private async handleTrialWillEnd(stripeSubscription: Stripe.Subscription): Promise<void> {
+    try {
+      const subscription = await prisma.subscription.findUnique({
+        where: { stripeSubscriptionId: stripeSubscription.id },
+        include: {
+          user: {
+            select: {
+              id: true,
+              email: true,
+              name: true,
+            },
+          },
+          subscriptionPlan: true,
+        },
+      });
+
+      if (!subscription) {
+        console.warn(`[Webhook] Subscription not found for trial_will_end: ${stripeSubscription.id}`);
+        return;
+      }
+
+      const trialEnd = (stripeSubscription as any).trial_end
+        ? new Date((stripeSubscription as any).trial_end * 1000)
+        : null;
+
+      console.log(`[Webhook] Trial will end for subscription ${subscription.id} (user: ${subscription.user.email}) at ${trialEnd?.toISOString()}`);
+
+      // TODO: Send email notification to user about trial ending
+      // This is a good place to integrate with your email service
+      // Example: await emailService.sendTrialEndingNotification(subscription.user.email, trialEnd);
+
+    } catch (error: any) {
+      console.error("Error handling trial will end:", error);
     }
   }
 
@@ -1955,6 +2244,7 @@ export class SubscriptionService {
 
   /**
    * Handle subscription updated
+   * CRITICAL: This also handles the trial-to-active transition when trial ends
    */
   private async handleSubscriptionUpdated(stripeSubscription: Stripe.Subscription): Promise<void> {
     try {
@@ -1962,29 +2252,36 @@ export class SubscriptionService {
       // This is important when switching plans - we need to match the correct subscription
       let subscription = await prisma.subscription.findUnique({
         where: { stripeSubscriptionId: stripeSubscription.id },
+        include: {
+          subscriptionPlan: true,
+        },
       });
 
       // Fallback to userId lookup if not found (for backward compatibility)
       if (!subscription) {
         const userId = parseInt(stripeSubscription.metadata?.userId || "0");
         if (!userId) {
+          console.warn(`[Webhook] No userId in metadata for subscription ${stripeSubscription.id}`);
           return;
         }
 
         subscription = await prisma.subscription.findUnique({
           where: { userId },
+          include: {
+            subscriptionPlan: true,
+          },
         });
       }
 
       if (!subscription) {
-        console.warn(`Subscription not found for Stripe subscription ${stripeSubscription.id}`);
+        console.warn(`[Webhook] Subscription not found for Stripe subscription ${stripeSubscription.id}`);
         return;
       }
 
       // Verify this is the correct subscription (double-check stripeSubscriptionId matches)
       // This prevents updating the wrong subscription when switching plans
       if (subscription.stripeSubscriptionId && subscription.stripeSubscriptionId !== stripeSubscription.id) {
-        console.warn(`Stripe subscription ID mismatch: DB has ${subscription.stripeSubscriptionId}, webhook has ${stripeSubscription.id}. Skipping update.`);
+        console.warn(`[Webhook] Stripe subscription ID mismatch: DB has ${subscription.stripeSubscriptionId}, webhook has ${stripeSubscription.id}. Skipping update.`);
         return;
       }
 
@@ -2000,14 +2297,89 @@ export class SubscriptionService {
       const validPeriodStart = periodStart && !isNaN(periodStart.getTime()) ? periodStart : null;
       const validPeriodEnd = periodEnd && !isNaN(periodEnd.getTime()) ? periodEnd : null;
 
+      // CRITICAL: Map Stripe status to our status
+      // This handles the trial-to-active transition automatically
+      const stripeStatus = stripeSubscription.status;
+      let newStatus = subscription.status;
+      let trialEnd = subscription.trialEnd;
+
+      console.log(`[Webhook] Subscription ${subscription.id} - Stripe status: ${stripeStatus}, Current local status: ${subscription.status}`);
+
+      // Map Stripe status to our internal status
+      switch (stripeStatus) {
+        case "active":
+          // IMPORTANT: When Stripe says "active", the trial has ended and payment succeeded
+          // OR it's an active subscription without trial
+          newStatus = "ACTIVE";
+          // Clear trial end date since we're now fully active
+          trialEnd = null;
+          break;
+        case "trialing":
+          newStatus = "TRIAL";
+          // Update trial end date from Stripe
+          if ((stripeSubscription as any).trial_end) {
+            trialEnd = new Date((stripeSubscription as any).trial_end * 1000);
+          }
+          break;
+        case "past_due":
+          newStatus = "PAST_DUE";
+          break;
+        case "canceled":
+          newStatus = "CANCELED";
+          break;
+        case "unpaid":
+        case "incomplete_expired":
+          newStatus = "EXPIRED";
+          break;
+        case "incomplete":
+          newStatus = "INCOMPLETE";
+          break;
+        default:
+          // Keep current status for unknown Stripe statuses
+          console.warn(`[Webhook] Unknown Stripe status: ${stripeStatus}`);
+      }
+
+      // Check if status is changing from TRIAL to ACTIVE (trial ended, payment succeeded)
+      const isTrialToActive = subscription.status === "TRIAL" && newStatus === "ACTIVE";
+      if (isTrialToActive) {
+        console.log(`[Webhook] Trial-to-Active transition for subscription ${subscription.id}`);
+      }
+
+      // Prepare update data
+      const updateData: any = {
+        currentPeriodStart: validPeriodStart,
+        currentPeriodEnd: validPeriodEnd,
+        cancelAtPeriodEnd: stripeSubscription.cancel_at_period_end || false,
+        status: newStatus as any,
+      };
+
+      // Update trial end if changed
+      if (trialEnd !== subscription.trialEnd) {
+        updateData.trialEnd = trialEnd;
+      }
+
+      // If transitioning from trial to active, reset counters for the new billing period
+      if (isTrialToActive) {
+        updateData.tasksCreatedThisPeriod = 0;
+        updateData.projectsCreatedThisPeriod = 0;
+        updateData.objectivesCreatedThisPeriod = 0;
+        updateData.keyResultsCreatedThisPeriod = 0;
+        updateData.workspacesCreatedThisPeriod = 0;
+        updateData.teamsCreatedThisPeriod = 0;
+        updateData.lastTaskCountReset = validPeriodStart || new Date();
+        updateData.lastCountReset = validPeriodStart || new Date();
+        // Clear payment failure tracking
+        updateData.paymentRetryCount = 0;
+        updateData.lastPaymentRetryAt = null;
+        updateData.paymentFailureReason = null;
+      }
+
       await prisma.subscription.update({
         where: { id: subscription.id },
-        data: {
-          currentPeriodStart: validPeriodStart,
-          currentPeriodEnd: validPeriodEnd,
-          cancelAtPeriodEnd: stripeSubscription.cancel_at_period_end || false,
-        },
+        data: updateData,
       });
+
+      console.log(`[Webhook] Updated subscription ${subscription.id}: ${subscription.status} -> ${newStatus}`);
     } catch (error: any) {
       console.error("Error handling subscription updated:", error);
     }

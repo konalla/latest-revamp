@@ -12,10 +12,10 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "seed:focus-templates": "tsx scripts/seed-focus-room-templates.ts",
-    "seed:referral-programs": "tsx scripts/seed-referral-programs.ts",
-    "seed:subscriptions": "tsx scripts/seed-subscriptions.ts",
-    "seed:all": "npm run seed:subscriptions && npm run seed:referral-programs && npm run seed:focus-templates"
+    "seed": "tsx prisma/seed.ts"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
   },
   "keywords": [],
   "author": "",
