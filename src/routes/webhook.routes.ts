@@ -38,30 +38,31 @@ router.post(
 
     try {
       // Verify webhook signature
-      // req.body should be a Buffer when using express.raw()
-      let body: Buffer;
-      
-      if (Buffer.isBuffer(req.body)) {
-        body = req.body;
-      } else if (typeof req.body === "string") {
-        body = Buffer.from(req.body);
-      } else {
-        // Fallback: convert to string then to buffer
-        body = Buffer.from(JSON.stringify(req.body));
+      // req.body MUST be a Buffer when using express.raw()
+      // If it's not a Buffer, the middleware is misconfigured
+      if (!Buffer.isBuffer(req.body)) {
+        const bodyType = typeof req.body;
+        console.error(`[Webhook] Invalid body format: expected Buffer, got ${bodyType}`);
+        console.error("[Webhook] Check middleware configuration - express.raw() must be applied before this route");
+        res.status(400).json({ 
+          error: "Invalid body format - webhook middleware misconfigured",
+          hint: "Ensure express.raw() middleware is applied to webhook routes"
+        });
+        return;
       }
       
       event = stripe.webhooks.constructEvent(
-        body,
+        req.body,
         sig,
         webhookSecret
       );
       
-      console.log(`Webhook event received: ${event.type} (${event.id})`);
+      console.log(`[Webhook] Event received: ${event.type} (${event.id})`);
     } catch (err: any) {
-      console.error("Webhook signature verification failed:", err.message);
-      console.error("Event type:", req.headers["stripe-signature"] ? "signature present" : "signature missing");
-      console.error("Webhook secret configured:", !!webhookSecret);
-      res.status(400).json({ error: `Webhook Error: ${err.message}` });
+      console.error("[Webhook] Signature verification failed:", err.message);
+      console.error("[Webhook] Body type:", Buffer.isBuffer(req.body) ? "Buffer" : typeof req.body);
+      console.error("[Webhook] Body length:", Buffer.isBuffer(req.body) ? req.body.length : "N/A");
+      res.status(400).json({ error: `Webhook signature verification failed: ${err.message}` });
       return;
     }
 
