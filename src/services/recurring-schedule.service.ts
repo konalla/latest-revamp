@@ -47,7 +47,9 @@ export class RecurringScheduleService {
    * Parse time string (HH:mm) and convert to Date in specified timezone, then to UTC
    */
   private parseTimeToUTC(time: string, timezone: string, date: Date): Date {
-    const [hours, minutes] = time.split(":").map(Number);
+    const parts = time.split(":").map(Number);
+    const hours = parts[0] ?? 0;
+    const minutes = parts[1] ?? 0;
     
     // Get the date in the specified timezone
     const zonedDate = toZonedTime(date, timezone);

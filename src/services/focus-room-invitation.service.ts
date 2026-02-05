@@ -77,7 +77,7 @@ export class FocusRoomInvitationService {
     }
 
     // Generate token
-    let token: string;
+    let token: string | undefined;
     let attempts = 0;
     const maxAttempts = 10;
 
@@ -93,9 +93,10 @@ export class FocusRoomInvitationService {
       }
 
       attempts++;
+      token = undefined;
     }
 
-    if (attempts >= maxAttempts) {
+    if (attempts >= maxAttempts || !token) {
       throw new Error("Failed to generate unique invitation token");
     }
 
@@ -110,7 +111,7 @@ export class FocusRoomInvitationService {
         inviterId,
         inviteeEmail: data.email.toLowerCase(),
         inviteeId: existingUser?.id || null,
-        token: token!,
+        token,
         expiresAt,
         status: "PENDING",
       },
@@ -460,4 +461,5 @@ export class FocusRoomInvitationService {
 }
 
 export const focusRoomInvitationService = new FocusRoomInvitationService();
+
 

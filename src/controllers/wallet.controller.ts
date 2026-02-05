@@ -64,8 +64,8 @@ export const getTransactionHistory = async (req: Request, res: Response) => {
     const result = await walletService.getTransactionHistory(userId, {
       limit,
       offset,
-      startDate,
-      endDate,
+      ...(startDate !== undefined && { startDate }),
+      ...(endDate !== undefined && { endDate }),
     });
 
     res.status(200).json({

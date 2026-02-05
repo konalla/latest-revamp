@@ -73,7 +73,7 @@ export class FocusRoomTemplateService {
     return prisma.focusRoomTemplate.create({
       data: {
         name: data.name,
-        description: data.description,
+        ...(data.description !== undefined && { description: data.description }),
         creatorId: userId,
         category: data.category,
         focusDuration: data.focusDuration,
@@ -190,4 +190,5 @@ export class FocusRoomTemplateService {
 }
 
 export const focusRoomTemplateService = new FocusRoomTemplateService();
+
 
