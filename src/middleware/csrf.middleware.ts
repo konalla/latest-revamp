@@ -10,7 +10,7 @@
 import crypto from "crypto";
 import { doubleCsrf } from "csrf-csrf";
 import type { Request, Response, NextFunction } from "express";
-import { csrfConfig } from "../config/security.config.js";
+import { csrfConfig, IS_PRODUCTION } from "../config/security.config.js";
 
 /**
  * Configure CSRF protection with double-submit cookie pattern
@@ -41,10 +41,10 @@ const doubleCsrfProtection = csrfUtilities.doubleCsrfProtection;
  * Generate CSRF secret if not provided (development only)
  */
 function generateCsrfSecret(): string {
-  if (process.env.NODE_ENV === 'production') {
-    throw new Error('CSRF_SECRET must be set in production environment');
+  if (IS_PRODUCTION) {
+    throw new Error('CSRF_SECRET must be set in production/staging environment');
   }
-  console.warn('⚠️  Using generated CSRF secret for development. Set CSRF_SECRET in .env for production.');
+  console.warn('⚠️  Using generated CSRF secret for development. Set CSRF_SECRET in .env for production/staging.');
   return crypto.randomBytes(32).toString('hex');
 }
 
