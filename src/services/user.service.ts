@@ -1,6 +1,7 @@
 import prisma from "../config/prisma.js";
 import bcrypt from "bcrypt";
 import type { ChangePasswordRequest, CreateUserRequest } from "../types/user.types.js";
+import { validatePassword, formatPasswordErrors } from "../utils/password-validator.js";
 
 const SALT_ROUNDS = 10;
 
@@ -179,10 +180,16 @@ const deleteUser = async (id: number) => {
 };
 
 const changePassword = async (userId: number, data: ChangePasswordRequest) => {
-  // Get the current user with password
+  // Get the current user with password and info for validation
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, password: true }
+    select: { 
+      id: true, 
+      password: true,
+      email: true,
+      username: true,
+      name: true
+    }
   });
 
   if (!user) {
@@ -193,6 +200,20 @@ const changePassword = async (userId: number, data: ChangePasswordRequest) => {
   const isCurrentPasswordValid = await bcrypt.compare(data.currentPassword, user.password);
   if (!isCurrentPasswordValid) {
     throw new Error("Current password is incorrect");
+  }
+
+  // Validate new password strength
+  const userInfo: { email?: string; username?: string; name?: string } = {
+    email: user.email,
+    username: user.username,
+  };
+  if (user.name) {
+    userInfo.name = user.name;
+  }
+  const passwordValidation = validatePassword(data.newPassword, undefined, userInfo);
+
+  if (!passwordValidation.isValid) {
+    throw new Error(formatPasswordErrors(passwordValidation));
   }
 
   // Hash the new password
