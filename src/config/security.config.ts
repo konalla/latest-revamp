@@ -163,9 +163,29 @@ export const getCorsOrigins = (): string[] => {
 
 /**
  * CORS Options
+ * Uses function-based origin checking for proper header handling
  */
 export const corsOptions = {
-  origin: getCorsOrigins(),
+  origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+    const allowedOrigins = getCorsOrigins();
+    
+    // Allow requests with no origin (like mobile apps, Postman, curl, or same-origin)
+    if (!origin) {
+      return callback(null, true);
+    }
+    
+    // Check if origin is in allowed list
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    
+    // Log rejected origin for debugging
+    console.warn(`[CORS] Rejected origin: ${origin}`);
+    console.warn(`[CORS] Allowed origins: ${allowedOrigins.join(', ')}`);
+    
+    // Reject origin
+    callback(new Error(`Origin ${origin} not allowed by CORS`));
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: [
@@ -176,6 +196,7 @@ export const corsOptions = {
   ],
   exposedHeaders: ['X-CSRF-Token'],
   maxAge: 86400, // 24 hours
+  optionsSuccessStatus: 200, // Some legacy browsers choke on 204
 };
 
 /**
