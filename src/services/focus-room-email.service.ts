@@ -1,13 +1,4 @@
-import sgMail from "@sendgrid/mail";
-
-// Initialize SendGrid
-const initializeSendGrid = () => {
-  const apiKey = process.env.SEND_GRID_API_KEY;
-  if (!apiKey) {
-    throw new Error("SEND_GRID_API_KEY is not set in environment variables");
-  }
-  sgMail.setApiKey(apiKey);
-};
+import { sendEmail } from "./ses.service.js";
 
 interface SendFocusRoomInvitationParams {
   to: string;
@@ -23,13 +14,6 @@ interface SendFocusRoomInvitationParams {
 export const sendFocusRoomInvitationEmail = async (
   params: SendFocusRoomInvitationParams
 ): Promise<void> => {
-  initializeSendGrid();
-
-  const fromEmail = process.env.SEND_GRID_EMAIL;
-  if (!fromEmail) {
-    throw new Error("SEND_GRID_EMAIL is not set in environment variables");
-  }
-
   const { to, inviterName, roomName, invitationLink, expiresAt } = params;
 
   // Format expiration date
@@ -42,27 +26,18 @@ export const sendFocusRoomInvitationEmail = async (
     minute: "2-digit",
   });
 
-  const msg = {
-    to,
-    from: {
-      email: fromEmail,
-      name: "IQniti",
-    },
-    subject: `${inviterName} invited you to join "${roomName}" focus room`,
-    text: generatePlainTextEmail(inviterName, roomName, invitationLink, expiryDate),
-    html: generateHtmlEmail(inviterName, roomName, invitationLink, expiryDate),
-  };
+  const textContent = generatePlainTextEmail(inviterName, roomName, invitationLink, expiryDate);
+  const htmlContent = generateHtmlEmail(inviterName, roomName, invitationLink, expiryDate);
 
   try {
-    await sgMail.send(msg);
+    await sendEmail({
+      to,
+      subject: `${inviterName} invited you to join "${roomName}" focus room`,
+      textContent,
+      htmlContent,
+    });
   } catch (error) {
     console.error("Error sending focus room invitation email:", error);
-    if (error && typeof error === "object" && "response" in error) {
-      const sendGridError = error as { response?: { body?: unknown } };
-      if (sendGridError.response?.body) {
-        console.error("SendGrid Error:", sendGridError.response.body);
-      }
-    }
     throw new Error("Failed to send focus room invitation email");
   }
 };

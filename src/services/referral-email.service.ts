@@ -1,13 +1,4 @@
-import sgMail from "@sendgrid/mail";
-
-// Initialize SendGrid
-const initializeSendGrid = () => {
-  const apiKey = process.env.SEND_GRID_API_KEY;
-  if (!apiKey) {
-    throw new Error("SEND_GRID_API_KEY is not set in environment variables");
-  }
-  sgMail.setApiKey(apiKey);
-};
+import { sendEmail } from "./ses.service.js";
 
 interface SendReferralInvitationParams {
   to: string;
@@ -24,33 +15,20 @@ interface SendReferralInvitationParams {
 export const sendReferralInvitationEmail = async (
   params: SendReferralInvitationParams
 ): Promise<void> => {
-  initializeSendGrid();
-
-  const fromEmail = process.env.SEND_GRID_EMAIL;
-  if (!fromEmail) {
-    throw new Error("SEND_GRID_EMAIL is not set in environment variables");
-  }
-
   const { to, referrerName, referrerEmail, referralLink } = params;
 
-  const msg = {
-    to,
-    from: {
-      email: fromEmail,
-      name: "IQniti"
-    },
-    subject: "Join me on IQniti - Exclusive Early Access! 🚀",
-    text: generatePlainTextEmail(referrerName, referrerEmail, referralLink),
-    html: generateHtmlEmail(referrerName, referrerEmail, referralLink),
-  };
+  const textContent = generatePlainTextEmail(referrerName, referrerEmail, referralLink);
+  const htmlContent = generateHtmlEmail(referrerName, referrerEmail, referralLink);
 
   try {
-    await sgMail.send(msg);
+    await sendEmail({
+      to,
+      subject: "Join me on IQniti - Exclusive Early Access! 🚀",
+      textContent,
+      htmlContent,
+    });
   } catch (error: any) {
     console.error("Error sending referral invitation email:", error);
-    if (error.response) {
-      console.error("SendGrid Error:", error.response.body);
-    }
     throw new Error("Failed to send referral invitation email");
   }
 };
