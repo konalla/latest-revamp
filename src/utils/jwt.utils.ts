@@ -1,7 +1,15 @@
 import jwt from "jsonwebtoken";
 import type { UserJWTPayload } from "../types/auth.types.js";
 
-const JWT_SECRET: string = process.env.JWT_SECRET || "your-super-secret-jwt-key-change-this-in-production";
+// JWT_SECRET is required - no fallback for security
+const JWT_SECRET: string = process.env.JWT_SECRET as string;
+if (!JWT_SECRET || JWT_SECRET.length < 32) {
+  throw new Error(
+    "FATAL SECURITY ERROR: JWT_SECRET environment variable must be set and at least 32 characters long. " +
+    "Generate one using: node -e \"console.log(require('crypto').randomBytes(64).toString('hex'))\""
+  );
+}
+
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "3d";
 
 export const generateToken = (payload: UserJWTPayload): string => {

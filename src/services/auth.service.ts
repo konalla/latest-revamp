@@ -11,6 +11,7 @@ import type {
   ResetPasswordResponse
 } from "../types/auth.types.js";
 import { generateToken } from "../utils/jwt.utils.js";
+import { validatePassword, formatPasswordErrors } from "../utils/password-validator.js";
 import { ensureWorkspaceAndTeamForUser } from "./workspace.service.js";
 import { subscriptionService } from "./subscription.service.js";
 import { sendPasswordResetEmail } from "./email.service.js";
@@ -37,6 +38,17 @@ const register = async (data: RegisterRequest): Promise<AuthResponse> => {
     throw new Error("Email already exists");
   } else if (existingUserByUsername) {
     throw new Error("Username already exists");
+  }
+
+  // Validate password strength
+  const passwordValidation = validatePassword(data.password, undefined, {
+    email: data.email,
+    username: data.username,
+    name: data.name
+  });
+
+  if (!passwordValidation.isValid) {
+    throw new Error(formatPasswordErrors(passwordValidation));
   }
 
   // Hash the password
@@ -300,16 +312,14 @@ const resetPassword = async (data: ResetPasswordRequest): Promise<ResetPasswordR
     throw new Error("Invalid or expired reset token");
   }
 
-  // Validate password
-  if (!data.newPassword || data.newPassword.length < 8) {
-    throw new Error("Password must be at least 8 characters long");
-  }
-
   // Find user by reset token
   const user = await prisma.user.findUnique({
     where: { resetToken: data.token },
     select: {
       id: true,
+      email: true,
+      username: true,
+      name: true,
       resetToken: true,
       resetTokenExpiry: true,
     }
@@ -330,6 +340,20 @@ const resetPassword = async (data: ResetPasswordRequest): Promise<ResetPasswordR
       }
     });
     throw new Error("Invalid or expired reset token");
+  }
+
+  // Validate new password strength
+  const userInfo: { email?: string; username?: string; name?: string } = {
+    email: user.email,
+    username: user.username,
+  };
+  if (user.name) {
+    userInfo.name = user.name;
+  }
+  const passwordValidation = validatePassword(data.newPassword, undefined, userInfo);
+
+  if (!passwordValidation.isValid) {
+    throw new Error(formatPasswordErrors(passwordValidation));
   }
 
   // Hash the new password
