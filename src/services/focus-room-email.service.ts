@@ -1,13 +1,4 @@
-import sgMail from "@sendgrid/mail";
-
-// Initialize SendGrid
-const initializeSendGrid = () => {
-  const apiKey = process.env.SEND_GRID_API_KEY;
-  if (!apiKey) {
-    throw new Error("SEND_GRID_API_KEY is not set in environment variables");
-  }
-  sgMail.setApiKey(apiKey);
-};
+import { sendEmail, escapeHtml, SESError } from "./ses.service.js";
 
 interface SendFocusRoomInvitationParams {
   to: string;
@@ -19,18 +10,31 @@ interface SendFocusRoomInvitationParams {
 
 /**
  * Send focus room invitation email
+ * @param params - Invitation parameters
+ * @returns Promise<string> - Message ID from SES
+ * @throws {SESError} If validation or sending fails
  */
 export const sendFocusRoomInvitationEmail = async (
   params: SendFocusRoomInvitationParams
-): Promise<void> => {
-  initializeSendGrid();
-
-  const fromEmail = process.env.SEND_GRID_EMAIL;
-  if (!fromEmail) {
-    throw new Error("SEND_GRID_EMAIL is not set in environment variables");
-  }
-
+): Promise<string> => {
   const { to, inviterName, roomName, invitationLink, expiresAt } = params;
+
+  // Input validation
+  if (!to || !to.trim()) {
+    throw new SESError("Recipient email is required", "INVALID_INPUT");
+  }
+  if (!inviterName || !inviterName.trim()) {
+    throw new SESError("Inviter name is required", "INVALID_INPUT");
+  }
+  if (!roomName || !roomName.trim()) {
+    throw new SESError("Room name is required", "INVALID_INPUT");
+  }
+  if (!invitationLink || !invitationLink.trim()) {
+    throw new SESError("Invitation link is required", "INVALID_INPUT");
+  }
+  if (!expiresAt || !(expiresAt instanceof Date) || isNaN(expiresAt.getTime())) {
+    throw new SESError("Valid expiration date is required", "INVALID_INPUT");
+  }
 
   // Format expiration date
   const expiryDate = new Date(expiresAt).toLocaleString("en-US", {
@@ -40,30 +44,54 @@ export const sendFocusRoomInvitationEmail = async (
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: "UTC",
   });
 
-  const msg = {
-    to,
-    from: {
-      email: fromEmail,
-      name: "IQniti",
-    },
-    subject: `${inviterName} invited you to join "${roomName}" focus room`,
-    text: generatePlainTextEmail(inviterName, roomName, invitationLink, expiryDate),
-    html: generateHtmlEmail(inviterName, roomName, invitationLink, expiryDate),
-  };
+  // Sanitize inputs
+  const safeInviterName = inviterName.trim();
+  const safeRoomName = roomName.trim();
+
+  const textContent = generatePlainTextEmail(safeInviterName, safeRoomName, invitationLink, expiryDate);
+  const htmlContent = generateHtmlEmail(safeInviterName, safeRoomName, invitationLink, expiryDate);
 
   try {
-    await sgMail.send(msg);
+    const messageId = await sendEmail({
+      to: to.trim(),
+      subject: `${safeInviterName} invited you to join "${safeRoomName}" focus room`,
+      textContent,
+      htmlContent,
+    });
+
+    console.log(JSON.stringify({
+      level: "info",
+      message: "Focus room invitation email sent",
+      messageId,
+      recipient: to.trim(),
+      roomName: safeRoomName,
+      timestamp: new Date().toISOString(),
+    }));
+
+    return messageId;
   } catch (error) {
-    console.error("Error sending focus room invitation email:", error);
-    if (error && typeof error === "object" && "response" in error) {
-      const sendGridError = error as { response?: { body?: unknown } };
-      if (sendGridError.response?.body) {
-        console.error("SendGrid Error:", sendGridError.response.body);
-      }
+    console.error(JSON.stringify({
+      level: "error",
+      message: "Failed to send focus room invitation email",
+      error: error instanceof Error ? error.message : "Unknown error",
+      recipient: to.trim(),
+      roomName: safeRoomName,
+      timestamp: new Date().toISOString(),
+    }));
+
+    // Re-throw SESError, wrap other errors
+    if (error instanceof SESError) {
+      throw error;
     }
-    throw new Error("Failed to send focus room invitation email");
+    throw new SESError(
+      "Failed to send focus room invitation email",
+      "EMAIL_SEND_FAILED",
+      undefined,
+      error
+    );
   }
 };
 
@@ -95,6 +123,7 @@ IQniti Team`;
 
 /**
  * Generate HTML email template
+ * All user-generated content is escaped to prevent XSS
  */
 const generateHtmlEmail = (
   inviterName: string,
@@ -102,12 +131,19 @@ const generateHtmlEmail = (
   invitationLink: string,
   expiryDate: string
 ): string => {
+  // Escape all user-generated content
+  const safeInviterName = escapeHtml(inviterName);
+  const safeRoomName = escapeHtml(roomName);
+  const safeInvitationLink = escapeHtml(invitationLink);
+  const safeExpiryDate = escapeHtml(expiryDate);
+
   return `
 <!DOCTYPE html>
-<html>
+<html lang="en">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Focus Room Invitation - IQniti</title>
   </head>
   <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
     <div style="background-color: #4A6CF7; padding: 20px; text-align: center; border-radius: 8px 8px 0 0;">
@@ -119,7 +155,7 @@ const generateHtmlEmail = (
       
       <p>Hi there!</p>
       
-      <p><strong>${inviterName}</strong> has invited you to join the focus room <strong>"${roomName}"</strong> on IQniti.</p>
+      <p><strong>${safeInviterName}</strong> has invited you to join the focus room <strong>"${safeRoomName}"</strong> on IQniti.</p>
       
       <p>Join them for focused work sessions and stay productive together!</p>
       
@@ -132,11 +168,11 @@ const generateHtmlEmail = (
       
       <p style="font-size: 12px; color: #666; margin-top: 30px;">
         Or copy and paste this link into your browser:<br>
-        <a href="${invitationLink}" style="color: #4A6CF7; word-break: break-all;">${invitationLink}</a>
+        <a href="${invitationLink}" style="color: #4A6CF7; word-break: break-all;">${safeInvitationLink}</a>
       </p>
       
       <p style="font-size: 12px; color: #666;">
-        This invitation will expire on <strong>${expiryDate}</strong>.
+        This invitation will expire on <strong>${safeExpiryDate}</strong>.
       </p>
       
       <p style="font-size: 12px; color: #666; margin-top: 30px;">
