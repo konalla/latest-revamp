@@ -1,13 +1,4 @@
-import sgMail from "@sendgrid/mail";
-
-// Initialize SendGrid
-const initializeSendGrid = () => {
-  const apiKey = process.env.SEND_GRID_API_KEY;
-  if (!apiKey) {
-    throw new Error("SEND_GRID_API_KEY is not set in environment variables");
-  }
-  sgMail.setApiKey(apiKey);
-};
+import { sendEmail, escapeHtml, SESError } from "./ses.service.js";
 
 interface SendReferralInvitationParams {
   to: string;
@@ -19,56 +10,98 @@ interface SendReferralInvitationParams {
 /**
  * Send referral invitation email
  * @param params - Email parameters including recipient, referrer info, and referral link
- * @returns Promise<void>
+ * @returns Promise<string> - Message ID from SES
+ * @throws {SESError} If validation or sending fails
  */
 export const sendReferralInvitationEmail = async (
   params: SendReferralInvitationParams
-): Promise<void> => {
-  initializeSendGrid();
-
-  const fromEmail = process.env.SEND_GRID_EMAIL;
-  if (!fromEmail) {
-    throw new Error("SEND_GRID_EMAIL is not set in environment variables");
-  }
-
+): Promise<string> => {
   const { to, referrerName, referrerEmail, referralLink } = params;
 
-  const msg = {
-    to,
-    from: {
-      email: fromEmail,
-      name: "IQniti"
-    },
-    subject: "Join me on IQniti - Exclusive Early Access! 🚀",
-    text: generatePlainTextEmail(referrerName, referrerEmail, referralLink),
-    html: generateHtmlEmail(referrerName, referrerEmail, referralLink),
-  };
+  // Input validation
+  if (!to || !to.trim()) {
+    throw new SESError("Recipient email is required", "INVALID_INPUT");
+  }
+  if (!referrerName || !referrerName.trim()) {
+    throw new SESError("Referrer name is required", "INVALID_INPUT");
+  }
+  if (!referrerEmail || !referrerEmail.trim()) {
+    throw new SESError("Referrer email is required", "INVALID_INPUT");
+  }
+  if (!referralLink || !referralLink.trim()) {
+    throw new SESError("Referral link is required", "INVALID_INPUT");
+  }
+
+  // Sanitize inputs
+  const safeReferrerName = referrerName.trim();
+  const safeReferrerEmail = referrerEmail.trim();
+  const safeReferralLink = referralLink.trim();
+
+  const textContent = generatePlainTextEmail(safeReferrerName, safeReferrerEmail, safeReferralLink);
+  const htmlContent = generateHtmlEmail(safeReferrerName, safeReferrerEmail, safeReferralLink);
 
   try {
-    await sgMail.send(msg);
+    const messageId = await sendEmail({
+      to: to.trim(),
+      subject: "Join me on IQniti - Exclusive Early Access! 🚀",
+      textContent,
+      htmlContent,
+    });
+
+    console.log(JSON.stringify({
+      level: "info",
+      message: "Referral invitation email sent",
+      messageId,
+      recipient: to.trim(),
+      referrer: safeReferrerEmail,
+      timestamp: new Date().toISOString(),
+    }));
+
+    return messageId;
   } catch (error: any) {
-    console.error("Error sending referral invitation email:", error);
-    if (error.response) {
-      console.error("SendGrid Error:", error.response.body);
+    console.error(JSON.stringify({
+      level: "error",
+      message: "Failed to send referral invitation email",
+      error: error instanceof Error ? error.message : "Unknown error",
+      recipient: to.trim(),
+      referrer: safeReferrerEmail,
+      timestamp: new Date().toISOString(),
+    }));
+
+    // Re-throw SESError, wrap other errors
+    if (error instanceof SESError) {
+      throw error;
     }
-    throw new Error("Failed to send referral invitation email");
+    throw new SESError(
+      "Failed to send referral invitation email",
+      "EMAIL_SEND_FAILED",
+      undefined,
+      error
+    );
   }
 };
 
 /**
  * Generate HTML email template for referral invitation
+ * All user-generated content is escaped to prevent XSS
  */
 const generateHtmlEmail = (
   referrerName: string,
   referrerEmail: string,
   referralLink: string
 ): string => {
+  // Escape all user-generated content
+  const safeReferrerName = escapeHtml(referrerName);
+  const safeReferrerEmail = escapeHtml(referrerEmail);
+  const safeReferralLink = escapeHtml(referralLink);
+
   return `
     <!DOCTYPE html>
-    <html>
+    <html lang="en">
     <head>
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Referral Invitation - IQniti</title>
       <style>
         body {
           font-family: Arial, sans-serif;
@@ -131,7 +164,7 @@ const generateHtmlEmail = (
       <div class="content">
         <h2 style="color: #6366F1; margin-top: 0;">Hi there! 👋</h2>
         
-        <p>My name is <strong>${escapeHtml(referrerName)}</strong>, and I'd like to invite you to join <strong>IQniti</strong> - the productivity platform that's changing how I work!</p>
+        <p>My name is <strong>${safeReferrerName}</strong>, and I'd like to invite you to join <strong>IQniti</strong> - the productivity platform that's changing how I work!</p>
         
         <p>IQniti is offering exclusive early access, and by using my referral link, you'll get special benefits when you join.</p>
         
@@ -141,7 +174,7 @@ const generateHtmlEmail = (
         
         <p style="font-size: 14px; color: #666;">
           Or copy and paste this link into your browser:<br>
-          <a href="${referralLink}" style="color: #6366F1; word-break: break-all;">${referralLink}</a>
+          <a href="${referralLink}" style="color: #6366F1; word-break: break-all;">${safeReferralLink}</a>
         </p>
         
         <h3 style="color: #6366F1;">What you'll get:</h3>
@@ -154,10 +187,10 @@ const generateHtmlEmail = (
         <p>Looking forward to seeing you on IQniti!</p>
         
         <p>Best regards,<br>
-        <strong>${escapeHtml(referrerName)}</strong></p>
+        <strong>${safeReferrerName}</strong></p>
         
         <div class="footer">
-          <p>This invitation was sent by ${escapeHtml(referrerName)} (${escapeHtml(referrerEmail)}). 
+          <p>This invitation was sent by ${safeReferrerName} (${safeReferrerEmail}). 
           If you didn't expect this email, you can safely ignore it.</p>
         </div>
       </div>
@@ -197,17 +230,4 @@ This invitation was sent by ${referrerName} (${referrerEmail}).
 If you didn't expect this email, you can safely ignore it.`;
 };
 
-/**
- * Escape HTML to prevent XSS
- */
-const escapeHtml = (text: string): string => {
-  const map: Record<string, string> = {
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#039;",
-  };
-  return text.replace(/[&<>"']/g, (m) => map[m] || m);
-};
 
