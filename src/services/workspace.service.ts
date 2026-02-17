@@ -198,15 +198,12 @@ export const getAllWorkspaces = async (userId: number) => {
     select: { id: true }
   });
 
-  // Get all teams where user is ADMIN or TEAM_MANAGER and get their workspace IDs
-  const adminOrManagerTeams = await prisma.team.findMany({
+  // Get all teams where user is an active member (any role) and get their workspace IDs
+  const memberTeams = await prisma.team.findMany({
     where: {
       memberships: {
         some: {
           userId: userId,
-          role: {
-            in: ["ADMIN", "TEAM_MANAGER"]
-          },
           status: "ACTIVE"
         }
       }
@@ -224,7 +221,7 @@ export const getAllWorkspaces = async (userId: number) => {
   });
 
   // Get unique workspace IDs from teams and workspace managers
-  const workspaceIdsFromTeams = adminOrManagerTeams.map(t => t.workspaceId);
+  const workspaceIdsFromTeams = memberTeams.map(t => t.workspaceId);
   const workspaceIdsFromManagers = workspaceManagerMemberships.map(m => m.workspaceId);
   
   // Combine owned workspace IDs, workspace IDs from teams, and workspace IDs from managers, remove duplicates
@@ -249,13 +246,22 @@ export const getAllWorkspaces = async (userId: number) => {
       const isWorkspaceManager = workspaceIdsFromManagers.includes(workspace.id);
 
       // Determine workspace-level role
-      let workspaceUserRole: "OWNER" | "WORKSPACE_MANAGER" | "TEAM_MANAGER";
+      let workspaceUserRole: "OWNER" | "WORKSPACE_MANAGER" | "TEAM_MANAGER" | "MEMBER";
       if (isOwner) {
         workspaceUserRole = "OWNER";
       } else if (isWorkspaceManager) {
         workspaceUserRole = "WORKSPACE_MANAGER";
       } else {
-        workspaceUserRole = "TEAM_MANAGER";
+        // Check if user has a TEAM_MANAGER or ADMIN role in any team of this workspace
+        const hasManagerRole = await prisma.teamMembership.findFirst({
+          where: {
+            userId,
+            status: "ACTIVE",
+            role: { in: ["ADMIN", "TEAM_MANAGER"] },
+            team: { workspaceId: workspace.id }
+          }
+        });
+        workspaceUserRole = hasManagerRole ? "TEAM_MANAGER" : "MEMBER";
       }
 
       let teams;
@@ -283,16 +289,13 @@ export const getAllWorkspaces = async (userId: number) => {
           orderBy: { createdAt: "asc" }
         });
       } else {
-        // Non-owner/non-workspace-manager can only see teams where they are ADMIN or TEAM_MANAGER
+        // Non-owner/non-workspace-manager can see teams where they are an active member (any role)
         teams = await prisma.team.findMany({
           where: {
             workspaceId: workspace.id,
             memberships: {
               some: {
                 userId: userId,
-                role: {
-                  in: ["ADMIN", "TEAM_MANAGER"]
-                },
                 status: "ACTIVE"
               }
             }
@@ -304,9 +307,7 @@ export const getAllWorkspaces = async (userId: number) => {
             memberships: {
               where: {
                 userId: userId,
-                role: {
-                  in: ["ADMIN", "TEAM_MANAGER"]
-                }
+                status: "ACTIVE"
               },
               select: {
                 role: true,
@@ -381,14 +382,11 @@ export const getWorkspaceById = async (userId: number, workspaceId: number) => {
     }
   });
 
-  // If user is not the owner or workspace manager, check if they are ADMIN or TEAM_MANAGER in any team
+  // If user is not the owner or workspace manager, check if they are an active member of any team in the workspace
   if (!isOwner && !isWorkspaceManager) {
-    const hasAdminOrManagerRole = await prisma.teamMembership.findFirst({
+    const teamMembership = await prisma.teamMembership.findFirst({
       where: {
         userId: userId,
-        role: {
-          in: ["ADMIN", "TEAM_MANAGER"]
-        },
         status: "ACTIVE",
         team: {
           workspaceId: workspaceId
@@ -396,19 +394,34 @@ export const getWorkspaceById = async (userId: number, workspaceId: number) => {
       }
     });
 
-    if (!hasAdminOrManagerRole) {
+    if (!teamMembership) {
       throw new Error("You don't have permission to access this workspace");
     }
   }
 
   // Determine workspace-level role
-  let workspaceUserRole: "OWNER" | "WORKSPACE_MANAGER" | "TEAM_MANAGER";
+  let workspaceUserRole: "OWNER" | "WORKSPACE_MANAGER" | "ADMIN" | "TEAM_MANAGER" | "MEMBER";
   if (isOwner) {
     workspaceUserRole = "OWNER";
   } else if (isWorkspaceManager) {
     workspaceUserRole = "WORKSPACE_MANAGER";
   } else {
-    workspaceUserRole = "TEAM_MANAGER";
+    // Check if the user has ADMIN or TEAM_MANAGER role in any team in this workspace
+    const highestRole = await prisma.teamMembership.findFirst({
+      where: {
+        userId: userId,
+        status: "ACTIVE",
+        role: { in: ["ADMIN", "TEAM_MANAGER"] },
+        team: { workspaceId: workspaceId }
+      }
+    });
+    if (highestRole?.role === "ADMIN") {
+      workspaceUserRole = "ADMIN";
+    } else if (highestRole?.role === "TEAM_MANAGER") {
+      workspaceUserRole = "TEAM_MANAGER";
+    } else {
+      workspaceUserRole = "MEMBER";
+    }
   }
 
   // Get teams based on user's role
@@ -437,16 +450,13 @@ export const getWorkspaceById = async (userId: number, workspaceId: number) => {
       orderBy: { createdAt: "asc" }
     });
   } else {
-    // Non-owner/non-workspace-manager can only see teams where they are ADMIN or TEAM_MANAGER
+    // Non-owner/non-workspace-manager: show teams where they are an active member (any role)
     teams = await prisma.team.findMany({
       where: {
         workspaceId: workspaceId,
         memberships: {
           some: {
             userId: userId,
-            role: {
-              in: ["ADMIN", "TEAM_MANAGER"]
-            },
             status: "ACTIVE"
           }
         }
@@ -458,9 +468,7 @@ export const getWorkspaceById = async (userId: number, workspaceId: number) => {
         memberships: {
           where: {
             userId: userId,
-            role: {
-              in: ["ADMIN", "TEAM_MANAGER"]
-            }
+            status: "ACTIVE"
           },
           select: {
             role: true,
