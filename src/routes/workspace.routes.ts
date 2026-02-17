@@ -21,6 +21,19 @@ import {
   getWorkspaceManagersController,
   searchWorkspaceManagersController
 } from "../controllers/workspace.controller.js";
+import {
+  getWorkspaceProjectsController,
+  getWorkspaceObjectivesController,
+  getWorkspaceOkrsController,
+  getWorkspaceTasksController,
+  getWorkspaceContentSummaryController,
+} from "../controllers/workspace-content.controller.js";
+import {
+  wsCreateProject, wsUpdateProject, wsDeleteProject,
+  wsCreateObjective, wsUpdateObjective, wsDeleteObjective,
+  wsCreateOkr, wsUpdateOkr, wsDeleteOkr,
+  wsCreateTask, wsUpdateTask, wsDeleteTask, wsToggleTask, wsGetTaskWithRec,
+} from "../controllers/workspace-content-crud.controller.js";
 import * as userStatusController from "../controllers/user-status.controller.js";
 import { requireWriteAccess } from "../middleware/subscription.middleware.js";
 
@@ -55,6 +68,33 @@ router.get("/workspaces/:workspaceId/managers", authenticateToken, getWorkspaceM
 
 // Workspace members status route
 router.get("/workspaces/:workspaceId/members/status", authenticateToken, userStatusController.getWorkspaceMembersStatus);
+
+// Workspace content routes (projects, objectives, OKRs, tasks scoped to workspace)
+router.get("/workspaces/:workspaceId/content/summary", authenticateToken, getWorkspaceContentSummaryController);
+router.get("/workspaces/:workspaceId/content/projects", authenticateToken, getWorkspaceProjectsController);
+router.get("/workspaces/:workspaceId/content/objectives", authenticateToken, getWorkspaceObjectivesController);
+router.get("/workspaces/:workspaceId/content/okrs", authenticateToken, getWorkspaceOkrsController);
+router.get("/workspaces/:workspaceId/content/tasks", authenticateToken, getWorkspaceTasksController);
+
+// Workspace content CRUD routes (create/update/delete scoped to workspace)
+// Projects
+router.post("/workspaces/:workspaceId/content/projects", authenticateToken, requireWriteAccess, wsCreateProject);
+router.put("/workspaces/:workspaceId/content/projects/:itemId", authenticateToken, requireWriteAccess, wsUpdateProject);
+router.delete("/workspaces/:workspaceId/content/projects/:itemId", authenticateToken, requireWriteAccess, wsDeleteProject);
+// Objectives
+router.post("/workspaces/:workspaceId/content/objectives", authenticateToken, requireWriteAccess, wsCreateObjective);
+router.put("/workspaces/:workspaceId/content/objectives/:itemId", authenticateToken, requireWriteAccess, wsUpdateObjective);
+router.delete("/workspaces/:workspaceId/content/objectives/:itemId", authenticateToken, requireWriteAccess, wsDeleteObjective);
+// OKRs
+router.post("/workspaces/:workspaceId/content/okrs", authenticateToken, requireWriteAccess, wsCreateOkr);
+router.put("/workspaces/:workspaceId/content/okrs/:itemId", authenticateToken, requireWriteAccess, wsUpdateOkr);
+router.delete("/workspaces/:workspaceId/content/okrs/:itemId", authenticateToken, requireWriteAccess, wsDeleteOkr);
+// Tasks
+router.post("/workspaces/:workspaceId/content/tasks", authenticateToken, requireWriteAccess, wsCreateTask);
+router.put("/workspaces/:workspaceId/content/tasks/:itemId", authenticateToken, requireWriteAccess, wsUpdateTask);
+router.put("/workspaces/:workspaceId/content/tasks/:itemId/toggle", authenticateToken, requireWriteAccess, wsToggleTask);
+router.delete("/workspaces/:workspaceId/content/tasks/:itemId", authenticateToken, requireWriteAccess, wsDeleteTask);
+router.get("/workspaces/:workspaceId/content/tasks/:itemId/detail", authenticateToken, wsGetTaskWithRec);
 
 export default router;
 

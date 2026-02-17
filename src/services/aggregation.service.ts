@@ -14,6 +14,12 @@ export class AggregationService {
    * Aggregate productivity analytics for a team
    */
   async aggregateTeamProductivity(teamId: number, days: number = 30): Promise<any> {
+    // Get the team to find its workspace
+    const team = await prisma.team.findUnique({
+      where: { id: teamId },
+      select: { workspaceId: true }
+    });
+
     // Get all active team members
     const memberships = await prisma.teamMembership.findMany({
       where: {
@@ -47,9 +53,9 @@ export class AggregationService {
 
     const memberIds = memberships.map(m => m.user.id);
     
-    // Get productivity data for all team members
+    // Get productivity data for all team members, scoped to the team's workspace
     const productivityData = await Promise.all(
-      memberIds.map(userId => analyticsService.getProductivityAnalytics(userId, days))
+      memberIds.map(userId => analyticsService.getProductivityAnalytics(userId, days, team?.workspaceId ?? undefined))
     );
 
     // Aggregate metrics
@@ -403,9 +409,28 @@ export class AggregationService {
       };
     }
 
-    // Get productivity data for each unique user only once
+    // Get workspace IDs for all managed teams to scope analytics
+    const managedTeams = await prisma.team.findMany({
+      where: { id: { in: teamIds } },
+      select: { workspaceId: true }
+    });
+    const managedWorkspaceIds = [...new Set(managedTeams.map(t => t.workspaceId).filter((id): id is number => id !== null))];
+
+    // Get productivity data scoped to the teams' workspaces (excludes personal tasks)
     const productivityData = await Promise.all(
-      uniqueUserIds.map(userId => analyticsService.getProductivityAnalytics(userId, days))
+      uniqueUserIds.map(async (uid) => {
+        const tasks = await prisma.task.findMany({
+          where: { userId: uid, ...(managedWorkspaceIds.length > 0 ? { workspaceId: { in: managedWorkspaceIds } } : { workspaceId: { not: null } }) },
+          orderBy: { createdAt: 'desc' }
+        });
+        const completedTasks = tasks.filter(t => t.completed);
+        return {
+          tasksCompletedCount: completedTasks.length,
+          totalTasksCount: tasks.length,
+          averageTaskDuration: tasks.length > 0 ? tasks.reduce((s, t) => s + (t.duration || 0), 0) / tasks.length : 0,
+          tasksByCategory: tasks.reduce((acc: Record<string, number>, t) => { acc[t.category || 'Uncategorized'] = (acc[t.category || 'Uncategorized'] || 0) + 1; return acc; }, {}),
+        };
+      })
     );
 
     // Aggregate metrics from unique users only
@@ -632,9 +657,9 @@ export class AggregationService {
       };
     }
 
-    // Get productivity data for each unique user only once
+    // Get productivity data for each unique user, scoped to this workspace only
     const productivityData = await Promise.all(
-      uniqueUserIds.map(userId => analyticsService.getProductivityAnalytics(userId, days))
+      uniqueUserIds.map(userId => analyticsService.getProductivityAnalytics(userId, days, workspaceId))
     );
 
     // Aggregate metrics from unique users only
@@ -796,9 +821,22 @@ export class AggregationService {
       };
     }
 
-    // Get productivity data for each unique user only once
+    // Get productivity data scoped to workspace tasks only (aggregate across all owned workspaces)
     const productivityData = await Promise.all(
-      uniqueUserIds.map(userId => analyticsService.getProductivityAnalytics(userId, days))
+      uniqueUserIds.map(async (uid) => {
+        // Get tasks scoped to any of the user's workspaces
+        const tasks = await prisma.task.findMany({
+          where: { userId: uid, workspaceId: { in: workspaceIds } },
+          orderBy: { createdAt: 'desc' }
+        });
+        const completedTasks = tasks.filter(t => t.completed);
+        return {
+          tasksCompletedCount: completedTasks.length,
+          totalTasksCount: tasks.length,
+          averageTaskDuration: tasks.length > 0 ? tasks.reduce((s, t) => s + (t.duration || 0), 0) / tasks.length : 0,
+          tasksByCategory: tasks.reduce((acc: Record<string, number>, t) => { acc[t.category || 'Uncategorized'] = (acc[t.category || 'Uncategorized'] || 0) + 1; return acc; }, {}),
+        };
+      })
     );
 
     // Aggregate metrics from unique users only
