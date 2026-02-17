@@ -17,7 +17,12 @@ import {
 } from "../services/workspace-content-crud.service.js";
 
 const getWorkspaceId = (req: Request): number | null => {
-  const id = parseInt(req.params.workspaceId);
+  const id = parseInt(req.params.workspaceId || "");
+  return isNaN(id) ? null : id;
+};
+
+const getItemId = (req: Request): number | null => {
+  const id = parseInt(req.params.itemId || "");
   return isNaN(id) ? null : id;
 };
 
@@ -56,8 +61,8 @@ export const wsUpdateProject = async (req: Request, res: Response) => {
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
     const workspaceId = getWorkspaceId(req);
     if (!workspaceId) return res.status(400).json({ message: "Invalid workspace ID" });
-    const projectId = parseInt(req.params.itemId);
-    if (isNaN(projectId)) return res.status(400).json({ message: "Invalid project ID" });
+    const projectId = getItemId(req);
+    if (!projectId) return res.status(400).json({ message: "Invalid project ID" });
 
     const result = await updateProjectInWorkspace(workspaceId, projectId, userId, req.body);
     res.json({ message: "Project updated", data: result });
@@ -72,8 +77,8 @@ export const wsDeleteProject = async (req: Request, res: Response) => {
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
     const workspaceId = getWorkspaceId(req);
     if (!workspaceId) return res.status(400).json({ message: "Invalid workspace ID" });
-    const projectId = parseInt(req.params.itemId);
-    if (isNaN(projectId)) return res.status(400).json({ message: "Invalid project ID" });
+    const projectId = getItemId(req);
+    if (!projectId) return res.status(400).json({ message: "Invalid project ID" });
 
     await deleteProjectInWorkspace(workspaceId, projectId, userId);
     res.json({ message: "Project deleted" });
@@ -105,8 +110,8 @@ export const wsUpdateObjective = async (req: Request, res: Response) => {
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
     const workspaceId = getWorkspaceId(req);
     if (!workspaceId) return res.status(400).json({ message: "Invalid workspace ID" });
-    const objectiveId = parseInt(req.params.itemId);
-    if (isNaN(objectiveId)) return res.status(400).json({ message: "Invalid objective ID" });
+    const objectiveId = getItemId(req);
+    if (!objectiveId) return res.status(400).json({ message: "Invalid objective ID" });
 
     const result = await updateObjectiveInWorkspace(workspaceId, objectiveId, userId, req.body);
     res.json({ message: "Objective updated", data: result });
@@ -121,8 +126,8 @@ export const wsDeleteObjective = async (req: Request, res: Response) => {
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
     const workspaceId = getWorkspaceId(req);
     if (!workspaceId) return res.status(400).json({ message: "Invalid workspace ID" });
-    const objectiveId = parseInt(req.params.itemId);
-    if (isNaN(objectiveId)) return res.status(400).json({ message: "Invalid objective ID" });
+    const objectiveId = getItemId(req);
+    if (!objectiveId) return res.status(400).json({ message: "Invalid objective ID" });
 
     await deleteObjectiveInWorkspace(workspaceId, objectiveId, userId);
     res.json({ message: "Objective deleted" });
@@ -154,8 +159,8 @@ export const wsUpdateOkr = async (req: Request, res: Response) => {
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
     const workspaceId = getWorkspaceId(req);
     if (!workspaceId) return res.status(400).json({ message: "Invalid workspace ID" });
-    const okrId = parseInt(req.params.itemId);
-    if (isNaN(okrId)) return res.status(400).json({ message: "Invalid OKR ID" });
+    const okrId = getItemId(req);
+    if (!okrId) return res.status(400).json({ message: "Invalid OKR ID" });
 
     const result = await updateOkrInWorkspace(workspaceId, okrId, userId, req.body);
     res.json({ message: "OKR updated", data: result });
@@ -170,8 +175,8 @@ export const wsDeleteOkr = async (req: Request, res: Response) => {
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
     const workspaceId = getWorkspaceId(req);
     if (!workspaceId) return res.status(400).json({ message: "Invalid workspace ID" });
-    const okrId = parseInt(req.params.itemId);
-    if (isNaN(okrId)) return res.status(400).json({ message: "Invalid OKR ID" });
+    const okrId = getItemId(req);
+    if (!okrId) return res.status(400).json({ message: "Invalid OKR ID" });
 
     await deleteOkrInWorkspace(workspaceId, okrId, userId);
     res.json({ message: "OKR deleted" });
@@ -203,8 +208,8 @@ export const wsUpdateTask = async (req: Request, res: Response) => {
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
     const workspaceId = getWorkspaceId(req);
     if (!workspaceId) return res.status(400).json({ message: "Invalid workspace ID" });
-    const taskId = parseInt(req.params.itemId);
-    if (isNaN(taskId)) return res.status(400).json({ message: "Invalid task ID" });
+    const taskId = getItemId(req);
+    if (!taskId) return res.status(400).json({ message: "Invalid task ID" });
 
     const result = await updateTaskInWorkspace(workspaceId, taskId, userId, req.body);
     res.json({ message: "Task updated", data: result });
@@ -219,8 +224,8 @@ export const wsToggleTask = async (req: Request, res: Response) => {
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
     const workspaceId = getWorkspaceId(req);
     if (!workspaceId) return res.status(400).json({ message: "Invalid workspace ID" });
-    const taskId = parseInt(req.params.itemId);
-    if (isNaN(taskId)) return res.status(400).json({ message: "Invalid task ID" });
+    const taskId = getItemId(req);
+    if (!taskId) return res.status(400).json({ message: "Invalid task ID" });
 
     const result = await toggleTaskInWorkspace(workspaceId, taskId, userId);
     res.json({ message: "Task toggled", data: result });
@@ -235,8 +240,8 @@ export const wsDeleteTask = async (req: Request, res: Response) => {
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
     const workspaceId = getWorkspaceId(req);
     if (!workspaceId) return res.status(400).json({ message: "Invalid workspace ID" });
-    const taskId = parseInt(req.params.itemId);
-    if (isNaN(taskId)) return res.status(400).json({ message: "Invalid task ID" });
+    const taskId = getItemId(req);
+    if (!taskId) return res.status(400).json({ message: "Invalid task ID" });
 
     await deleteTaskInWorkspace(workspaceId, taskId, userId);
     res.json({ message: "Task deleted" });
@@ -251,8 +256,8 @@ export const wsGetTaskWithRec = async (req: Request, res: Response) => {
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
     const workspaceId = getWorkspaceId(req);
     if (!workspaceId) return res.status(400).json({ message: "Invalid workspace ID" });
-    const taskId = parseInt(req.params.itemId);
-    if (isNaN(taskId)) return res.status(400).json({ message: "Invalid task ID" });
+    const taskId = getItemId(req);
+    if (!taskId) return res.status(400).json({ message: "Invalid task ID" });
 
     const result = await getTaskWithRecommendation(workspaceId, taskId, userId);
     res.json({ message: "Task with recommendation", data: result });

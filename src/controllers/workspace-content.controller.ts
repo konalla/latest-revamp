@@ -8,7 +8,7 @@ import {
 } from "../services/workspace-content.service.js";
 
 const parseWorkspaceId = (req: Request): number | null => {
-  const id = parseInt(req.params.workspaceId!);
+  const id = parseInt(req.params.workspaceId || "");
   return isNaN(id) ? null : id;
 };
 
@@ -22,16 +22,23 @@ const parseOptionalInt = (val: unknown): number | undefined => {
   return isNaN(parsed) ? undefined : parsed;
 };
 
-const parseQueryParams = (req: Request) => ({
-  page: req.query.page ? parseInt(req.query.page as string) : 1,
-  limit: req.query.limit ? parseInt(req.query.limit as string) : 20,
-  search: req.query.search as string | undefined,
-  status: req.query.status as string | undefined,
-  teamId: parseOptionalInt(req.query.teamId),
-  projectId: parseOptionalInt(req.query.projectId),
-  objectiveId: parseOptionalInt(req.query.objectiveId),
-  okrId: parseOptionalInt(req.query.okrId),
-});
+const parseQueryParams = (req: Request) => {
+  const params: Record<string, unknown> = {
+    page: req.query.page ? parseInt(req.query.page as string) : 1,
+    limit: req.query.limit ? parseInt(req.query.limit as string) : 20,
+  };
+  if (req.query.search) params.search = req.query.search as string;
+  if (req.query.status) params.status = req.query.status as string;
+  const teamId = parseOptionalInt(req.query.teamId);
+  if (teamId !== undefined) params.teamId = teamId;
+  const projectId = parseOptionalInt(req.query.projectId);
+  if (projectId !== undefined) params.projectId = projectId;
+  const objectiveId = parseOptionalInt(req.query.objectiveId);
+  if (objectiveId !== undefined) params.objectiveId = objectiveId;
+  const okrId = parseOptionalInt(req.query.okrId);
+  if (okrId !== undefined) params.okrId = okrId;
+  return params as { page: number; limit: number; search?: string; status?: string; teamId?: number; projectId?: number; objectiveId?: number; okrId?: number };
+};
 
 export const getWorkspaceProjectsController = async (req: Request, res: Response) => {
   try {
@@ -122,24 +129,21 @@ export const getWorkspaceTasksController = async (req: Request, res: Response) =
     const workspaceId = parseWorkspaceId(req);
     if (!workspaceId) return res.status(400).json({ message: "Invalid workspace ID" });
 
-    const queryParams = {
-      ...parseQueryParams(req),
-      completed: req.query.completed !== undefined
-        ? req.query.completed === "true"
-        : undefined,
-      priority: req.query.priority as string | undefined,
-    };
+    const baseParams = parseQueryParams(req);
+    const taskParams: Record<string, unknown> = { ...baseParams };
+    if (req.query.completed !== undefined) taskParams.completed = req.query.completed === "true";
+    if (req.query.priority) taskParams.priority = req.query.priority as string;
 
-    const result = await getWorkspaceTasks(workspaceId, userId, queryParams);
+    const result = await getWorkspaceTasks(workspaceId, userId, taskParams as any);
 
     res.json({
       message: "Workspace tasks retrieved successfully",
       data: result,
       pagination: {
-        page: queryParams.page,
-        limit: queryParams.limit,
+        page: baseParams.page,
+        limit: baseParams.limit,
         total: result.total,
-        totalPages: Math.ceil(result.total / queryParams.limit),
+        totalPages: Math.ceil(result.total / baseParams.limit),
       },
     });
   } catch (error: any) {
