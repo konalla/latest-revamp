@@ -5,7 +5,7 @@ export class AnalyticsService {
    * Get productivity analytics for a user within a specified timeframe
    * If days is undefined, calculates for all time
    */
-  async getProductivityAnalytics(userId: number, days?: number): Promise<any> {
+  async getProductivityAnalytics(userId: number, days?: number, workspaceId?: number): Promise<any> {
     try {
       if (days !== undefined) {
         console.log(`Getting productivity analytics for user ${userId} with ${days} days timeframe`);
@@ -13,9 +13,15 @@ export class AnalyticsService {
         console.log(`Getting productivity analytics for user ${userId} for all time`);
       }
       
+      // Build where clause - optionally scope to workspace
+      const taskWhere: any = { userId };
+      if (workspaceId !== undefined) {
+        taskWhere.workspaceId = workspaceId;
+      }
+
       // Get tasks for the user
       const allTasks = await prisma.task.findMany({
-        where: { userId },
+        where: taskWhere,
         orderBy: { createdAt: 'desc' }
       });
       console.log(`Found ${allTasks.length} total tasks for user ${userId}`);
