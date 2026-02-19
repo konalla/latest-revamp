@@ -15,11 +15,13 @@ type TaskInternal = {
   completed: boolean;
   userId: number; // Needed for AI recommendations but not in response
   position: number;
+  listPosition: number | null;
+  matrixPosition: number | null;
   importance: boolean;
   urgency: boolean;
   isHighLeverage: boolean;
   advancesKeyResults: boolean;
-  createdAt?: Date; // Optional, can be omitted
+  createdAt?: Date;
 };
 
 // Task type for response (excludes userId and other unnecessary fields)
@@ -35,11 +37,13 @@ export type Task = {
   projectId?: number | null;
   completed: boolean;
   position: number;
+  listPosition: number | null;
+  matrixPosition: number | null;
   importance: boolean | null;
   urgency: boolean | null;
   isHighLeverage: boolean | null;
   advancesKeyResults: boolean | null;
-  createdAt?: string; // ISO string format for response
+  createdAt?: string;
 };
 
 type CategoryPlan = {
@@ -129,6 +133,8 @@ export class FocusPlanningService {
           priority: true,
           completed: true,
           position: true,
+          listPosition: true,
+          matrixPosition: true,
           importance: true,
           urgency: true,
           isHighLeverage: true,
@@ -275,6 +281,8 @@ export class FocusPlanningService {
       priority: task.priority,
       completed: task.completed,
       position: task.position,
+      listPosition: task.listPosition ?? null,
+      matrixPosition: task.matrixPosition ?? null,
       importance: task.importance ?? null,
       urgency: task.urgency ?? null,
       isHighLeverage: task.isHighLeverage ?? null,
