@@ -14,6 +14,7 @@ import type {
 import sharp from "sharp";
 import path from "path";
 import fs from "fs";
+import { statusAssignmentService } from "../services/status-assignment.service.js";
 
 export class AdminController {
   /**
@@ -888,6 +889,34 @@ export class AdminController {
       } else {
         res.status(500).json({ message: error.message || "Failed to update redemption status" });
       }
+    }
+  }
+
+  /**
+   * Assign Origin badge to a user
+   * POST /api/admin/users/:id/assign-origin-badge
+   */
+  async assignOriginBadge(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = parseInt(req.params.id || '');
+      if (isNaN(userId)) {
+        res.status(400).json({ message: "Invalid user ID" });
+        return;
+      }
+
+      const result = await statusAssignmentService.assignOriginStatus(userId);
+
+      if (!result.success) {
+        res.status(400).json({ message: result.message });
+        return;
+      }
+
+      res.status(200).json({
+        message: result.message,
+        data: { userId, badge: "ORIGIN" },
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed to assign Origin badge" });
     }
   }
 }

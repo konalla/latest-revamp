@@ -6,6 +6,7 @@ import path from "path";
 import fs from "fs";
 import prisma from "../config/prisma.js";
 import { walletService } from "../services/wallet.service.js";
+import { statusAssignmentService } from "../services/status-assignment.service.js";
 
 const createUser = async (req: Request<{}, {}, CreateUserRequest>, res: Response) => {
   try {
@@ -61,7 +62,7 @@ const getCurrentUser = async (req: Request, res: Response) => {
     const { password, ...userWithoutPassword } = user;
     
     // Get referral status for badge information
-    const referralStatus = await prisma.userReferralStatus.findUnique({
+    let referralStatus = await prisma.userReferralStatus.findUnique({
       where: { userId: user.id },
       select: {
         earlyAccessStatus: true,
@@ -69,6 +70,38 @@ const getCurrentUser = async (req: Request, res: Response) => {
         vanguardId: true,
       },
     });
+    
+    // Safety net: if user has paid but doesn't have the Origin badge,
+    // attempt to assign it now (covers missed webhook scenarios)
+    if (!referralStatus || referralStatus.earlyAccessStatus === "NONE") {
+      try {
+        const hasSuccessfulPayment = await prisma.payment.findFirst({
+          where: {
+            subscription: { userId: user.id },
+            status: "succeeded",
+            amount: { gt: 0 },
+          },
+        });
+
+        if (hasSuccessfulPayment) {
+          console.log(`[Badge Safety Net] User ${user.id} has paid but no Origin badge, assigning now...`);
+          const result = await statusAssignmentService.assignOriginStatus(user.id);
+          if (result.success) {
+            console.log(`[Badge Safety Net] Origin badge assigned to user ${user.id}: ${result.message}`);
+            referralStatus = await prisma.userReferralStatus.findUnique({
+              where: { userId: user.id },
+              select: {
+                earlyAccessStatus: true,
+                originId: true,
+                vanguardId: true,
+              },
+            });
+          }
+        }
+      } catch (err) {
+        console.error(`[Badge Safety Net] Error checking/assigning badge for user ${user.id}:`, err);
+      }
+    }
     
     // Get wallet balance
     const wallet = await walletService.getWallet(user.id);

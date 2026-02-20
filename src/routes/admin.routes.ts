@@ -52,6 +52,9 @@ router.get("/teams/:id", adminController.getTeamDetails.bind(adminController));
 router.get("/subscriptions", adminController.getAllSubscriptions.bind(adminController));
 router.get("/subscriptions/:id", adminController.getSubscriptionDetails.bind(adminController));
 
+// Badge management
+router.post("/users/:id/assign-origin-badge", adminController.assignOriginBadge.bind(adminController));
+
 // Redeemable Items
 router.get("/redeemable-items", adminController.getAllRedeemableItems.bind(adminController));
 router.get("/redeemable-items/:id", adminController.getRedeemableItemById.bind(adminController));

@@ -158,6 +158,11 @@ app.use("/uploads", (req, res, next) => {
   // 3. Files are behind rate limiting
   res.header("Cross-Origin-Resource-Policy", "cross-origin");
   
+  // Prevent browsers from caching profile images too aggressively,
+  // which can cause intermittent loading failures across components
+  res.header("Cache-Control", "public, max-age=300, must-revalidate");
+  res.header("Vary", "Origin");
+  
   next();
 }, express.static(path.join(process.cwd(), "uploads")));
 
