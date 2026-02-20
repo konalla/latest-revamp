@@ -71,10 +71,13 @@ const getCurrentUser = async (req: Request, res: Response) => {
       },
     });
     
-    // Safety net: if user has paid but doesn't have the Origin badge,
-    // attempt to assign it now (covers missed webhook scenarios)
+    // Safety net: if user doesn't have the Origin badge, check if they deserve one.
+    // Covers missed webhook scenarios (e.g. webhook failed, payment record missing).
     if (!referralStatus || referralStatus.earlyAccessStatus === "NONE") {
       try {
+        let shouldAssignBadge = false;
+
+        // Check 1: explicit payment record with amount > 0
         const hasSuccessfulPayment = await prisma.payment.findFirst({
           where: {
             subscription: { userId: user.id },
@@ -84,6 +87,27 @@ const getCurrentUser = async (req: Request, res: Response) => {
         });
 
         if (hasSuccessfulPayment) {
+          shouldAssignBadge = true;
+        }
+
+        // Check 2: active subscription that went through a trial period
+        // (status=ACTIVE + trialStart set means the trial ended and payment succeeded,
+        // even if the payment record is missing from the database)
+        if (!shouldAssignBadge) {
+          const activeSubscription = await prisma.subscription.findUnique({
+            where: { userId: user.id },
+          });
+
+          if (
+            activeSubscription &&
+            activeSubscription.status === "ACTIVE" &&
+            activeSubscription.trialStart
+          ) {
+            shouldAssignBadge = true;
+          }
+        }
+
+        if (shouldAssignBadge) {
           console.log(`[Badge Safety Net] User ${user.id} has paid but no Origin badge, assigning now...`);
           const result = await statusAssignmentService.assignOriginStatus(user.id);
           if (result.success) {

@@ -79,21 +79,45 @@ export type SubscriptionStatus =
 // ============================================================================
 
 /**
- * Safely extract period start from a Stripe subscription
- * Handles both direct properties and nested response objects
+ * Safely extract period start from a Stripe subscription.
+ * In API version 2025-10-29.clover, current_period_start moved from the
+ * Subscription object to SubscriptionItem objects. We check both locations.
  */
 export function getSubscriptionPeriodStart(subscription: Stripe.Subscription): number | null {
+  // Try top-level field first (pre-clover API versions)
   const sub = subscription as StripeSubscriptionWithPeriod;
-  return sub.current_period_start ?? null;
+  if (sub.current_period_start != null) {
+    return sub.current_period_start;
+  }
+
+  // Clover API: extract from the first subscription item
+  const firstItem = (subscription as any).items?.data?.[0];
+  if (firstItem?.current_period_start != null) {
+    return firstItem.current_period_start;
+  }
+
+  return null;
 }
 
 /**
- * Safely extract period end from a Stripe subscription
- * Handles both direct properties and nested response objects
+ * Safely extract period end from a Stripe subscription.
+ * In API version 2025-10-29.clover, current_period_end moved from the
+ * Subscription object to SubscriptionItem objects. We check both locations.
  */
 export function getSubscriptionPeriodEnd(subscription: Stripe.Subscription): number | null {
+  // Try top-level field first (pre-clover API versions)
   const sub = subscription as StripeSubscriptionWithPeriod;
-  return sub.current_period_end ?? null;
+  if (sub.current_period_end != null) {
+    return sub.current_period_end;
+  }
+
+  // Clover API: extract from the first subscription item
+  const firstItem = (subscription as any).items?.data?.[0];
+  if (firstItem?.current_period_end != null) {
+    return firstItem.current_period_end;
+  }
+
+  return null;
 }
 
 /**

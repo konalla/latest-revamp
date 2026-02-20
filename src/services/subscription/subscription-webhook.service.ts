@@ -372,6 +372,40 @@ export class SubscriptionWebhookService {
       });
 
       console.log(`[Webhook] Updated subscription ${subscription.id}: ${subscription.status} -> ${newStatus}`);
+
+      // Redundant badge assignment on trial-to-active transition.
+      // The primary path is handleInvoicePaymentSucceeded, but if that webhook
+      // fails or is never delivered, this ensures the user still gets their badge.
+      if (isTrialToActive) {
+        try {
+          const existingBadge = await prisma.userReferralStatus.findUnique({
+            where: { userId: subscription.userId },
+            select: { earlyAccessStatus: true },
+          });
+
+          if (!existingBadge || existingBadge.earlyAccessStatus === "NONE") {
+            console.log(`[Webhook] Trial-to-Active: Assigning Origin badge to user ${subscription.userId} as backup...`);
+            const result = await statusAssignmentService.assignOriginStatus(subscription.userId);
+            if (result.success) {
+              console.log(`[Webhook] Origin badge assigned to user ${subscription.userId}: ${result.message}`);
+            }
+
+            // Also complete referral if user was referred
+            try {
+              const referralResult = await referralService.completeReferralOnboarding(subscription.userId);
+              if (referralResult.success) {
+                console.log(`[Webhook] Referral completed for user ${subscription.userId} on trial-to-active`);
+              }
+            } catch (refError: any) {
+              if (!refError.message?.includes("No referral found")) {
+                console.error("[Webhook] Error completing referral on trial-to-active:", refError);
+              }
+            }
+          }
+        } catch (badgeError: any) {
+          console.error("[Webhook] Error assigning badge on trial-to-active:", badgeError);
+        }
+      }
     } catch (error: any) {
       console.error("Error handling subscription updated:", error);
     }
