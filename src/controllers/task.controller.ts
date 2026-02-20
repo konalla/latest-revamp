@@ -410,20 +410,25 @@ const updateTaskPositions = async (req: Request, res: Response) => {
       return res.status(401).json({ message: "User not authenticated" });
     }
 
-    const { positions } = req.body;
+    const { positions, viewType } = req.body;
     
-    if (!Array.isArray(positions)) {
-      return res.status(400).json({ message: "Positions must be an array" });
+    if (!Array.isArray(positions) || positions.length === 0) {
+      return res.status(400).json({ message: "Positions must be a non-empty array" });
     }
 
-    // Validate positions format
+    if (viewType && !['list', 'matrix'].includes(viewType)) {
+      return res.status(400).json({ message: "viewType must be 'list' or 'matrix'" });
+    }
+
     for (const pos of positions) {
-      if (!pos.id || typeof pos.position !== 'number') {
-        return res.status(400).json({ message: "Each position item must have id and position" });
+      if (typeof pos.id !== 'number' || pos.id <= 0 ||
+          typeof pos.position !== 'number' || pos.position < 0 ||
+          !Number.isInteger(pos.position)) {
+        return res.status(400).json({ message: "Each item must have a positive integer id and a non-negative integer position" });
       }
     }
 
-    await taskService.updateTaskPositions(positions, req.user.userId);
+    await taskService.updateTaskPositions(positions, req.user.userId, viewType);
     
     res.json({ message: "Task positions updated successfully" });
   } catch (error: any) {

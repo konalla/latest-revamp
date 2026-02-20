@@ -44,14 +44,15 @@ router.post("/batch-update", requireWriteAccess, taskController.batchUpdateTasks
 // PATCH /api/tasks/:id - Restore task (set completed: false) (requires write access)
 router.patch("/:id", requireWriteAccess, taskController.restoreTask);
 
+// PUT /api/tasks/positions - Update multiple task positions (for drag-and-drop reordering) (requires write access)
+// Must be registered before /:id to avoid Express matching "positions" as an :id param
+router.put("/positions", requireWriteAccess, taskController.updateTaskPositions);
+
 // PUT /api/tasks/:id - Update task by ID (only if it belongs to logged-in user) (requires write access)
 router.put("/:id", requireWriteAccess, taskController.updateTask);
 
 // PUT /api/tasks/:id/toggle - Toggle task completion status (requires write access)
 router.put("/:id/toggle", requireWriteAccess, taskController.toggleTaskCompletion);
-
-// PUT /api/tasks/positions - Update multiple task positions (for drag-and-drop reordering) (requires write access)
-router.put("/positions", requireWriteAccess, taskController.updateTaskPositions);
 
 // DELETE /api/tasks/:id - Delete task by ID (only if it belongs to logged-in user) (requires write access)
 router.delete("/:id", requireWriteAccess, taskController.deleteTask);

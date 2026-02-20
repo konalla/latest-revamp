@@ -221,10 +221,12 @@ model Task {
   category    String
   duration    Int
   priority    String
-  position    Int
-  createdAt   DateTime  @default(now())
-  completed   Boolean   @default(false)
-  dueDate     DateTime?
+  position       Int
+  listPosition   Int?
+  matrixPosition Int?
+  createdAt      DateTime  @default(now())
+  completed      Boolean   @default(false)
+  dueDate        DateTime?
 
   // Eisenhower Matrix
   importance Boolean @default(false)

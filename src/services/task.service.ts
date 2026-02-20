@@ -1172,18 +1172,23 @@ export class TaskService {
   /**
    * Update task positions
    */
-  async updateTaskPositions(positions: Array<{ id: number; position: number }>, userId: number): Promise<void> {
-    const updatePromises = positions.map(({ id, position }) =>
-      prisma.task.updateMany({
-        where: {
-          id,
-          userId,
-        },
-      data: { position },
-    })
-  );
+  async updateTaskPositions(
+    positions: Array<{ id: number; position: number }>,
+    userId: number,
+    viewType?: 'list' | 'matrix'
+  ): Promise<void> {
+    const positionField = viewType === 'list' ? 'listPosition'
+      : viewType === 'matrix' ? 'matrixPosition'
+      : 'position';
 
-    await Promise.all(updatePromises);
+    await prisma.$transaction(
+      positions.map(({ id, position }) =>
+        prisma.task.updateMany({
+          where: { id, userId },
+          data: { [positionField]: position },
+        })
+      )
+    );
   }
 
   /**
