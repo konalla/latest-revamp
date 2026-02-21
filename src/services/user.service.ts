@@ -171,8 +171,44 @@ const getUserById = async (id: number) => {
   });
 };
 
+const TIME_FIELDS = [
+  'deep_work_start_time',
+  'deep_work_end_time',
+  'creative_work_start_time',
+  'creative_work_end_time',
+  'reflective_work_start_time',
+  'reflective_work_end_time',
+  'executive_work_start_time',
+  'executive_work_end_time',
+] as const;
+
+const TIME_REGEX = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
+
 const updateUser = async (id: number, data: any) => {
-  return prisma.user.update({ where: { id }, data });
+  const sanitized = { ...data };
+  const errors: string[] = [];
+
+  for (const field of TIME_FIELDS) {
+    if (!(field in sanitized)) continue;
+
+    const value = sanitized[field];
+
+    if (value === null || value === undefined || value === '') {
+      delete sanitized[field];
+      continue;
+    }
+
+    if (typeof value !== 'string' || !TIME_REGEX.test(value)) {
+      const label = field.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+      errors.push(`${label} must be in HH:MM format (e.g. 09:00).`);
+    }
+  }
+
+  if (errors.length > 0) {
+    throw new Error(errors.join(' '));
+  }
+
+  return prisma.user.update({ where: { id }, data: sanitized });
 };
 
 const deleteUser = async (id: number) => {
