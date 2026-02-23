@@ -2,6 +2,9 @@ import prisma from "../config/prisma.js";
 import { CognitiveLoadService } from "./cognitive-load.service.js";
 import userStatusService from "./user-status.service.js";
 
+// No single focus session should ever exceed 8 hours of actual work
+const MAX_SESSION_DURATION_MINUTES = 480;
+
 export interface FocusSessionResponse {
   id: number;
   userId: number;
@@ -143,14 +146,19 @@ export class FocusSessionService {
    * Map session to response format with insights
    */
   private mapSessionToInsightsResponse(session: any): any {
-    // Calculate duration from timestamps (not duration field)
+    // Prefer stored duration field; fall back to capped timestamp diff
     let durationMinutes = 0;
     const startedAt = session.startedAt instanceof Date ? session.startedAt : new Date(session.startedAt);
     const endedAt = session.endedAt ? (session.endedAt instanceof Date ? session.endedAt : new Date(session.endedAt)) : null;
     
-    if (endedAt && startedAt) {
+    if (session.duration && session.duration > 0) {
+      durationMinutes = Math.min(session.duration, MAX_SESSION_DURATION_MINUTES);
+    } else if (endedAt && startedAt) {
       const diffMs = endedAt.getTime() - startedAt.getTime();
-      durationMinutes = Math.max(0, Math.floor(diffMs / 1000 / 60));
+      durationMinutes = Math.min(
+        Math.max(0, Math.floor(diffMs / 1000 / 60)),
+        MAX_SESSION_DURATION_MINUTES
+      );
     }
 
     // Extract insights and category from intention JSON
@@ -233,6 +241,10 @@ export class FocusSessionService {
 
   async createFocusSession(userId: number, data: CreateFocusSessionRequest): Promise<FocusSessionResponse> {
     try {
+      // Auto-close any existing active/paused sessions before creating a new one
+      // This prevents duplicate sessions from double-clicks or race conditions
+      await this.closeStaleSessionsForUser(userId);
+
       const taskIds = data.taskIds || [];
       let calculatedDuration = data.duration || 0;
 
@@ -283,7 +295,6 @@ export class FocusSessionService {
         await userStatusService.updateUserStatus(userId, true);
       } catch (error) {
         console.error("Error updating user status after creating focus session:", error);
-        // Don't throw error - session creation should still succeed
       }
       
       return this.mapDatabaseSessionToResponse(session, {
@@ -295,6 +306,54 @@ export class FocusSessionService {
     } catch (error) {
       console.error("Error creating focus session:", error);
       throw error;
+    }
+  }
+
+  /**
+   * Close any active/paused sessions for a user.
+   * Sets duration to the lesser of: elapsed time from intention JSON, or 1 minute.
+   * This prevents orphaned sessions from inflating analytics.
+   */
+  private async closeStaleSessionsForUser(userId: number): Promise<void> {
+    try {
+      const staleSessions = await prisma.focusSession.findMany({
+        where: {
+          userId,
+          status: { in: ['active', 'paused'] },
+          endedAt: null,
+        },
+        select: { id: true, startedAt: true, intention: true },
+      });
+
+      if (staleSessions.length === 0) return;
+
+      console.log(`[FocusSession] Auto-closing ${staleSessions.length} stale session(s) for user ${userId}`);
+
+      for (const session of staleSessions) {
+        const intention = session.intention as any;
+        // Use the last synced elapsedTime from intention if available, otherwise default to 1
+        const savedElapsed = intention?.elapsedTime;
+        let durationMinutes = 1;
+        if (savedElapsed && savedElapsed > 0) {
+          durationMinutes = Math.min(
+            Math.max(1, Math.round(savedElapsed / 60)),
+            MAX_SESSION_DURATION_MINUTES
+          );
+        }
+
+        await prisma.$queryRaw`
+          UPDATE focus_sessions
+          SET status = 'completed',
+              ended_at = NOW(),
+              completed = true,
+              duration = ${durationMinutes},
+              notes = COALESCE(notes, '') || ' [auto-closed: new session started]'
+          WHERE id = ${session.id} AND user_id = ${userId}
+        `;
+        console.log(`[FocusSession] Auto-closed session ${session.id} with duration ${durationMinutes}m`);
+      }
+    } catch (error) {
+      console.error(`[FocusSession] Error closing stale sessions for user ${userId}:`, error);
     }
   }
 
@@ -393,53 +452,59 @@ export class FocusSessionService {
       }
 
       // Calculate actual duration in minutes
-      // Priority: 1) Use elapsedTime from frontend (most reliable), 2) Calculate from timestamps as fallback
+      // Priority: 1) elapsedTime from frontend, 2) elapsedTime saved in intention JSON, 3) timestamp fallback (capped)
       let calculatedDuration = 0;
       
       console.log('ElapsedTime from request:', data.elapsedTime);
       
-      // First, use elapsedTime from the request (frontend tracks this accurately)
       if (data.elapsedTime !== undefined && data.elapsedTime > 0) {
-        // elapsedTime from frontend is in seconds
-        // Convert to minutes and round
+        // elapsedTime from frontend is in seconds – convert to minutes
         calculatedDuration = Math.max(1, Math.round(data.elapsedTime / 60));
-        console.log(`Using elapsedTime: ${data.elapsedTime}s = ${calculatedDuration} minutes`);
+        console.log(`Using elapsedTime from request: ${data.elapsedTime}s = ${calculatedDuration} minutes`);
       } else {
-        // Fall back to calculating from timestamps if elapsedTime is not provided
-        const startedAt = existingSession.startedAt;
-        console.log('ElapsedTime not provided, falling back to timestamp calculation. StartedAt:', startedAt);
-        
-        if (startedAt) {
-          try {
-            const startTime = new Date(startedAt);
-            const endTime = new Date();
-            
-            // Validate the date
-            if (isNaN(startTime.getTime())) {
-              console.error('Invalid startTime:', startedAt);
-              throw new Error('Invalid startTime');
-            }
-            
-            const diffMs = endTime.getTime() - startTime.getTime();
-            const diffSeconds = Math.round(diffMs / 1000);
-            const diffMinutes = diffMs / (1000 * 60);
-            
-            // Only use timestamp calculation if it's positive and reasonable
-            if (diffMs > 0) {
-              calculatedDuration = Math.max(1, Math.round(diffMinutes)); // At least 1 minute, round to nearest
-              console.log(`Calculated duration from timestamps (fallback): ${calculatedDuration} minutes (${diffMs}ms difference, ${diffSeconds}s, ${diffMinutes.toFixed(2)} minutes)`);
-            } else {
-              console.warn('Timestamp difference is negative or zero');
-              calculatedDuration = 1; // Default to 1 minute
-            }
-          } catch (error) {
-            console.error('Error calculating duration from timestamps:', error);
-            calculatedDuration = 1; // Default to 1 minute
-          }
+        // Try the last synced elapsedTime from intention JSON (written by timer service every 15s)
+        const savedElapsed = intentionData?.elapsedTime;
+        if (savedElapsed && savedElapsed > 0) {
+          calculatedDuration = Math.max(1, Math.round(savedElapsed / 60));
+          console.log(`Using elapsedTime from intention JSON: ${savedElapsed}s = ${calculatedDuration} minutes`);
         } else {
-          console.log('No startedAt found, defaulting to 1 minute');
-          calculatedDuration = 1; // Default to 1 minute
+          // Last resort: timestamp diff, but capped to prevent multi-day durations
+          const startedAt = existingSession.startedAt;
+          console.log('No elapsedTime available, falling back to capped timestamp calculation. StartedAt:', startedAt);
+          
+          if (startedAt) {
+            try {
+              const startTime = new Date(startedAt);
+              const endTime = new Date();
+              
+              if (isNaN(startTime.getTime())) {
+                console.error('Invalid startTime:', startedAt);
+                throw new Error('Invalid startTime');
+              }
+              
+              const diffMs = endTime.getTime() - startTime.getTime();
+              const diffMinutes = diffMs / (1000 * 60);
+              
+              if (diffMs > 0) {
+                calculatedDuration = Math.max(1, Math.round(diffMinutes));
+                console.log(`Timestamp fallback: ${calculatedDuration} minutes (raw)`);
+              } else {
+                calculatedDuration = 1;
+              }
+            } catch (error) {
+              console.error('Error calculating duration from timestamps:', error);
+              calculatedDuration = 1;
+            }
+          } else {
+            calculatedDuration = 1;
+          }
         }
+      }
+      
+      // Apply sanity cap – no session should exceed MAX_SESSION_DURATION_MINUTES
+      if (calculatedDuration > MAX_SESSION_DURATION_MINUTES) {
+        console.warn(`Duration ${calculatedDuration}m exceeds cap of ${MAX_SESSION_DURATION_MINUTES}m, capping`);
+        calculatedDuration = MAX_SESSION_DURATION_MINUTES;
       }
       
       console.log(`Final calculated duration: ${calculatedDuration} minutes`);

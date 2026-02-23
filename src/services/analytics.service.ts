@@ -1,5 +1,7 @@
 import prisma from "../config/prisma.js";
 
+const MAX_SESSION_DURATION_MINUTES = 480;
+
 export class AnalyticsService {
   /**
    * Get productivity analytics for a user within a specified timeframe
@@ -270,22 +272,32 @@ export class AnalyticsService {
       // Calculate focus session metrics
       const focusSessionCount = focusSessions.length;
       
-      // Calculate total and average duration based on start and end times
+      // Use the stored duration field (minutes) which is set by the session service.
+      // Fall back to capped timestamp diff only when duration is missing/zero.
       let totalFocusSessionTime = 0;
-      let sessionsWithDuration = 0; // Count only sessions with both start and end times
+      let sessionsWithDuration = 0;
       focusSessions.forEach(session => {
-        if (session.startedAt && session.endedAt) {
+        let durationMinutes = 0;
+
+        if (session.duration && session.duration > 0) {
+          durationMinutes = Math.min(session.duration, MAX_SESSION_DURATION_MINUTES);
+        } else if (session.startedAt && session.endedAt) {
           try {
             const startTime = new Date(session.startedAt);
             const endTime = new Date(session.endedAt);
-            const durationMs = endTime.getTime() - startTime.getTime();
-            const durationMinutes = durationMs / (1000 * 60); // Convert to minutes
-            totalFocusSessionTime += durationMinutes;
-            sessionsWithDuration++;
+            const diffMs = endTime.getTime() - startTime.getTime();
+            durationMinutes = Math.min(
+              Math.max(0, diffMs / (1000 * 60)),
+              MAX_SESSION_DURATION_MINUTES
+            );
           } catch (e) {
-            console.error('Error calculating session duration from start/end times:', e);
-            // Skip this session if date parsing fails
+            console.error('Error calculating session duration fallback:', e);
           }
+        }
+
+        if (durationMinutes > 0) {
+          totalFocusSessionTime += durationMinutes;
+          sessionsWithDuration++;
         }
       });
       
@@ -421,7 +433,7 @@ export class AnalyticsService {
           }
         }).length;
 
-        // Calculate total focus time for this day
+        // Calculate total focus time for this day (capped per session)
         const totalFocusTimeThisDay = allFocusSessions
           .filter(session => {
             try {
@@ -431,7 +443,10 @@ export class AnalyticsService {
               return false;
             }
           })
-          .reduce((sum, session) => sum + (session.duration || 0), 0);
+          .reduce((sum, session) => {
+            const dur = Math.min(session.duration || 0, MAX_SESSION_DURATION_MINUTES);
+            return sum + dur;
+          }, 0);
 
         dailyData.push({
           date: dateStr,

@@ -19,6 +19,10 @@ const TIMER_KEYS = {
   LOCK: "timer:lock:",
 };
 
+// Sessions older than this are considered abandoned and auto-closed
+const STALE_SESSION_THRESHOLD_HOURS = 8;
+const MAX_SESSION_DURATION_MINUTES = 480;
+
 interface SessionTimerState {
   sessionId: number;
   userId: number;
@@ -45,6 +49,7 @@ export class FocusSessionTimerService {
   private localTimers: Map<number, NodeJS.Timeout> = new Map();
   private dbSyncInterval: NodeJS.Timeout | null = null;
   private masterLoopInterval: NodeJS.Timeout | null = null;
+  private staleCleanupInterval: NodeJS.Timeout | null = null;
   private instanceId: string;
   private isShuttingDown: boolean = false;
 
@@ -53,6 +58,7 @@ export class FocusSessionTimerService {
     this.instanceId = `${process.pid}-${Date.now()}`;
     this.startDbSyncInterval();
     this.startMasterTimerLoop();
+    this.startStaleSessionCleanup();
   }
 
   /**
@@ -717,6 +723,12 @@ export class FocusSessionTimerService {
    */
   async restoreActiveSessions() {
     try {
+      // Auto-close any sessions that are clearly stale
+      const closedCount = await this.cleanupStaleSessions();
+      if (closedCount > 0) {
+        console.log(`[Timer] Auto-closed ${closedCount} stale session(s) on startup`);
+      }
+
       // First check Redis for any existing states
       const redisStates = await this.getActiveTimers();
       console.log(`[Timer] Found ${redisStates.length} sessions in Redis`);
@@ -793,22 +805,95 @@ export class FocusSessionTimerService {
   }
 
   /**
+   * Periodically scan for and auto-close abandoned sessions in the database.
+   * Runs every 30 minutes.
+   */
+  private startStaleSessionCleanup() {
+    this.staleCleanupInterval = setInterval(async () => {
+      if (this.isShuttingDown) return;
+      await this.cleanupStaleSessions();
+    }, 30 * 60 * 1000);
+  }
+
+  /**
+   * Find sessions that have been active/paused for longer than the threshold
+   * and auto-complete them with a capped duration.
+   */
+  async cleanupStaleSessions(): Promise<number> {
+    try {
+      const thresholdMs = STALE_SESSION_THRESHOLD_HOURS * 3600 * 1000;
+      const cutoff = new Date(Date.now() - thresholdMs);
+
+      const staleSessions = await prisma.focusSession.findMany({
+        where: {
+          status: { in: ['active', 'paused'] },
+          endedAt: null,
+          startedAt: { lt: cutoff },
+        },
+        select: { id: true, userId: true, startedAt: true, intention: true },
+      });
+
+      if (staleSessions.length === 0) return 0;
+
+      console.log(`[Timer] Found ${staleSessions.length} stale session(s) to auto-close`);
+
+      for (const session of staleSessions) {
+        const intention = session.intention as any;
+        const savedElapsed = intention?.elapsedTime;
+        let durationMinutes = 1;
+
+        if (savedElapsed && savedElapsed > 0) {
+          durationMinutes = Math.min(
+            Math.max(1, Math.round(savedElapsed / 60)),
+            MAX_SESSION_DURATION_MINUTES
+          );
+        }
+
+        await prisma.$queryRaw`
+          UPDATE focus_sessions
+          SET status = 'completed',
+              ended_at = NOW(),
+              completed = true,
+              duration = ${durationMinutes},
+              notes = COALESCE(notes, '') || ' [auto-closed: session timed out]'
+          WHERE id = ${session.id}
+        `;
+
+        // Clean up Redis state if any
+        await this.deleteSessionState(session.id);
+
+        // Invalidate cache
+        await sessionCacheService.invalidateSession(session.id);
+        await sessionCacheService.clearUserActiveSession(session.userId);
+
+        console.log(`[Timer] Auto-closed stale session ${session.id} (user ${session.userId}) with duration ${durationMinutes}m`);
+      }
+
+      return staleSessions.length;
+    } catch (error) {
+      console.error('[Timer] Error cleaning up stale sessions:', error);
+      return 0;
+    }
+  }
+
+  /**
    * Cleanup on shutdown
    */
   async cleanup() {
     this.isShuttingDown = true;
 
-    // Clear master loop
     if (this.masterLoopInterval) {
       clearInterval(this.masterLoopInterval);
     }
 
-    // Clear DB sync interval
     if (this.dbSyncInterval) {
       clearInterval(this.dbSyncInterval);
     }
 
-    // Clear local timers
+    if (this.staleCleanupInterval) {
+      clearInterval(this.staleCleanupInterval);
+    }
+
     for (const interval of this.localTimers.values()) {
       clearInterval(interval);
     }
