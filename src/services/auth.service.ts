@@ -228,6 +228,7 @@ const login = async (data: LoginRequest): Promise<AuthResponse> => {
       username: user.username,
       name: user.name,
       role: user.role,
+      profile_photo_url: user.profile_photo_url,
     },
     token,
     message: "Login successful",
