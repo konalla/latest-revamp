@@ -18,6 +18,7 @@ export interface AuthResponse {
     username: string;
     name: string;
     role: string;
+    profile_photo_url?: string | null;
   };
   token: string;
   message: string;
