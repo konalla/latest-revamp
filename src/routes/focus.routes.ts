@@ -8,7 +8,8 @@ import {
   pauseSession,
   resumeSession,
   getFocusPatterns,
-  getFocusSessionsWithInsights
+  getFocusSessionsWithInsights,
+  beaconEndSession
 } from "../controllers/focus.controller.js";
 import { authenticateToken, optionalAuth } from "../middleware/auth.middleware.js";
 import { requireWriteAccess } from "../middleware/subscription.middleware.js";
@@ -41,6 +42,10 @@ router.get("/focus/patterns", optionalAuth, getFocusPatterns);
 
 // GET /api/focus-sessions/with-insights - Get all focus sessions with insights (requires auth)
 router.get("/focus-sessions/with-insights", authenticateToken, getFocusSessionsWithInsights);
+
+// POST /api/ai-focus/session/beacon-end - Lightweight endpoint for sendBeacon on browser close
+// No auth middleware -- token is verified from request body
+router.post("/ai-focus/session/beacon-end", beaconEndSession);
 
 export default router;
 

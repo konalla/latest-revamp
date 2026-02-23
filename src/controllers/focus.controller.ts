@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import { authenticateToken } from "../middleware/auth.middleware.js";
+import { verifyToken } from "../utils/jwt.utils.js";
 import focusSessionService, { 
   type CreateFocusSessionRequest, 
   type UpdateSessionRequest, 
@@ -286,4 +287,57 @@ export const resumeSession = async (req: Request, res: Response) => {
   }
 };
 
+/**
+ * POST /api/ai-focus/session/beacon-end
+ * Lightweight endpoint for navigator.sendBeacon() on browser close.
+ * Auth token is passed in the body since sendBeacon can't set headers.
+ */
+export const beaconEndSession = async (req: Request, res: Response) => {
+  try {
+    const { token, sessionId, elapsedTime } = req.body;
 
+    if (!token || !sessionId) {
+      return res.status(400).json({ message: "token and sessionId are required" });
+    }
+
+    let userId: number;
+    try {
+      const decoded = verifyToken(token) as any;
+      userId = decoded?.id ?? decoded?.userId;
+      if (!userId || typeof userId !== "number") {
+        return res.status(401).json({ message: "Invalid token" });
+      }
+    } catch {
+      return res.status(401).json({ message: "Invalid or expired token" });
+    }
+
+    const parsedSessionId = typeof sessionId === "number" ? sessionId : parseInt(sessionId, 10);
+    if (isNaN(parsedSessionId)) {
+      return res.status(400).json({ message: "Invalid session ID" });
+    }
+
+    const endData: EndSessionRequest = {
+      reason: "interrupted",
+      elapsedTime: typeof elapsedTime === "number" && elapsedTime > 0 ? elapsedTime : 1,
+      notes: "Session auto-ended: browser closed",
+    };
+
+    console.log(`[Beacon] Ending session ${parsedSessionId} for user ${userId} (elapsedTime: ${endData.elapsedTime}s)`);
+
+    const session = await focusSessionService.endFocusSession(parsedSessionId, userId, endData);
+
+    if (!session) {
+      return res.status(404).json({ message: "Session not found or already ended" });
+    }
+
+    const wsService = (global as any).focusSessionWebSocketService;
+    if (wsService) {
+      await wsService.broadcastSessionEnded(parsedSessionId, userId);
+    }
+
+    return res.json({ success: true });
+  } catch (error) {
+    console.error("[Beacon] Error ending session:", error);
+    return res.status(500).json({ message: "Failed to end session" });
+  }
+};

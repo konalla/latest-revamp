@@ -27,6 +27,10 @@ const updateTaskProgressSchema = z.object({
 const MAX_CONNECTIONS_PER_USER = 5;
 const userConnections: Map<number, Set<string>> = new Map();
 
+// Grace period before auto-ending a session after all sockets disconnect
+const DISCONNECT_GRACE_PERIOD_MS = 60_000; // 60 seconds
+const disconnectTimers: Map<number, NodeJS.Timeout> = new Map();
+
 export class FocusSessionWebSocketService {
   private io: SocketIOServer;
   private namespace: Namespace;
@@ -107,6 +111,14 @@ export class FocusSessionWebSocketService {
         userConnections.set(userId, new Set());
       }
       userConnections.get(userId)!.add(socket.id);
+
+      // Cancel any pending disconnect grace period since user reconnected
+      const pendingTimer = disconnectTimers.get(userId);
+      if (pendingTimer) {
+        clearTimeout(pendingTimer);
+        disconnectTimers.delete(userId);
+        console.log(`[WebSocket] Cancelled disconnect grace period for user ${userId} (reconnected)`);
+      }
 
       // Auto-join user's room
       socket.join(userRoom);
@@ -320,6 +332,14 @@ export class FocusSessionWebSocketService {
           connections.delete(socket.id);
           if (connections.size === 0) {
             userConnections.delete(userId);
+
+            // All sockets for this user are gone -- start grace period
+            console.log(`[WebSocket] All connections closed for user ${userId}, starting ${DISCONNECT_GRACE_PERIOD_MS / 1000}s grace period`);
+            const timer = setTimeout(() => {
+              disconnectTimers.delete(userId);
+              this.handleUserFullyDisconnected(userId);
+            }, DISCONNECT_GRACE_PERIOD_MS);
+            disconnectTimers.set(userId, timer);
           }
         }
       });
@@ -329,6 +349,44 @@ export class FocusSessionWebSocketService {
         console.error(`[WebSocket] Socket error for ${socket.id}:`, error);
       });
     });
+  }
+
+  /**
+   * Called after the grace period expires and the user has not reconnected.
+   * Auto-ends any active session using the last known elapsed time.
+   */
+  private async handleUserFullyDisconnected(userId: number) {
+    try {
+      // Check if user actually reconnected in the meantime
+      const connections = userConnections.get(userId);
+      if (connections && connections.size > 0) {
+        console.log(`[WebSocket] User ${userId} reconnected before grace period action, skipping auto-end`);
+        return;
+      }
+
+      const session = await focusSessionService.getCurrentFocusSession(userId);
+      if (!session) {
+        console.log(`[WebSocket] No active session for user ${userId} after disconnect, nothing to end`);
+        return;
+      }
+
+      // Use the last known elapsed time from the session (synced every 15s by timer service)
+      const elapsedTime = session.elapsedTime && session.elapsedTime > 0 ? session.elapsedTime : 1;
+
+      console.log(`[WebSocket] Auto-ending session ${session.id} for user ${userId} after disconnect (elapsedTime: ${elapsedTime}s)`);
+
+      await focusSessionService.endFocusSession(session.id, userId, {
+        reason: "interrupted",
+        elapsedTime,
+        notes: "Session auto-ended: user disconnected",
+      });
+
+      await this.timerService.endTimer(session.id);
+      await sessionCacheService.invalidateSession(session.id);
+      await sessionCacheService.clearUserActiveSession(userId);
+    } catch (error) {
+      console.error(`[WebSocket] Error auto-ending session for user ${userId} after disconnect:`, error);
+    }
   }
 
   /**
@@ -536,5 +594,9 @@ export class FocusSessionWebSocketService {
   async cleanup() {
     await this.timerService.cleanup();
     userConnections.clear();
+    for (const timer of disconnectTimers.values()) {
+      clearTimeout(timer);
+    }
+    disconnectTimers.clear();
   }
 }
