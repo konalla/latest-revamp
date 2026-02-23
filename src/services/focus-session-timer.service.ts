@@ -538,11 +538,21 @@ export class FocusSessionTimerService {
   }
 
   /**
-   * End timer and session
+   * End timer and session.
+   * When called from the master timer loop (scheduled duration expired),
+   * also persists the completion to the database so the session doesn't
+   * remain "active" in PostgreSQL.
+   * @param sessionId The session to end
+   * @param skipDbUpdate If true, skip the database UPDATE (used when the
+   *   caller already handled the DB write, e.g. broadcastSessionEnded
+   *   which is invoked after the REST endpoint wrote to the DB).
    */
-  async endTimer(sessionId: number): Promise<void> {
+  async endTimer(sessionId: number, skipDbUpdate = false): Promise<void> {
     const state = await this.getSessionState(sessionId);
     if (!state) return;
+
+    // Guard against double-processing
+    if (state.status === "completed") return;
 
     await this.stopTimer(sessionId);
 
@@ -551,9 +561,33 @@ export class FocusSessionTimerService {
     const totalElapsed = Math.floor((now.getTime() - startTime.getTime()) / 1000);
     const elapsedTime = Math.max(0, totalElapsed - state.totalPauseDuration);
 
-    // Update state to completed
+    // Update Redis state to completed
     state.status = "completed";
     await this.saveSessionState(state);
+
+    // Persist completion to the database so the session is no longer "active"
+    if (!skipDbUpdate) {
+      try {
+        const durationMinutes = Math.min(
+          Math.max(1, Math.round(elapsedTime / 60)),
+          MAX_SESSION_DURATION_MINUTES
+        );
+
+        await prisma.$queryRaw`
+          UPDATE focus_sessions
+          SET status = 'completed',
+              ended_at = NOW(),
+              completed = true,
+              duration = ${durationMinutes},
+              notes = COALESCE(notes, '') || ' [auto-completed: timer expired]'
+          WHERE id = ${sessionId}
+            AND status IN ('active', 'paused')
+        `;
+        console.log(`[Timer] Persisted session ${sessionId} completion to DB (duration: ${durationMinutes}m)`);
+      } catch (dbError) {
+        console.error(`[Timer] Failed to persist session ${sessionId} completion to DB:`, dbError);
+      }
+    }
 
     // Emit end event
     const namespace = this.io.of("/focus-session");

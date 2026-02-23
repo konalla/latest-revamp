@@ -569,7 +569,8 @@ export class FocusSessionWebSocketService {
    * Broadcast session ended event
    */
   async broadcastSessionEnded(sessionId: number, userId: number) {
-    await this.timerService.endTimer(sessionId);
+    // skipDbUpdate=true because the caller (REST endpoint / beacon) already wrote to the DB
+    await this.timerService.endTimer(sessionId, true);
     await sessionCacheService.invalidateSession(sessionId);
     await sessionCacheService.clearUserActiveSession(userId);
   }
