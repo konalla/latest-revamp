@@ -264,39 +264,48 @@ export class SubscriptionCoreService {
         }
       } else {
         // No Stripe subscription - use local logic (for free plans or legacy subscriptions)
+        const isFree = subscription.subscriptionPlan.name === "free";
+
+        // Free plans auto-renew their period — no grace period or expiration
+        if (isFree && subscription.currentPeriodEnd && now >= subscription.currentPeriodEnd) {
+          const newStart = new Date(now);
+          const newEnd = new Date(now);
+          newEnd.setMonth(newEnd.getMonth() + 1);
+          updatedPeriodStart = newStart;
+          updatedPeriodEnd = newEnd;
+          newStatus = "ACTIVE";
+          gracePeriodEnd = null;
+        }
         
         // If trial, check if trial ended
-        if (subscription.status === "TRIAL") {
+        if (!isFree && subscription.status === "TRIAL") {
           if (subscription.trialEnd && now >= subscription.trialEnd) {
             newStatus = "EXPIRED";
           } else if (
             subscription.subscriptionPlan.maxTasks &&
             subscription.tasksCreatedThisPeriod >= subscription.subscriptionPlan.maxTasks
           ) {
-            // Trial ended due to task limit
             newStatus = "EXPIRED";
           }
         }
 
-        // If active, check if period ended
-        if (subscription.status === "ACTIVE") {
+        // If active (non-free), check if period ended
+        if (!isFree && subscription.status === "ACTIVE") {
           if (subscription.currentPeriodEnd && now >= subscription.currentPeriodEnd) {
-            // Enter grace period
             newStatus = "GRACE_PERIOD";
             if (!gracePeriodEnd) {
               gracePeriodEnd = new Date(subscription.currentPeriodEnd);
               gracePeriodEnd.setDate(gracePeriodEnd.getDate() + GRACE_PERIOD_DAYS);
             }
 
-            // Check if grace period ended
             if (gracePeriodEnd && now >= gracePeriodEnd) {
               newStatus = "EXPIRED";
             }
           }
         }
 
-        // If in grace period, check if it ended
-        if (subscription.status === "GRACE_PERIOD" && gracePeriodEnd) {
+        // If in grace period (non-free), check if it ended
+        if (!isFree && subscription.status === "GRACE_PERIOD" && gracePeriodEnd) {
           if (now >= gracePeriodEnd) {
             newStatus = "EXPIRED";
           }
