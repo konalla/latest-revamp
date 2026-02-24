@@ -25,6 +25,24 @@ const createUser = async (data: CreateUserRequest) => {
     } else if (existingUserByUsername) {
       throw new Error("Username already exists");
     }
+
+    // Prevent username/email cross-conflict (login accepts either identifier)
+    if (data.username) {
+      const usernameTakenAsEmail = await prisma.user.findUnique({
+        where: { email: data.username }
+      });
+      if (usernameTakenAsEmail) {
+        throw new Error("This username is already registered as another account's email. Please choose a different username.");
+      }
+    }
+    if (data.email) {
+      const emailTakenAsUsername = await prisma.user.findUnique({
+        where: { username: data.email }
+      });
+      if (emailTakenAsUsername) {
+        throw new Error("This email is already used as a username by another account. Please use a different email.");
+      }
+    }
   }
 
   // Extract language from data and remove it from user data

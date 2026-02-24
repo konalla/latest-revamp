@@ -125,16 +125,34 @@ export class AnalyticsService {
       });
       console.log('Tasks completed by day:', tasksCompletedByDay);
       
-      // Find most productive day
-      let mostProductiveDay = new Date().toISOString().split('T')[0]; // default to today
-      let maxCompletedTasks = 0;
-      Object.entries(tasksCompletedByDay).forEach(([dateStr, count]) => {
-        if (count > maxCompletedTasks) {
-          maxCompletedTasks = count;
-          mostProductiveDay = dateStr;
-        }
+      // Find most productive day from focus sessions (day of week with most completed focus sessions)
+      let mostProductiveDay: string | null = null;
+      const focusSessionsWhere: any = { userId, completed: true };
+      if (days !== undefined) {
+        const startDate = new Date();
+        startDate.setDate(startDate.getDate() - days);
+        focusSessionsWhere.startedAt = { gte: startDate };
+      }
+      const completedFocusSessions = await prisma.focusSession.findMany({
+        where: focusSessionsWhere,
+        select: { startedAt: true },
       });
-      console.log(`Most productive day: ${mostProductiveDay}`);
+      if (completedFocusSessions.length > 0) {
+        const dayCounts: Record<number, number> = {}; // 0=Sun, 6=Sat
+        completedFocusSessions.forEach((s) => {
+          const dayOfWeek = new Date(s.startedAt).getDay();
+          dayCounts[dayOfWeek] = (dayCounts[dayOfWeek] || 0) + 1;
+        });
+        const weekdays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        let maxCount = 0;
+        Object.entries(dayCounts).forEach(([dayNum, count]) => {
+          if (count > maxCount) {
+            maxCount = count;
+            mostProductiveDay = weekdays[parseInt(dayNum, 10)];
+          }
+        });
+      }
+      console.log(`Most productive day (from focus sessions): ${mostProductiveDay ?? 'N/A'}`);
       
       return {
         taskCompletionRate,
@@ -516,7 +534,7 @@ export class AnalyticsService {
       tasksByCategory: { 'Uncategorized': 0 },
       tasksCompletedByDay: {},
       averageTaskDuration: 0,
-      mostProductiveDay: new Date().toISOString().split('T')[0],
+      mostProductiveDay: null,
       mostProductiveCategory: 'Uncategorized',
       message: "No task data available yet. Start by creating tasks to track your productivity."
     };

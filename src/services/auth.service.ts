@@ -40,6 +40,22 @@ const register = async (data: RegisterRequest): Promise<AuthResponse> => {
     throw new Error("Username already exists");
   }
 
+  // Prevent username/email cross-conflict: login accepts either identifier, so ensure
+  // no account can have username equal to another's email or email equal to another's username
+  const usernameTakenAsEmail = await prisma.user.findUnique({
+    where: { email: data.username }
+  });
+  if (usernameTakenAsEmail) {
+    throw new Error("This username is already registered as another account's email. Please choose a different username.");
+  }
+
+  const emailTakenAsUsername = await prisma.user.findUnique({
+    where: { username: data.email }
+  });
+  if (emailTakenAsUsername) {
+    throw new Error("This email is already used as a username by another account. Please use a different email.");
+  }
+
   // Validate password strength
   const passwordValidation = validatePassword(data.password, undefined, {
     email: data.email,
