@@ -343,33 +343,50 @@ export class AnalyticsService {
         ? tasksCompletedDuringFocus / tasksScheduledForFocus 
         : 0;
       
-      // Find most productive 3-hour window
-      const hourlyCompletions: Record<number, number> = {};
+      // Build hourly productivity from task completions and focus sessions
+      const hourlyRaw: Record<number, number> = {};
+      for (let h = 0; h < 24; h++) hourlyRaw[h] = 0;
+
+      // Count completed tasks per hour (use createdAt as proxy)
       tasks.forEach(task => {
         if (task.completed) {
           try {
-            // Use task creation time as a proxy
             const hour = new Date(task.createdAt).getHours();
-            if (!hourlyCompletions[hour]) {
-              hourlyCompletions[hour] = 0;
-            }
-            hourlyCompletions[hour]++;
+            hourlyRaw[hour]++;
           } catch (error) {
             console.error('Error parsing task date for hourly completions:', error);
           }
         }
       });
-      
+
+      // Add focus session contribution per hour (weighted by productivity score)
+      focusSessions.forEach(session => {
+        try {
+          const hour = new Date(session.startedAt).getHours();
+          const durationMin = session.duration && session.duration > 0 ? session.duration : 0;
+          // Score: 1 point per 30 minutes of focus
+          hourlyRaw[hour] += durationMin / 30;
+        } catch (error) {
+          console.error('Error parsing session date for hourly productivity:', error);
+        }
+      });
+
+      // Normalize to 0-100
+      const maxRaw = Math.max(...Object.values(hourlyRaw));
+      const hourlyProductivity: Record<number, number> = {};
+      for (let h = 0; h < 24; h++) {
+        hourlyProductivity[h] = maxRaw > 0 ? Math.round((hourlyRaw[h]! / maxRaw) * 100) : 0;
+      }
+
+      // Find most productive 3-hour window
       let mostProductiveHour = 9; // Default to 9 AM
-      let maxHourlyCompletions = 0;
-      
+      let maxWindowScore = 0;
       for (let hour = 0; hour < 24; hour++) {
-        const completions = (hourlyCompletions[hour] || 0) + 
-                           (hourlyCompletions[(hour + 1) % 24] || 0) + 
-                           (hourlyCompletions[(hour + 2) % 24] || 0);
-        
-        if (completions > maxHourlyCompletions) {
-          maxHourlyCompletions = completions;
+        const windowScore = (hourlyRaw[hour] || 0) +
+                            (hourlyRaw[(hour + 1) % 24] || 0) +
+                            (hourlyRaw[(hour + 2) % 24] || 0);
+        if (windowScore > maxWindowScore) {
+          maxWindowScore = windowScore;
           mostProductiveHour = hour;
         }
       }
@@ -389,7 +406,9 @@ export class AnalyticsService {
         focusSessionCount,
         taskCompletionRateDuringFocus,
         mostProductive3HourWindow,
-        tasksCompletedDuringFocus
+        tasksCompletedDuringFocus,
+        hourlyProductivity,
+        peakHour: maxWindowScore > 0 ? mostProductiveHour : null
       };
     } catch (error) {
       console.error('Error getting focus analytics:', error);
@@ -568,6 +587,8 @@ export class AnalyticsService {
    * Get default focus analytics when data is not available or there's an error
    */
   private getDefaultFocusAnalytics(): any {
+    const hourlyProductivity: Record<number, number> = {};
+    for (let h = 0; h < 24; h++) hourlyProductivity[h] = 0;
     return {
       averageFocusSessionDuration: 0,
       totalFocusSessionTime: 0,
@@ -575,6 +596,8 @@ export class AnalyticsService {
       taskCompletionRateDuringFocus: 0,
       mostProductive3HourWindow: "9AM-12PM",
       tasksCompletedDuringFocus: 0,
+      hourlyProductivity,
+      peakHour: null,
       message: "No focus session data available yet. Start by creating focus sessions to track your productivity."
     };
   }
