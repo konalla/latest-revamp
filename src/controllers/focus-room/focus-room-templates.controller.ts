@@ -76,6 +76,7 @@ export const getAllTemplates = async (req: Request, res: Response): Promise<void
           allowObservers: t.allowObservers,
           usageCount: t.usageCount,
           createdAt: t.createdAt,
+          visibility: t.visibility,
         })),
         public: templates.public.map((t) => ({
           id: t.id,
