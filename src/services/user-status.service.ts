@@ -57,13 +57,92 @@ export class UserStatusService {
   }
 
   /**
-   * Get user's active status with fallback to focus sessions
-   * @param userId User ID
-   * @returns User status information
+   * Derive user status from focus room sessions (source of truth)
+   * User is "in session" if they are a participant in a room that has an active (ACTIVE or PAUSED) focus room session
+   */
+  async getUserStatusFromFocusRoomSessions(userId: number): Promise<boolean> {
+    try {
+      const participantInActiveRoom = await prisma.focusRoomParticipant.findFirst({
+        where: {
+          userId,
+          status: { not: "LEFT" },
+          room: {
+            sessions: {
+              some: {
+                status: { in: ["ACTIVE", "PAUSED"] },
+              },
+            },
+          },
+        },
+        select: { id: true },
+      });
+      return !!participantInActiveRoom;
+    } catch (error) {
+      console.error(`Error getting user status from focus room sessions for user ${userId}:`, error);
+      return false;
+    }
+  }
+
+  /**
+   * Get derived online status from actual sessions (focus + focus room).
+   * This is the source of truth; User.isOnline is a cache that can become stale.
+   */
+  async getDerivedOnlineStatus(userId: number): Promise<boolean> {
+    const [fromFocus, fromRoom] = await Promise.all([
+      this.getUserStatusFromFocusSessions(userId),
+      this.getUserStatusFromFocusRoomSessions(userId),
+    ]);
+    return fromFocus || fromRoom;
+  }
+
+  /**
+   * Batch get derived online status for multiple users (for list endpoints).
+   */
+  async getDerivedOnlineStatusBatch(userIds: number[]): Promise<Map<number, boolean>> {
+    if (userIds.length === 0) return new Map();
+
+    const [focusUserIds, roomUserIds] = await Promise.all([
+      prisma.focusSession
+        .findMany({
+          where: {
+            userId: { in: userIds },
+            status: { in: ["active", "paused"] },
+          },
+          select: { userId: true },
+          distinct: ["userId"],
+        })
+        .then((rows) => new Set(rows.map((r) => r.userId))),
+      prisma.focusRoomParticipant
+        .findMany({
+          where: {
+            userId: { in: userIds },
+            status: { not: "LEFT" },
+            room: {
+              sessions: {
+                some: { status: { in: ["ACTIVE", "PAUSED"] } },
+              },
+            },
+          },
+          select: { userId: true },
+          distinct: ["userId"],
+        })
+        .then((rows) => new Set(rows.map((r) => r.userId))),
+    ]);
+
+    const result = new Map<number, boolean>();
+    for (const id of userIds) {
+      result.set(id, focusUserIds.has(id) || roomUserIds.has(id));
+    }
+    return result;
+  }
+
+  /**
+   * Get user's active status (source of truth: derived from focus + focus room sessions)
+   * Returns derived isOnline so users never appear "online" when they have no active session.
+   * Also syncs the User.isOnline cache when it drifts from the derived value.
    */
   async getUserActiveStatus(userId: number): Promise<UserStatusResponse> {
     try {
-      // Get cached status from User table
       const user = await prisma.user.findUnique({
         where: { id: userId },
         select: {
@@ -77,29 +156,46 @@ export class UserStatusService {
         throw new Error(`User ${userId} not found`);
       }
 
-      // Get active focus session (source of truth)
-      const activeSession = await prisma.focusSession.findFirst({
-        where: {
-          userId,
-          status: {
-            in: ["active", "paused"],
+      // Source of truth: active focus session OR participant in active focus room session
+      const [activeFocusSession, activeRoomParticipation] = await Promise.all([
+        prisma.focusSession.findFirst({
+          where: {
+            userId,
+            status: { in: ["active", "paused"] },
           },
-        },
-        select: {
-          id: true,
-        },
-        orderBy: {
-          startedAt: "desc",
-        },
-      });
+          select: { id: true },
+          orderBy: { startedAt: "desc" },
+        }),
+        prisma.focusRoomParticipant.findFirst({
+          where: {
+            userId,
+            status: { not: "LEFT" },
+            room: {
+              sessions: {
+                some: { status: { in: ["ACTIVE", "PAUSED"] } },
+              },
+            },
+          },
+          select: { id: true },
+        }),
+      ]);
 
-      const hasActiveFocusSession = !!activeSession;
+      const hasActiveFocusSession = !!activeFocusSession;
+      const hasActiveFocusRoomSession = !!activeRoomParticipation;
+      const derivedIsOnline = hasActiveFocusSession || hasActiveFocusRoomSession;
+
+      // Sync cache if it was stale (e.g. user closed tab without ending session)
+      if (user.isOnline !== derivedIsOnline) {
+        this.updateUserStatus(userId, derivedIsOnline).catch((err) =>
+          console.error(`Error syncing user status for ${userId}:`, err)
+        );
+      }
 
       return {
         userId: user.id,
-        isOnline: user.isOnline,
+        isOnline: derivedIsOnline,
         hasActiveFocusSession,
-        activeFocusSessionId: activeSession?.id || null,
+        activeFocusSessionId: activeFocusSession?.id ?? null,
         statusUpdatedAt: user.statusUpdatedAt,
       };
     } catch (error) {
@@ -109,14 +205,12 @@ export class UserStatusService {
   }
 
   /**
-   * Sync user's cached status with actual focus sessions
-   * Useful for ensuring consistency
-   * @param userId User ID
+   * Sync user's cached status with actual sessions (focus + focus room)
    */
   async syncUserStatus(userId: number): Promise<void> {
     try {
-      const hasActiveSession = await this.getUserStatusFromFocusSessions(userId);
-      await this.updateUserStatus(userId, hasActiveSession);
+      const derived = await this.getDerivedOnlineStatus(userId);
+      await this.updateUserStatus(userId, derived);
     } catch (error) {
       console.error(`Error syncing user status for user ${userId}:`, error);
       throw error;
@@ -124,9 +218,8 @@ export class UserStatusService {
   }
 
   /**
-   * Get active users with optional filters
-   * @param options Filter options
-   * @returns Array of active users with status
+   * Get active users with optional filters.
+   * Uses derived online status (focus + focus room sessions) so only users with an actual session appear online.
    */
   async getActiveUsers(options: {
     workspaceId?: number;
@@ -144,22 +237,14 @@ export class UserStatusService {
         isOnline: true,
       };
 
-      // Filter by workspace if provided
       if (options.workspaceId) {
         whereClause.workspaceMemberships = {
-          some: {
-            workspaceId: options.workspaceId,
-          },
+          some: { workspaceId: options.workspaceId },
         };
       }
-
-      // Filter by team if provided
       if (options.teamId) {
         whereClause.teamMemberships = {
-          some: {
-            teamId: options.teamId,
-            status: "ACTIVE",
-          },
+          some: { teamId: options.teamId, status: "ACTIVE" },
         };
       }
 
@@ -172,12 +257,30 @@ export class UserStatusService {
           isOnline: true,
           statusUpdatedAt: true,
         },
-        orderBy: {
-          statusUpdatedAt: "desc",
-        },
+        orderBy: { statusUpdatedAt: "desc" },
       });
 
-      return users;
+      const userIds = users.map((u) => u.id);
+      const derivedStatus = await this.getDerivedOnlineStatusBatch(userIds);
+
+      // Optionally sync cache for users who are marked online in DB but actually offline (stale)
+      const staleOnlineUserIds = users.filter((u) => !(derivedStatus.get(u.id) ?? false)).map((u) => u.id);
+      if (staleOnlineUserIds.length > 0) {
+        Promise.all(
+          staleOnlineUserIds.map((id) =>
+            this.updateUserStatus(id, false).catch((err) =>
+              console.error(`Error syncing stale user status for ${id}:`, err)
+            )
+          )
+        ).catch(() => {});
+      }
+
+      return users
+        .map((u) => ({
+          ...u,
+          isOnline: derivedStatus.get(u.id) ?? false,
+        }))
+        .filter((u) => u.isOnline);
     } catch (error) {
       console.error("Error getting active users:", error);
       throw error;
@@ -185,9 +288,8 @@ export class UserStatusService {
   }
 
   /**
-   * Get workspace members' status
-   * @param workspaceId Workspace ID
-   * @returns Array of workspace members with status
+   * Get workspace members' status.
+   * isOnline is derived from actual focus + focus room sessions.
    */
   async getWorkspaceMembersStatus(workspaceId: number): Promise<Array<{
     userId: number;
@@ -219,11 +321,14 @@ export class UserStatusService {
         throw new Error(`Workspace ${workspaceId} not found`);
       }
 
+      const userIds = workspace.memberships.map((m) => m.user.id);
+      const derivedStatus = await this.getDerivedOnlineStatusBatch(userIds);
+
       return workspace.memberships.map((membership) => ({
         userId: membership.user.id,
         name: membership.user.name,
         role: membership.role,
-        isOnline: membership.user.isOnline,
+        isOnline: derivedStatus.get(membership.user.id) ?? false,
         statusUpdatedAt: membership.user.statusUpdatedAt,
       }));
     } catch (error) {
@@ -233,9 +338,8 @@ export class UserStatusService {
   }
 
   /**
-   * Get team members' status
-   * @param teamId Team ID
-   * @returns Array of team members with status
+   * Get team members' status.
+   * isOnline is derived from actual focus + focus room sessions.
    */
   async getTeamMembersStatus(teamId: number): Promise<Array<{
     userId: number;
@@ -250,9 +354,7 @@ export class UserStatusService {
         where: { id: teamId },
         include: {
           memberships: {
-            where: {
-              status: "ACTIVE",
-            },
+            where: { status: "ACTIVE" },
             include: {
               user: {
                 select: {
@@ -271,12 +373,15 @@ export class UserStatusService {
         throw new Error(`Team ${teamId} not found`);
       }
 
+      const userIds = team.memberships.map((m) => m.user.id);
+      const derivedStatus = await this.getDerivedOnlineStatusBatch(userIds);
+
       return team.memberships.map((membership) => ({
         userId: membership.user.id,
         name: membership.user.name,
         role: membership.role,
         status: membership.status,
-        isOnline: membership.user.isOnline,
+        isOnline: derivedStatus.get(membership.user.id) ?? false,
         statusUpdatedAt: membership.user.statusUpdatedAt,
       }));
     } catch (error) {

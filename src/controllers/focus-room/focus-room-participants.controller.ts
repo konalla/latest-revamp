@@ -140,6 +140,7 @@ export const getRoomParticipants = async (req: Request, res: Response): Promise<
         user: p.user ? {
           id: p.user.id,
           name: p.user.name,
+          username: (p.user as { username?: string }).username ?? null,
           email: p.user.email,
           profilePhoto: p.user.profile_photo_url || null,
           profile_photo_url: p.user.profile_photo_url || null,

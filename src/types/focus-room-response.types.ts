@@ -319,10 +319,11 @@ export interface GetTemplatesResponse extends ApiResponse<TemplateResponse[]> {
   templates: TemplateResponse[];
 }
 
-export interface GetAllTemplatesResponse extends ApiResponse<{ system: TemplateResponse[]; user: TemplateResponse[] }> {
+export interface GetAllTemplatesResponse extends ApiResponse<{ system: TemplateResponse[]; user: TemplateResponse[]; public: TemplateResponse[] }> {
   templates: {
     system: TemplateResponse[];
     user: TemplateResponse[];
+    public: TemplateResponse[];
   };
 }
 

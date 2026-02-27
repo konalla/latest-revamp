@@ -25,24 +25,6 @@ export class FocusRoomTemplateService {
   }
 
   /**
-   * Get all templates available to user (system + user's templates)
-   */
-  async getAllAvailableTemplates(userId: number): Promise<{
-    system: FocusRoomTemplate[];
-    user: FocusRoomTemplate[];
-  }> {
-    const [systemTemplates, userTemplates] = await Promise.all([
-      this.getSystemTemplates(),
-      this.getUserTemplates(userId),
-    ]);
-
-    return {
-      system: systemTemplates,
-      user: userTemplates,
-    };
-  }
-
-  /**
    * Get user's templates
    */
   async getUserTemplates(userId: number): Promise<FocusRoomTemplate[]> {
@@ -55,6 +37,41 @@ export class FocusRoomTemplateService {
         createdAt: "desc",
       },
     });
+  }
+
+  /**
+   * Get public templates created by other users (visible to all)
+   */
+  async getPublicUserTemplates(excludeUserId: number): Promise<FocusRoomTemplate[]> {
+    return prisma.focusRoomTemplate.findMany({
+      where: {
+        isSystem: false,
+        visibility: "PUBLIC",
+        creatorId: { not: excludeUserId },
+      },
+      orderBy: [{ usageCount: "desc" }, { createdAt: "desc" }],
+    });
+  }
+
+  /**
+   * Get all templates available to user (system + user's + other users' public)
+   */
+  async getAllAvailableTemplates(userId: number): Promise<{
+    system: FocusRoomTemplate[];
+    user: FocusRoomTemplate[];
+    public: FocusRoomTemplate[];
+  }> {
+    const [systemTemplates, userTemplates, publicTemplates] = await Promise.all([
+      this.getSystemTemplates(),
+      this.getUserTemplates(userId),
+      this.getPublicUserTemplates(userId),
+    ]);
+
+    return {
+      system: systemTemplates,
+      user: userTemplates,
+      public: publicTemplates,
+    };
   }
 
   /**
