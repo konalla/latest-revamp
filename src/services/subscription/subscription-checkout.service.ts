@@ -148,16 +148,6 @@ export class SubscriptionCheckoutService {
         },
       });
 
-      if (existingSubscription) {
-        // If user already has free plan, return it
-        if (existingSubscription.subscriptionPlan.name === "free") {
-          return existingSubscription;
-        }
-        // If user has another plan, throw error
-        throw new Error("You already have an active subscription. Please cancel it first before subscribing to the free plan.");
-      }
-
-      // Get free plan
       const freePlan = await prisma.subscriptionPlan.findUnique({
         where: { name: "free" },
       });
@@ -166,40 +156,89 @@ export class SubscriptionCheckoutService {
         throw new Error("Free plan not found");
       }
 
-      // Set up monthly billing period
       const now = new Date();
       const periodEnd = new Date(now);
       periodEnd.setMonth(periodEnd.getMonth() + 1); // Next month
 
-      // Create subscription without payment provider
-      const subscription = await prisma.subscription.create({
-        data: {
-          userId,
-          subscriptionPlanId: freePlan.id,
-          paymentProviderId: null, // No payment provider for free plan
-          status: "ACTIVE",
-          currentPeriodStart: now,
-          currentPeriodEnd: periodEnd,
-          tasksCreatedThisPeriod: 0,
-          projectsCreatedThisPeriod: 0,
-          objectivesCreatedThisPeriod: 0,
-          keyResultsCreatedThisPeriod: 0,
-          workspacesCreatedThisPeriod: 0,
-          teamsCreatedThisPeriod: 0,
-          lastTaskCountReset: now,
-          lastCountReset: now,
-        },
-        include: {
-          subscriptionPlan: true,
-          user: {
-            select: {
-              id: true,
-              email: true,
-              name: true,
+      let subscription: any;
+
+      if (existingSubscription) {
+        // If user already has free plan, return it
+        if (existingSubscription.subscriptionPlan.name === "free") {
+          return existingSubscription;
+        }
+        // If subscription is CANCELED or EXPIRED (e.g. cancelled during free trial), allow switching to free
+        if (existingSubscription.status === "CANCELED" || existingSubscription.status === "EXPIRED") {
+          subscription = await prisma.subscription.update({
+            where: { id: existingSubscription.id },
+            data: {
+              subscriptionPlanId: freePlan.id,
+              paymentProviderId: null,
+              status: "ACTIVE",
+              stripeSubscriptionId: null,
+              stripeCustomerId: null,
+              currentPeriodStart: now,
+              currentPeriodEnd: periodEnd,
+              trialStart: null,
+              trialEnd: null,
+              gracePeriodEnd: null,
+              cancelAtPeriodEnd: false,
+              canceledAt: null,
+              tasksCreatedThisPeriod: 0,
+              projectsCreatedThisPeriod: 0,
+              objectivesCreatedThisPeriod: 0,
+              keyResultsCreatedThisPeriod: 0,
+              workspacesCreatedThisPeriod: 0,
+              teamsCreatedThisPeriod: 0,
+              lastTaskCountReset: now,
+              lastCountReset: now,
+            },
+            include: {
+              subscriptionPlan: true,
+              user: {
+                select: {
+                  id: true,
+                  email: true,
+                  name: true,
+                },
+              },
+            },
+          });
+        } else {
+          // User has an active subscription (TRIAL, ACTIVE, or GRACE_PERIOD) on another plan
+          throw new Error("You already have an active subscription. Please cancel it first before subscribing to the free plan.");
+        }
+      } else {
+        // No existing subscription - create new free plan subscription
+        subscription = await prisma.subscription.create({
+          data: {
+            userId,
+            subscriptionPlanId: freePlan.id,
+            paymentProviderId: null, // No payment provider for free plan
+            status: "ACTIVE",
+            currentPeriodStart: now,
+            currentPeriodEnd: periodEnd,
+            tasksCreatedThisPeriod: 0,
+            projectsCreatedThisPeriod: 0,
+            objectivesCreatedThisPeriod: 0,
+            keyResultsCreatedThisPeriod: 0,
+            workspacesCreatedThisPeriod: 0,
+            teamsCreatedThisPeriod: 0,
+            lastTaskCountReset: now,
+            lastCountReset: now,
+          },
+          include: {
+            subscriptionPlan: true,
+            user: {
+              select: {
+                id: true,
+                email: true,
+                name: true,
+              },
             },
           },
-        },
-      });
+        });
+      }
 
       // Award 5 coins to referrer if user was referred and subscribed to free plan
       try {
