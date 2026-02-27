@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 import { focusRoomTemplateService } from "../../services/focus-room-template.service.js";
-import { createTemplateSchema, createRoomFromTemplateSchema } from "../../types/focus-room.types.js";
+import { createTemplateSchema, createRoomFromTemplateSchema, updateTemplateSchema } from "../../types/focus-room.types.js";
 import type {
   GetTemplatesResponse,
   GetAllTemplatesResponse,
@@ -240,3 +240,80 @@ export const createRoomFromTemplate = async (req: Request, res: Response): Promi
   }
 };
 
+export const updateTemplate = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ success: false, error: "Unauthorized" });
+      return;
+    }
+
+    const templateId = parseTemplateId(req.params.templateId);
+    if (templateId === null) {
+      res.status(400).json({ success: false, error: "Invalid template ID" });
+      return;
+    }
+
+    const validatedData = updateTemplateSchema.parse(req.body);
+    const template = await focusRoomTemplateService.updateTemplate(templateId, userId, validatedData);
+
+    const response: CreateTemplateResponse = {
+      success: true,
+      template: {
+        id: template.id,
+        name: template.name,
+        description: template.description,
+        category: template.category,
+        focusDuration: template.focusDuration,
+        breakDuration: template.breakDuration,
+        allowObservers: template.allowObservers,
+        createdAt: template.createdAt,
+      },
+    };
+
+    res.json(response);
+  } catch (error: unknown) {
+    if (error && typeof error === "object" && "name" in error && error.name === "ZodError") {
+      res.status(400).json({
+        success: false,
+        error: "Invalid template data",
+        details: (error as unknown as { errors: unknown }).errors,
+      });
+      return;
+    }
+
+    console.error("Error updating template:", error);
+    const message = error instanceof Error ? error.message : "Failed to update template";
+    res.status(500).json({
+      success: false,
+      error: message,
+    });
+  }
+};
+
+export const deleteTemplate = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ success: false, error: "Unauthorized" });
+      return;
+    }
+
+    const templateId = parseTemplateId(req.params.templateId);
+    if (templateId === null) {
+      res.status(400).json({ success: false, error: "Invalid template ID" });
+      return;
+    }
+
+    await focusRoomTemplateService.deleteTemplate(templateId, userId);
+
+    res.json({ success: true, message: "Template deleted successfully" });
+  } catch (error: unknown) {
+    console.error("Error deleting template:", error);
+    const message = error instanceof Error ? error.message : "Failed to delete template";
+    res.status(500).json({
+      success: false,
+      error: message,
+    });
+  }
+};

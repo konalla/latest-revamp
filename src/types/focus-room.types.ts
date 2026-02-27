@@ -76,6 +76,8 @@ export const createRoomFromTemplateSchema = z.object({
   password: z.string().min(4).max(100).optional(),
 });
 
+export const updateTemplateSchema = createTemplateSchema.partial();
+
 // Recurring Schedule Schemas
 export const recurringScheduleSchema = z.object({
   type: z.enum(["DAILY", "WEEKLY", "CUSTOM"]),
@@ -150,6 +152,7 @@ export type UpdateParticipantStatusInput = z.infer<typeof updateParticipantStatu
 export type CreateInvitationInput = z.infer<typeof createInvitationSchema>;
 export type AcceptInvitationInput = z.infer<typeof acceptInvitationSchema>;
 export type CreateTemplateInput = z.infer<typeof createTemplateSchema>;
+export type UpdateTemplateInput = z.infer<typeof updateTemplateSchema>;
 export type CreateRoomFromTemplateInput = z.infer<typeof createRoomFromTemplateSchema>;
 export type ScheduleSessionInput = z.infer<typeof scheduleSessionSchema>;
 export type CreateRecurringScheduleInput = z.infer<typeof recurringScheduleSchema>;

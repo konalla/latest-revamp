@@ -38,6 +38,8 @@ import {
   getTemplateById,
   createTemplate,
   createRoomFromTemplate,
+  updateTemplate,
+  deleteTemplate,
   // Scheduling Management
   scheduleSession,
   cancelScheduledSession,
@@ -112,6 +114,12 @@ router.post("/templates", authenticateToken, createTemplate);
 
 // POST /api/focus-rooms/templates/:templateId/create-room - Create room from template
 router.post("/templates/:templateId/create-room", authenticateToken, createRoomFromTemplate);
+
+// PATCH /api/focus-rooms/templates/:templateId - Update template (creator only)
+router.patch("/templates/:templateId", authenticateToken, updateTemplate);
+
+// DELETE /api/focus-rooms/templates/:templateId - Delete template (creator only)
+router.delete("/templates/:templateId", authenticateToken, deleteTemplate);
 
 // ============================================
 // Room-specific Routes (must come after specific paths)
