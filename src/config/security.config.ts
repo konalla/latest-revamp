@@ -227,6 +227,7 @@ export const csrfConfig = {
     '/api/health', // Health check
     '/api/auth/login', // User login (no session yet)
     '/api/auth/register', // User registration (no session yet)
+    '/api/auth/check-availability', // Availability check (no session yet)
     '/api/admin/auth/login', // Admin login (no session yet)
   ],
 };

@@ -40,8 +40,7 @@ const register = async (data: RegisterRequest): Promise<AuthResponse> => {
     throw new Error("Username already exists");
   }
 
-  // Prevent username/email cross-conflict: login accepts either identifier, so ensure
-  // no account can have username equal to another's email or email equal to another's username
+  // Prevent username/email cross-conflict
   const usernameTakenAsEmail = await prisma.user.findUnique({
     where: { email: data.username }
   });
@@ -67,24 +66,58 @@ const register = async (data: RegisterRequest): Promise<AuthResponse> => {
     throw new Error(formatPasswordErrors(passwordValidation));
   }
 
-  // Hash the password
   const hashedPassword = await bcrypt.hash(data.password, SALT_ROUNDS);
 
-  // Create the user
-  const user = await prisma.user.create({
-    data: {
-      email: data.email,
-      password: hashedPassword,
-      username: data.username,
-      name: data.name,
-    },
-    select: {
-      id: true,
-      email: true,
-      username: true,
-      name: true,
-      role: true,
+  // Transactional creation: User + UserProfile
+  const user = await prisma.$transaction(async (tx) => {
+    const newUser = await tx.user.create({
+      data: {
+        email: data.email,
+        password: hashedPassword,
+        username: data.username,
+        name: data.name,
+        phone_number: data.phone_number || null,
+      },
+      select: {
+        id: true,
+        email: true,
+        username: true,
+        name: true,
+        role: true,
+      }
+    });
+
+    // Create UserProfile with onboarding data
+    if (data.profile) {
+      await tx.userProfile.create({
+        data: {
+          userId: newUser.id,
+          professionalIdentity: data.profile.professionalIdentity || [],
+          primaryRole: data.profile.primaryRole || [],
+          country: data.profile.country || null,
+          workingHours: data.profile.workingHours || null,
+          productivityScore: data.profile.productivityScore ?? null,
+          iqnitiGoal: data.profile.iqnitiGoal || [],
+          aiContextMetadata: {
+            onboardingCompletedAt: new Date().toISOString(),
+            registrationVersion: "v2-wizard",
+          },
+        },
+      });
+    } else {
+      await tx.userProfile.create({
+        data: {
+          userId: newUser.id,
+          aiContextMetadata: {
+            onboardingCompletedAt: new Date().toISOString(),
+            registrationVersion: "v2-wizard",
+            profileSkipped: true,
+          },
+        },
+      });
     }
+
+    return newUser;
   });
 
   // Ensure workspace and team exist for this user
@@ -95,13 +128,11 @@ const register = async (data: RegisterRequest): Promise<AuthResponse> => {
     try {
       await referralService.registerReferral(user.id, data.referralCode);
     } catch (error: any) {
-      // Log error but don't fail registration if referral fails
       console.error("Error registering referral during signup:", error);
     }
   }
 
   // Send signup webhook asynchronously (don't block registration)
-  // Get the full user profile with all necessary data for webhook
   const fullUserData = await prisma.user.findUnique({
     where: { id: user.id },
     select: {
@@ -111,20 +142,17 @@ const register = async (data: RegisterRequest): Promise<AuthResponse> => {
       name: true,
       phone_number: true,
       created_at: true,
-      // Job & Company info
       job_title: true,
       company_name: true,
       company_size: true,
       company_description: true,
       industry: true,
-      // Profile info
       bio: true,
       website: true,
       linkedin_url: true,
       website_url: true,
       timezone: true,
       profile_photo_url: true,
-      // Referral status for badge info
       referralStatus: {
         select: {
           earlyAccessStatus: true,
@@ -136,7 +164,6 @@ const register = async (data: RegisterRequest): Promise<AuthResponse> => {
   });
 
   if (fullUserData) {
-    // Send webhook asynchronously - don't block registration
     webhookService
       .sendSignupWebhook({
         id: fullUserData.id,
@@ -159,20 +186,12 @@ const register = async (data: RegisterRequest): Promise<AuthResponse> => {
         referralStatus: fullUserData.referralStatus,
       })
       .catch((error) => {
-        // Log error but don't throw - registration is already successful
-        // Webhook failures should not affect user registration
         console.error("Failed to send signup webhook (non-blocking):", error.message || error);
       });
   }
 
-  // Note: Users need to select a subscription plan after registration
-  // They can choose the free plan (POST /api/subscriptions/subscribe-free) or a paid plan (POST /api/subscriptions/checkout)
-  // The free plan does not require payment, while paid plans require Stripe checkout
+  const needsPaymentSetup = true;
 
-  // Check if user needs to select a plan
-  const needsPaymentSetup = true; // New users always need to select a plan (free or paid)
-
-  // Generate JWT token
   const token = generateToken({
     userId: user.id,
     email: user.email,
@@ -183,8 +202,26 @@ const register = async (data: RegisterRequest): Promise<AuthResponse> => {
     user,
     token,
     message: "User registered successfully",
-    needsPaymentSetup, // Flag to indicate frontend should redirect to payment setup
+    needsPaymentSetup,
   };
+};
+
+const checkAvailability = async (field: "email" | "username", value: string): Promise<{ available: boolean; field: string }> => {
+  const normalizedValue = value.trim().toLowerCase();
+
+  if (field === "email") {
+    const existing = await prisma.user.findUnique({
+      where: { email: normalizedValue },
+      select: { id: true },
+    });
+    return { available: !existing, field };
+  }
+
+  const existing = await prisma.user.findUnique({
+    where: { username: normalizedValue },
+    select: { id: true },
+  });
+  return { available: !existing, field };
 };
 
 const login = async (data: LoginRequest): Promise<AuthResponse> => {
@@ -397,4 +434,5 @@ export {
   logout,
   forgotPassword,
   resetPassword,
+  checkAvailability,
 };

@@ -1,5 +1,5 @@
 export interface LoginRequest {
-  identifier: string; // Can be email or username
+  identifier: string;
   password: string;
 }
 
@@ -8,7 +8,16 @@ export interface RegisterRequest {
   password: string;
   username: string;
   name: string;
-  referralCode?: string; // Optional referral code for signup
+  phone_number?: string;
+  referralCode?: string;
+  profile?: {
+    professionalIdentity?: string[];
+    primaryRole?: string[];
+    country?: string;
+    workingHours?: string;
+    productivityScore?: number;
+    iqnitiGoal?: string[];
+  };
 }
 
 export interface AuthResponse {
@@ -22,7 +31,17 @@ export interface AuthResponse {
   };
   token: string;
   message: string;
-  needsPaymentSetup?: boolean; // Flag to indicate if user needs to set up payment method (for new registrations)
+  needsPaymentSetup?: boolean;
+}
+
+export interface CheckAvailabilityRequest {
+  field: "email" | "username";
+  value: string;
+}
+
+export interface CheckAvailabilityResponse {
+  available: boolean;
+  field: string;
 }
 
 export interface UserJWTPayload {

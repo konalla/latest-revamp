@@ -26,6 +26,7 @@ const passwordResetLimiter = rateLimit({
 
 // Apply strict rate limiting to authentication endpoints
 router.post("/register", authLimiter, authController.register);
+router.post("/check-availability", authLimiter, authController.checkAvailability);
 router.post("/login", authLimiter, authController.login);
 router.post("/logout", authenticateToken, authController.logout);
 router.post("/forgot-password", passwordResetLimiter, authController.forgotPassword);

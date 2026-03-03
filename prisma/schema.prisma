@@ -93,6 +93,9 @@ model User {
   // Subscription relation
   subscription Subscription?
 
+  // User Profile (onboarding data for AI personalization)
+  userProfile UserProfile?
+
   // Referral relations
   referralStatus    UserReferralStatus?
   referralsMade     Referral[]          @relation("Referrer")
@@ -113,6 +116,25 @@ model User {
 
   @@index([isOnline])
   @@index([statusUpdatedAt])
+}
+
+model UserProfile {
+  id                   Int      @id @default(autoincrement())
+  userId               Int      @unique @map("user_id")
+  professionalIdentity String[] @default([]) @map("professional_identity")
+  primaryRole          String[] @default([]) @map("primary_role")
+  country              String?
+  workingHours         String?  @map("working_hours")
+  productivityScore    Int?     @map("productivity_score")
+  iqnitiGoal           String[] @default([]) @map("iqniti_goal")
+  aiContextMetadata    Json?    @default("{}") @map("ai_context_metadata")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("user_profiles")
 }
 
 model Project {
