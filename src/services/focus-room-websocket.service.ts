@@ -231,6 +231,7 @@ export class FocusRoomWebSocketService {
 
       this.setupJoinRoomHandler(socket);
       this.setupLeaveRoomHandler(socket);
+      this.setupLeaveRoomViewHandler(socket);
       this.setupParticipantStatusHandler(socket);
       this.setupIntentionHandler(socket);
       this.setupTimerSyncHandler(socket);
@@ -307,6 +308,29 @@ export class FocusRoomWebSocketService {
 
       if (mapping) {
         socket.to(roomName).emit("participant_left", { userId: socket.userId });
+        socket.to(roomName).emit("participant_offline", { userId: socket.userId });
+      }
+    });
+  }
+
+  /**
+   * Handle leave_room_view event
+   *
+   * Fired when a user navigates away from the room detail page but has NOT
+   * actually left the room. We leave the Socket.IO room (so they stop
+   * receiving broadcasts) and mark them offline, but we do NOT emit
+   * "participant_left" — the user is still a room participant.
+   */
+  private setupLeaveRoomViewHandler(socket: AuthenticatedSocket): void {
+    socket.on("leave_room_view", (data: { roomId: number }) => {
+      const { roomId } = data;
+      const roomName = this.getRoomName(roomId);
+
+      const mapping = this.removeUserOnline(socket.id);
+      socket.leave(roomName);
+      delete socket.currentRoomId;
+
+      if (mapping) {
         socket.to(roomName).emit("participant_offline", { userId: socket.userId });
       }
     });
