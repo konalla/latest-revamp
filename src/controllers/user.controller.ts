@@ -57,10 +57,7 @@ const getCurrentUser = async (req: Request, res: Response) => {
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
-    
-    // Don't return password
-    const { password, ...userWithoutPassword } = user;
-    
+
     // Get referral status for badge information
     let referralStatus = await prisma.userReferralStatus.findUnique({
       where: { userId: user.id },
@@ -132,7 +129,7 @@ const getCurrentUser = async (req: Request, res: Response) => {
     
     // Add default language, badge info, and wallet balance
     const response = {
-      ...userWithoutPassword,
+      ...user,
       language: "english",
       badge: referralStatus ? {
         status: referralStatus.earlyAccessStatus.toLowerCase(),

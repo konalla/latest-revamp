@@ -60,7 +60,7 @@ const createUser = async (data: CreateUserRequest) => {
     name: userDataRaw.name,
     email: userDataRaw.email,
     ...(hashedPassword && { password: hashedPassword }),
-    ...(userDataRaw.role && { role: userDataRaw.role as any }),
+    // role is intentionally excluded — defaults to USER; only set via admin tools directly
     ...(userDataRaw.phone_number && { phone_number: userDataRaw.phone_number }),
     ...(userDataRaw.company_name && { company_name: userDataRaw.company_name }),
     ...(userDataRaw.website && { website: userDataRaw.website }),
@@ -127,18 +127,32 @@ const createUser = async (data: CreateUserRequest) => {
 };
 
 const getAllUsers = async () => {
-  return prisma.user.findMany();
+  return prisma.user.findMany({
+    select: {
+      id: true,
+      username: true,
+      name: true,
+      email: true,
+      role: true,
+      phone_number: true,
+      profile_photo_url: true,
+      job_title: true,
+      company_name: true,
+      industry: true,
+      created_at: true,
+    }
+  });
 };
 
 const getUserById = async (id: number) => {
-  return prisma.user.findUnique({ 
+  return prisma.user.findUnique({
     where: { id },
     select: {
       id: true,
       username: true,
       name: true,
       email: true,
-      password: true,
+      // password intentionally excluded — never expose hashes via API
       role: true,
       phone_number: true,
       company_name: true,
@@ -204,6 +218,13 @@ const TIME_REGEX = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
 
 const updateUser = async (id: number, data: any) => {
   const sanitized = { ...data };
+
+  // Strip fields that must never be set via the update endpoint
+  const FORBIDDEN_FIELDS = ['role', 'password', 'resetToken', 'resetTokenExpiry', 'id'];
+  for (const field of FORBIDDEN_FIELDS) {
+    delete sanitized[field];
+  }
+
   const errors: string[] = [];
 
   for (const field of TIME_FIELDS) {

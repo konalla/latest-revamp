@@ -1,4 +1,5 @@
 import { Router } from "express";
+import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import { authenticateToken } from "../middleware/auth.middleware.js";
 import { requireAdmin } from "../middleware/admin.middleware.js";
 import { adminController } from "../controllers/admin.controller.js";
@@ -7,11 +8,20 @@ import {
   uploadRedeemableItemImage,
   handleUploadError,
 } from "../middleware/upload.middleware.js";
+import { rateLimitConfig } from "../config/security.config.js";
 
 const router = Router();
 
-// Admin authentication routes (no auth required)
-router.post("/auth/login", adminAuthController.login.bind(adminAuthController));
+// Strict rate limiter for admin login — 5 attempts per 15 minutes per IP
+const adminLoginLimiter = rateLimit({
+  ...rateLimitConfig.auth,
+  max: 5,
+  keyGenerator: (req) => `admin-login:${ipKeyGenerator(req.ip || "")}`,
+  message: "Too many admin login attempts, please try again later",
+});
+
+// Admin authentication routes (no auth required, but rate limited)
+router.post("/auth/login", adminLoginLimiter, adminAuthController.login.bind(adminAuthController));
 
 // All other admin routes require authentication and admin role
 router.use(authenticateToken);
