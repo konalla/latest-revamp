@@ -45,8 +45,8 @@ const createUser = async (data: CreateUserRequest) => {
     }
   }
 
-  // Extract language from data and remove it from user data
-  const { language, ...userDataRaw } = data;
+  // Extract language and strip forbidden fields from user data
+  const { language, role: _role, ...userDataRaw } = data as any;
 
   // Hash password if provided
   let hashedPassword: string | undefined;
@@ -126,8 +126,33 @@ const createUser = async (data: CreateUserRequest) => {
   });
 };
 
+const SAFE_USER_SELECT = {
+  id: true,
+  username: true,
+  name: true,
+  email: true,
+  role: true,
+  phone_number: true,
+  company_name: true,
+  website: true,
+  profile_photo_url: true,
+  job_title: true,
+  industry: true,
+  bio: true,
+  timezone: true,
+  linkedin_url: true,
+  website_url: true,
+  secondary_social_url: true,
+  secondary_social_type: true,
+  preferred_working_hours: true,
+  communication_preference: true,
+  primary_work_focus: true,
+  profile_completion_percentage: true,
+  created_at: true,
+} as const;
+
 const getAllUsers = async () => {
-  return prisma.user.findMany();
+  return prisma.user.findMany({ select: SAFE_USER_SELECT });
 };
 
 const getUserById = async (id: number) => {
@@ -202,8 +227,11 @@ const TIME_FIELDS = [
 
 const TIME_REGEX = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
 
+const FORBIDDEN_UPDATE_FIELDS = ["role", "password", "resetToken", "resetTokenExpiry", "id"] as const;
+
 const updateUser = async (id: number, data: any) => {
   const sanitized = { ...data };
+  for (const field of FORBIDDEN_UPDATE_FIELDS) delete sanitized[field];
   const errors: string[] = [];
 
   for (const field of TIME_FIELDS) {

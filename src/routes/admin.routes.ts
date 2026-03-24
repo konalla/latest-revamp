@@ -1,4 +1,5 @@
 import { Router } from "express";
+import rateLimit from "express-rate-limit";
 import { authenticateToken } from "../middleware/auth.middleware.js";
 import { requireAdmin } from "../middleware/admin.middleware.js";
 import { adminController } from "../controllers/admin.controller.js";
@@ -10,8 +11,17 @@ import {
 
 const router = Router();
 
-// Admin authentication routes (no auth required)
-router.post("/auth/login", adminAuthController.login.bind(adminAuthController));
+// Strict rate limiter: 5 attempts per 15 minutes per IP
+const adminLoginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  message: "Too many admin login attempts, please try again later",
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Admin authentication routes (no auth required, but rate limited)
+router.post("/auth/login", adminLoginLimiter, adminAuthController.login.bind(adminAuthController));
 
 // All other admin routes require authentication and admin role
 router.use(authenticateToken);
