@@ -266,7 +266,7 @@ export const updateTemplate = async (req: Request, res: Response): Promise<void>
       return;
     }
 
-    const validatedData = updateTemplateSchema.parse(req.body);
+    const validatedData = updateTemplateSchema.parse(req.body) as Parameters<typeof focusRoomTemplateService.updateTemplate>[2];
     const template = await focusRoomTemplateService.updateTemplate(templateId, userId, validatedData);
 
     const response: CreateTemplateResponse = {

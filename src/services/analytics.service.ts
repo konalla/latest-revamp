@@ -148,7 +148,7 @@ export class AnalyticsService {
         Object.entries(dayCounts).forEach(([dayNum, count]) => {
           if (count > maxCount) {
             maxCount = count;
-            mostProductiveDay = weekdays[parseInt(dayNum, 10)];
+            mostProductiveDay = weekdays[parseInt(dayNum, 10)] ?? null;
           }
         });
       }
@@ -352,7 +352,7 @@ export class AnalyticsService {
         if (task.completed) {
           try {
             const hour = new Date(task.createdAt).getHours();
-            hourlyRaw[hour]++;
+            hourlyRaw[hour] = (hourlyRaw[hour] ?? 0) + 1;
           } catch (error) {
             console.error('Error parsing task date for hourly completions:', error);
           }
@@ -365,7 +365,7 @@ export class AnalyticsService {
           const hour = new Date(session.startedAt).getHours();
           const durationMin = session.duration && session.duration > 0 ? session.duration : 0;
           // Score: 1 point per 30 minutes of focus
-          hourlyRaw[hour] += durationMin / 30;
+          hourlyRaw[hour] = (hourlyRaw[hour] ?? 0) + durationMin / 30;
         } catch (error) {
           console.error('Error parsing session date for hourly productivity:', error);
         }

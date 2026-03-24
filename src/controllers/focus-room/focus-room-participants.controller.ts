@@ -14,6 +14,7 @@ import type {
   UpdateCompletionResponse,
   UpdateParticipantStatusResponse,
   RemoveParticipantResponse,
+  ParticipantResponse,
 } from "../../types/focus-room-response.types.js";
 import { parseRoomId, parseParticipantId } from "../../utils/focus-room.utils.js";
 
@@ -129,7 +130,7 @@ export const getRoomParticipants = async (req: Request, res: Response): Promise<
 
     const response: GetParticipantsResponse = {
       success: true,
-      participants: participants.map((p) => ({
+      participants: (participants.map((p) => ({
         id: p.id,
         userId: p.userId,
         role: p.role,
@@ -145,7 +146,7 @@ export const getRoomParticipants = async (req: Request, res: Response): Promise<
           profilePhoto: p.user.profile_photo_url || null,
           profile_photo_url: p.user.profile_photo_url || null,
         } : undefined,
-      })),
+      })) as ParticipantResponse[]),
     };
 
     res.json(response);
