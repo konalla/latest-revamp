@@ -10,7 +10,7 @@ const router = Router();
 
 // Ownership check: user can only modify their own record, admins can modify any
 const requireOwnerOrAdmin = (req: Request, res: Response, next: NextFunction) => {
-  const requestedId = parseInt(req.params.id);
+  const requestedId = parseInt(req.params.id as string);
   const callerId = req.user?.id;
   const callerRole = (req.user as any)?.role;
   if (callerRole === "ADMIN" || callerId === requestedId) return next();
